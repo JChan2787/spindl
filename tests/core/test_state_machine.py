@@ -13,6 +13,8 @@ from spindl.core.state_machine import (
     AudioStateMachine,
 )
 
+pytestmark = pytest.mark.hardware
+
 
 class TestBargeInSpeechCapture:
     """

@@ -46,6 +46,10 @@ class TestExtractModelName:
 
         assert result == "CustomModel"
 
+    @pytest.mark.skipif(
+        __import__("sys").platform != "win32",
+        reason="Windows-only path parsing",
+    )
     def test_windows_backslash_path(self):
         """Should handle Windows-style backslash paths."""
         model_path = "X:\\Models\\Model-Q8_0.gguf"

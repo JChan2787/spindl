@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from spindl.utils.paths import get_project_root, resolve_relative_path
 
 
@@ -43,6 +45,10 @@ class TestResolveRelativePath:
         root = get_project_root()
         assert result == str(root / "tts/models")
 
+    @pytest.mark.skipif(
+        __import__("sys").platform != "win32",
+        reason="Windows-only path resolution",
+    )
     def test_windows_absolute_path_unchanged(self) -> None:
         """Windows-style absolute paths pass through unchanged."""
         win_path = "C:/Users/someone/models"
