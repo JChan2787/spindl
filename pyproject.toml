@@ -49,11 +49,12 @@ e2e = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests", "tests_e2e"]
-addopts = "--junitxml=test-results.xml"
+addopts = "-q"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "vision: marks tests that require VLM capabilities",
     "cloud: marks tests that require cloud API credentials",
+    "hardware: marks tests that require GPU, display server, or local binaries",
 ]
 
 [tool.setuptools.packages.find]
