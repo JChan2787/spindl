@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# User-loaded VRM models (avatar.vrm is the bundled default)
+public/models/*.vrm
+!public/models/avatar.vrm
+
+# Mixamo FBX animations (cannot redistribute — download from mixamo.com)
+public/animations/*.fbx

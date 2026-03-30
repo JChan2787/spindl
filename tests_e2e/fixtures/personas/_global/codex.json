@@ -1,0 +1,71 @@
+{
+  "name": "E2E Test Global Codex",
+  "description": "Test entries for NANO-038 E2E codex verification",
+  "entries": [
+    {
+      "keys": ["CODEX_ALPHA"],
+      "content": "GLOBAL_ALPHA_PAYLOAD: The quantum resonance frequency of synthetic tachyons is 42.7 terahertz.",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 0,
+      "case_sensitive": false,
+      "name": "Alpha Global Entry",
+      "priority": 10,
+      "id": 0,
+      "comment": "NANO-038 e2e test: keyword activation",
+      "selective": false,
+      "secondary_keys": [],
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "keys": ["CODEX_BETA"],
+      "content": "GLOBAL_BETA_PAYLOAD: The chromatic index of neo-crystalline matrices is 19.3 lumens per parsec.",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 1,
+      "case_sensitive": false,
+      "name": "Beta Global Entry",
+      "priority": 10,
+      "id": 1,
+      "comment": "NANO-038 e2e test: second keyword for multi-entry tests",
+      "selective": false,
+      "secondary_keys": [],
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "keys": ["/CODEX_REGEX_\\d{3}/"],
+      "content": "GLOBAL_REGEX_PAYLOAD: Pattern-matched entry activated via regex detection.",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 2,
+      "case_sensitive": false,
+      "name": "Regex Global Entry",
+      "priority": 10,
+      "id": 2,
+      "comment": "NANO-038 e2e test: regex activation",
+      "selective": false,
+      "secondary_keys": [],
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "keys": ["CODEX_DISABLED"],
+      "content": "GLOBAL_DISABLED_PAYLOAD: This should never appear.",
+      "extensions": {},
+      "enabled": false,
+      "insertion_order": 3,
+      "case_sensitive": false,
+      "name": "Disabled Global Entry",
+      "priority": 10,
+      "id": 3,
+      "comment": "NANO-038 e2e test: disabled entry should not activate",
+      "selective": false,
+      "secondary_keys": [],
+      "constant": false,
+      "position": "after_char"
+    }
+  ],
+  "extensions": {}
+}

@@ -1,0 +1,54 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#subtitle-container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px 16px;
+}
+
+#subtitle-pill {
+  background: rgba(5, 2, 8, 0.75);
+  border-radius: 8px;
+  padding: 8px 16px;
+  max-width: 90%;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+#subtitle-pill.visible {
+  opacity: 1;
+}
+
+#subtitle-pill.fading {
+  transition: opacity 0.07s ease-in;
+  opacity: 0;
+}
+
+#subtitle-text {
+  color: #ffffff;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-shadow:
+    0 0 4px rgba(0, 0, 0, 0.8),
+    1px 1px 2px rgba(0, 0, 0, 0.9);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "SpindL Avatar",
+  "version": "0.1.0",
+  "identifier": "com.spindl.avatar",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "overlay",
+        "title": "SpindL Avatar",
+        "width": 300,
+        "height": 400,
+        "x": 100,
+        "y": 100,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "resizable": true,
+        "skipTaskbar": true,
+        "transparent": false,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' asset: https://asset.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* asset: https://asset.localhost; img-src 'self' data: blob: asset: https://asset.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

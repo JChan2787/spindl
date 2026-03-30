@@ -1,0 +1,118 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+# Python build artifacts (not gui/src/lib/)
+/lib/
+/lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node
+node_modules/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Legacy git history (pre-SpindL)
+.git-old/
+
+# PyTorch cache (Silero VAD model downloads)
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+test-results.xml
+tests_e2e/report.html
+tests_e2e/assets/
+tests_e2e/results.xml
+tests_e2e/test_output.log
+
+# Model files (large binaries)
+models/*
+!models/.gitkeep
+tts/models/
+stt/models/
+*.pth
+*.pt
+*.onnx
+
+# Audio output (test artifacts)
+output/
+*.wav
+
+# Conversation session files (user data)
+conversations/*.jsonl
+conversations/.last_session_*
+conversations_test/
+logs/
+
+# Config backups
+*.bak
+
+# Runtime config (user-specific provider settings, model paths, API keys)
+config/spindl.yaml
+
+# Character data (user-created characters — spindle is the bundled default)
+/characters/*
+!/characters/spindle/
+# Per-character ChromaDB memories (user conversation data)
+characters/*/memory/
+
+# Archived scripts (dev-only, not for public release)
+archived_scripts/
+
+# Archived docs (pre-release documentation, not for public release)
+archived_docs/
+
+# Misc archive (dev-only scratch space)
+archive_misc/
+
+# Persona data (legacy — deprecated in favor of characters/)
+/personas/
+
+# Memory test scripts (contain PII in seed data)
+scripts/seed_test_memories.py
+
+# E2E test configs (contain user-specific model paths, drive letters, ports)
+tests_e2e/fixtures/config/spindl_e2e_*.yaml
+!tests_e2e/fixtures/config/spindl_e2e_template.yaml
+
+# E2E config backups (contain hardcoded paths and username)
+config/spindl.yaml.e2e_*
+
+# VTubeStudio auth token (local plugin credential)
+vtubeStudio_token.txt

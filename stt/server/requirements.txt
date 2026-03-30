@@ -1,0 +1,5 @@
+# NeMo STT Server dependencies
+# Install in WSL conda environment: conda activate nemo && pip install -r requirements.txt
+
+nemo_toolkit[asr]
+numpy

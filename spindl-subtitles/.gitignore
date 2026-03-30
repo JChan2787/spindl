@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Rust build artifacts
+src-tauri/target/
+
+# Tauri generated schemas
+src-tauri/gen/
+
+# Lock files (regenerated from package.json / Cargo.toml)
+package-lock.json
+src-tauri/Cargo.lock
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,5 @@
+# GUI Server dependencies
+# Install with: pip install -r requirements.txt
+
+python-socketio[asyncio]>=5.10.0
+uvicorn>=0.30.0

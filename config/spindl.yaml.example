@@ -1,0 +1,372 @@
+# ============================================================================
+# SpindL Configuration
+# ============================================================================
+#
+# FIRST-TIME SETUP:
+#   Option A (Recommended): Skip this file entirely.
+#     1. Run: python scripts/dev.py
+#     2. Open http://localhost:3000 → the Launcher page builds this file for you.
+#
+#   Option B (Manual):
+#     1. Copy this file: cp config/spindl.yaml.example config/spindl.yaml
+#     2. Fill in the REQUIRED sections below (search for "REQUIRED").
+#     3. For cloud providers, copy .env.example to .env and add your API keys.
+#
+# SECRETS:
+#   API keys use ${ENV_VAR} syntax. Define them in .env, never in this file.
+#   See .env.example for the list.
+#
+# ============================================================================
+
+
+# ============================================================================
+# REQUIRED — You must configure at least ONE LLM provider to start.
+# ============================================================================
+
+llm:
+  provider: llama                         # Options: "llama" (local), "deepseek" (cloud), "openrouter" (cloud)
+  providers:
+
+    # --- Local LLM (llama.cpp) ---
+    # Download a GGUF model and point to your llama-server binary.
+    # Get llama.cpp: https://github.com/ggerganov/llama.cpp/releases
+    # Get models:    https://huggingface.co (search for GGUF)
+    llama:
+      executable_path: /path/to/llama-server      # REQUIRED: path to llama-server binary
+      model_path: /path/to/your-model.gguf        # REQUIRED: path to your GGUF model file
+      host: 127.0.0.1
+      port: 5557
+      context_size: 32768
+      gpu_layers: 99                              # 99 = offload all layers to GPU
+      # tensor_split:                             # Multi-GPU VRAM split ratios (e.g., 30/70 across 2 GPUs)
+      #   - 0.3
+      #   - 0.7
+      # extra_args:                               # Additional llama.cpp flags passed to the server
+      #   - -fa
+      #   - 'on'
+      timeout: 60
+      temperature: 0.7
+      max_tokens: 2048
+      top_p: 0.95
+      # reasoning_format: deepseek                # Uncomment for models with <think> (Qwen3, DeepSeek)
+      # reasoning_budget: -1                      # -1 = unlimited, 0 = disabled
+
+    # --- Cloud: DeepSeek ---
+    # Set DEEPSEEK_API_KEY in .env
+    deepseek:
+      url: https://api.deepseek.com/v1
+      api_key: ${DEEPSEEK_API_KEY}
+      model: deepseek-chat
+      context_size: 32768
+      timeout: 60
+      temperature: 0.7
+      max_tokens: 2048
+
+    # --- Cloud: OpenRouter (200+ models) ---
+    # Set OPENROUTER_API_KEY in .env
+    # Browse models: https://openrouter.ai/models
+    openrouter:
+      url: https://openrouter.ai/api/v1
+      api_key: ${OPENROUTER_API_KEY}
+      model: google/gemini-2.5-pro
+      context_size: 32768
+      timeout: 120
+      temperature: 0.7
+      max_tokens: 2048
+      top_p: 0.95
+
+
+# ============================================================================
+# REQUIRED — Speech-to-text. Needed for voice conversations.
+# (Skip if you only want text chat via the web dashboard.)
+# ============================================================================
+
+stt:
+  provider: whisper                       # Options: "whisper" (local), "parakeet" (local, NeMo)
+  providers:
+    whisper:
+      host: 127.0.0.1
+      port: 6969
+      timeout: 30
+      binary_path: /path/to/whisper-server        # REQUIRED: path to whisper-server binary
+      model_path: /path/to/ggml-small.en.bin      # REQUIRED: path to Whisper model
+      language: en
+      threads: 4
+      no_gpu: false
+
+
+# ============================================================================
+# REQUIRED — Text-to-speech. Needed for voice output.
+# (Skip if you only want text chat via the web dashboard.)
+# ============================================================================
+
+tts:
+  provider: kokoro
+  providers:
+    kokoro:
+      host: 127.0.0.1
+      port: 5556
+      voice: af_bella                     # Default voice (change in dashboard at runtime)
+      language: a                         # "a" = American English, "b" = British English
+      models_dir: ./tts/models
+      timeout: 30
+      # device: cuda:0                    # GPU device for inference (use "cpu" to avoid CUDA contention)
+      # conda_env: spindl                 # Conda environment name (if using conda)
+
+
+# ============================================================================
+# OPTIONAL — Vision (screen capture + VLM). Lets the agent see your screen.
+# ============================================================================
+
+vlm:
+  provider: llama                         # Options: "llama" (local), "openai" (cloud), "llm" (unified)
+  capture:
+    monitor: 1                            # Which monitor to capture (1 = primary)
+    width: 1920
+    height: 1080
+    jpeg_quality: 95
+  providers:
+
+    # --- Local VLM (llama.cpp with vision model) ---
+    llama:
+      model_type: gemma3                  # Options: "gemma3", "llava"
+      executable_path: /path/to/llama-server
+      model_path: /path/to/vlm-model.gguf
+      mmproj_path: /path/to/mmproj.gguf   # Vision projector file (separate download)
+      host: 127.0.0.1
+      port: 5558
+      context_size: 8192
+      gpu_layers: 99
+      # tensor_split:                     # Multi-GPU VRAM split (same as LLM)
+      #   - 0
+      #   - 1
+      # extra_args:                       # Additional llama.cpp flags
+      #   - --cache-ram
+      #   - "0"
+      timeout: 30
+      max_tokens: 300
+      prompt: Describe what you see in this image concisely.
+
+    # --- Cloud VLM (OpenAI-compatible) ---
+    # Works with xAI/Grok, OpenAI GPT-4o, etc. Set API key in .env.
+    openai:
+      api_key: ${XAI_API_KEY}
+      base_url: https://api.x.ai
+      model: grok-4-1-fast-non-reasoning
+      context_size: 8192
+      timeout: 30
+      max_tokens: 300
+      prompt: Describe what you see in this image concisely.
+
+  # Unified mode: set provider to "llm" above to reuse your chat LLM for vision.
+  # Requires a multimodal model (e.g., Gemma 3). No separate VLM server needed.
+
+
+# ============================================================================
+# OPTIONAL — Memory (RAG). Lets the agent remember past conversations.
+# Requires an embedding server (see launcher.services.embedding below).
+# ============================================================================
+
+memory:
+  enabled: true
+  relevance_threshold: 0.75              # Lower = more memories retrieved (0.0–1.0)
+  top_k: 5                               # Max memories injected per response
+  dedup_threshold: 0.30                  # L2 distance gate for dedup (lower = stricter)
+  reflection_interval: 5                 # Turns between auto flash card generation
+  # reflection_prompt: |                 # Custom extraction prompt (must contain {transcript})
+  #   From the conversation below, extract the single most important fact...
+  #   Conversation:
+  #   {transcript}
+  # reflection_system_message: null      # System message for the extraction LLM
+  # reflection_delimiter: "{qa}"         # Separator between entries in LLM output
+  curation:                              # LLM-assisted dedup (optional, requires OpenRouter)
+    enabled: false
+    api_key: ${OPENROUTER_API_KEY}
+    model: anthropic/claude-haiku-4-5
+    # prompt: null                       # Custom curation prompt (uses built-in default)
+    timeout: 30.0
+  # --- Retrieval scoring weights (must sum to ~1.0) ---
+  scoring_w_relevance: 0.5              # Vector similarity weight
+  scoring_w_recency: 0.2                # Ebbinghaus recency decay weight
+  scoring_w_importance: 0.2             # Importance rating weight (1-10)
+  scoring_w_frequency: 0.1              # Access frequency weight
+  scoring_decay_base: 0.9975            # Recency decay rate (lower = faster decay)
+  embedding:
+    base_url: http://127.0.0.1:5559
+    timeout: 60
+
+
+# ============================================================================
+# OPTIONAL — Stimuli. Lets the agent speak unprompted after idle periods.
+# ============================================================================
+
+stimuli:
+  enabled: false                          # Set true to enable autonomous behavior
+  patience:
+    enabled: true
+    seconds: 20                           # Seconds of silence before the agent initiates
+    prompt: Continue the conversation naturally. You have been idle. Think of something interesting to say or ask.
+  twitch:                                 # OPTIONAL — Twitch chat integration
+    enabled: false
+    channel: ""                           # REQUIRED if enabled — your Twitch channel name
+    app_id: ${TWITCH_APP_ID}             # Set in .env — from Twitch dev console
+    app_secret: ${TWITCH_APP_SECRET}     # Set in .env — from Twitch dev console
+    buffer_size: 10                       # Max messages buffered before firing (1-50)
+    max_message_length: 300               # Ignore messages longer than this
+    prompt_template: "Recent Twitch chat messages:\n{messages}\nPick the most interesting message and respond to it naturally."
+
+
+# ============================================================================
+# OPTIONAL — Tools. Function calling (e.g., screen vision).
+# ============================================================================
+
+tools:
+  enabled: true
+  max_iterations: 5                       # Max tool call rounds per response
+  tools:
+    screen_vision:
+      enabled: true
+      monitor: 1
+      vlm_provider: llama                 # Which VLM provider handles screen description
+
+
+# ============================================================================
+# OPTIONAL — Avatar & Subtitles. Desktop overlay via Tauri apps.
+# ============================================================================
+
+avatar:
+  enabled: false                          # Enable avatar bridge (spawns spindl-avatar)
+  emotion_classifier: off                 # "classifier" = DistilBERT emotion detection, "off" = disabled
+  emotion_model_path: models/emotion
+  emotion_confidence_threshold: 0.3       # Minimum confidence to trigger expression (0.0–1.0)
+  expression_fade_delay: 1.0              # Seconds after TTS ends before expressions fade to neutral
+  show_emotion_in_chat: true              # Show classified emotion badge in chat messages
+  subtitles_enabled: false                # Enable subtitle overlay (spawns spindl-subtitles)
+  subtitle_fade_delay: 1.5               # Seconds after TTS ends before subtitle text fades out
+  avatar_always_on_top: true              # Avatar window stays above all other windows
+  subtitle_always_on_top: true            # Subtitle window stays above all other windows
+  global_animations_dir: spindl-avatar/public/animations
+  base_animations:                        # Global default Mixamo FBX clips per mood
+    idle: Standing Idle                   # Neutral / no emotion detected
+    happy: Happy                          # Classifier mood: amused
+    sad: Sad Idle                         # Classifier mood: melancholy
+    angry: Angry                          # Classifier mood: annoyed
+    curious: Thinking                     # Classifier mood: curious
+
+# ============================================================================
+# OPTIONAL — VTubeStudio. Connect to VTubeStudio instead of the built-in avatar.
+# ============================================================================
+
+vtubestudio:
+  enabled: false
+  host: 127.0.0.1
+  port: 8001
+  plugin_name: SpindL
+
+# ============================================================================
+# DEFAULTS — You probably don't need to change these.
+# ============================================================================
+
+audio:
+  capture_rate: 16000
+  chunk_size: 512
+
+character:
+  default: spindle                        # Character persona loaded at startup
+  directory: ./characters
+
+vad:
+  min_silence_ms: 1500                    # Silence duration to end speech detection
+  min_speech_ms: 250                      # Minimum speech duration to trigger
+  threshold: 0.45                         # VAD sensitivity (0.0–1.0, lower = more sensitive)
+
+pipeline:
+  budget_strategy: truncate
+  conversations_dir: ./conversations
+  response_reserve: 300
+  resume_session: true
+  summarization_reserve_tokens: 512
+  summarization_threshold: 0.7
+
+prompt:
+  rag_prefix: "The following are relevant memories about the user and past conversations. Use them to inform your response:"
+  rag_suffix: End of memories.
+  codex_prefix: "The following facts are always true in this context:"
+  codex_suffix: ""
+
+
+# ============================================================================
+# ADVANCED — Service launcher configuration.
+# Controls how `python scripts/launcher.py` starts and monitors services.
+# Most users should configure services through the GUI Launcher page instead.
+# ============================================================================
+
+launcher:
+  health_check_timeout: 60
+  log_file: ./logs/launcher.log
+  log_level: info
+  logging:
+    services:
+      llm: warning
+      orchestrator: info
+      stt: error
+      tts: error
+      vlm: error
+    suppress:
+      - Connection from
+      - "-> success:"
+      - "slot \\d+:"
+      - sampling params
+      - sampler constr
+      - sampler chain
+      - ^llama_
+      - ^load_
+      - ^print_info
+      - ^clip_
+      - ^ggml_
+      - ^sched_
+      - ^common_
+      - ^srv\s+
+      - ^slot\s+
+      - "^main:"
+  services:
+    embedding:
+      enabled: true
+      platform: native
+      command: /path/to/llama-server --embedding -m /path/to/embedding-model.gguf --host 127.0.0.1 --port 5559 -ngl 99 -c 2048 -b 2048 -ub 2048
+      health_check:
+        type: http
+        url: http://127.0.0.1:5559/health
+        timeout: 60
+    llm:
+      enabled: true
+      platform: native
+      health_check:
+        type: provider
+        timeout: 90
+    orchestrator:
+      command: python -u scripts/run_orchestrator_with_gui.py --config config/spindl.yaml
+      depends_on:
+        - llm
+        - stt
+        - tts
+      enabled: true
+      health_check:
+        type: none
+      pass_debug: true
+      platform: native
+    stt:
+      enabled: true
+      platform: native
+      command: /path/to/whisper-server -m /path/to/ggml-small.en.bin --host 127.0.0.1 --port 6969 -l en -t 4
+      health_check:
+        type: tcp
+        host: 127.0.0.1
+        port: 6969
+        timeout: 60
+    tts:
+      enabled: true
+      platform: native
+      health_check:
+        type: provider
+        timeout: 60
