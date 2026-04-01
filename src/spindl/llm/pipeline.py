@@ -101,6 +101,10 @@ class PipelineResult:
     reasoning: Optional[str] = None
     """Thinking/reasoning content from the LLM, if present (NANO-042)."""
 
+    tts_text: Optional[str] = None
+    """TTS-safe version of the response with formatting stripped (NANO-109).
+    None when TTSCleanupPlugin is not registered."""
+
     block_contents: Optional[list[dict]] = None
     """Per-block content data for token breakdown (NANO-045b).
     Each dict has: id, label, section, chars, deferred.
@@ -392,6 +396,7 @@ class LLMPipeline:
             activated_codex_entries=activated_codex,
             retrieved_memories=retrieved_memories,
             reasoning=context.metadata.get("reasoning"),
+            tts_text=context.metadata.get("tts_text"),
             block_contents=context.metadata.get("block_contents"),
         )
 

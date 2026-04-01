@@ -335,9 +335,13 @@ class GUIServer:
 
         if self._orchestrator:
             try:
-                # Update orchestrator config in-memory, then persist
+                # Update orchestrator config in-memory, then persist.
+                # Merge onto existing to preserve dashboard-only keys
+                # (e.g. repeat_penalty from NANO-108).
                 llm_cfg = self._orchestrator._config.llm_config
-                llm_cfg.providers["llama"] = config
+                if "llama" not in llm_cfg.providers:
+                    llm_cfg.providers["llama"] = {}
+                llm_cfg.providers["llama"].update(config)
                 self._orchestrator._config.save_to_yaml(self._config_path)
                 print(
                     f"[GUI] Local LLM config persisted via orchestrator to "
@@ -368,7 +372,11 @@ class GUIServer:
                 data["llm"] = {}
             if "providers" not in data["llm"]:
                 data["llm"]["providers"] = {}
-            data["llm"]["providers"]["llama"] = config
+            # Merge launcher config onto existing section to preserve
+            # dashboard-only keys (e.g. repeat_penalty from NANO-108)
+            if "llama" not in data["llm"]["providers"]:
+                data["llm"]["providers"]["llama"] = {}
+            data["llm"]["providers"]["llama"].update(config)
 
             with open(config_path, "w", encoding="utf-8") as f:
                 ry.dump(data, f)
@@ -424,7 +432,9 @@ class GUIServer:
             try:
                 vis_cfg = self._orchestrator._config.vlm_config
                 vis_cfg.provider = "llama"
-                vis_cfg.providers["llama"] = config
+                if "llama" not in vis_cfg.providers:
+                    vis_cfg.providers["llama"] = {}
+                vis_cfg.providers["llama"].update(config)
                 self._orchestrator._config.save_to_yaml(self._config_path)
                 print(
                     f"[GUI] Local VLM config persisted via orchestrator to "
@@ -455,7 +465,9 @@ class GUIServer:
                 data["vlm"] = {}
             if "providers" not in data["vlm"]:
                 data["vlm"]["providers"] = {}
-            data["vlm"]["providers"]["llama"] = config
+            if "llama" not in data["vlm"]["providers"]:
+                data["vlm"]["providers"]["llama"] = {}
+            data["vlm"]["providers"]["llama"].update(config)
 
             with open(config_path, "w", encoding="utf-8") as f:
                 ry.dump(data, f)
@@ -791,9 +803,13 @@ class GUIServer:
                 for t in visible:
                     role = t.get("role")
                     if role in ("user", "assistant"):
+                        # NANO-109: display_content holds raw LLM output (with
+                        # formatting); content holds cleaned text for LLM replay.
+                        # Chat display should show the raw version when available.
+                        display_text = t.get("display_content") or t.get("content", "")
                         turn = {
                             "role": role,
-                            "text": t.get("content", ""),
+                            "text": display_text,
                             "timestamp": t.get("timestamp", ""),
                         }
                         # NANO-075: Forward metadata for hydration survival
@@ -4634,8 +4650,9 @@ class GUIServer:
         stimulus_source: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
+        tts_text: Optional[str] = None,
     ) -> None:
-        """Emit response event to all clients (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion)."""
+        """Emit response event to all clients (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text)."""
         data = {"text": text, "is_final": is_final}
         if activated_codex_entries:
             data["activated_codex_entries"] = activated_codex_entries
@@ -4648,6 +4665,8 @@ class GUIServer:
         if emotion is not None:
             data["emotion"] = emotion
             data["emotion_confidence"] = emotion_confidence
+        if tts_text is not None:
+            data["tts_text"] = tts_text
         await self.sio.emit("response", data)
 
     async def emit_stimulus_fired(

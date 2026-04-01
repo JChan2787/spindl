@@ -198,12 +198,13 @@ class OrchestratorCallbacks:
                     last_assistant_message=last_msg,
                 )
                 response = result.content
+                tts_response = result.tts_text or response  # NANO-109
                 self._last_response = response
 
                 # Classify emotion for avatar + chat display (NANO-094)
                 emotion, emotion_confidence = self._classify_emotion(response or "")
 
-                # Emit response event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-094: emotion)
+                # Emit response event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-094: emotion, NANO-109: tts_text)
                 if self._event_bus is not None:
                     self._event_bus.emit(
                         ResponseReadyEvent(
@@ -214,6 +215,7 @@ class OrchestratorCallbacks:
                             reasoning=result.reasoning,
                             emotion=emotion,
                             emotion_confidence=emotion_confidence,
+                            tts_text=result.tts_text,
                         )
                     )
 
@@ -261,10 +263,10 @@ class OrchestratorCallbacks:
                 if not response or response.strip() == "":
                     return
 
-                # 4. Synthesize speech via provider (NANO-015, NANO-054a)
+                # 4. Synthesize speech via provider (NANO-015, NANO-054a, NANO-109: use TTS-cleaned text)
                 tts_config = self._persona.get("tts_voice_config", {})
                 audio_result = self._tts_provider.synthesize(
-                    response,
+                    tts_response,
                     voice=tts_config.get("voice"),
                     **{k: v for k, v in tts_config.items() if k != "voice"},
                 )
@@ -423,12 +425,13 @@ class OrchestratorCallbacks:
                     stimulus_metadata=stimulus_metadata,
                 )
                 response = result.content
+                tts_response = result.tts_text or response  # NANO-109
                 self._last_response = response
 
                 # Classify emotion for avatar + chat display (NANO-094)
                 emotion, emotion_confidence = self._classify_emotion(response or "")
 
-                # Emit response event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion)
+                # Emit response event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text)
                 if self._event_bus is not None:
                     self._event_bus.emit(
                         ResponseReadyEvent(
@@ -440,6 +443,7 @@ class OrchestratorCallbacks:
                             stimulus_source=stimulus_source,
                             emotion=emotion,
                             emotion_confidence=emotion_confidence,
+                            tts_text=result.tts_text,
                         )
                     )
 
@@ -501,10 +505,10 @@ class OrchestratorCallbacks:
                     self._emit_state_change(current_state, "system_speaking", "tts_start")
                     current_state = "system_speaking"
 
-                    # NANO-054a: provider-agnostic TTS config
+                    # NANO-054a: provider-agnostic TTS config, NANO-109: use TTS-cleaned text
                     tts_config = self._persona.get("tts_voice_config", {})
                     audio_result = self._tts_provider.synthesize(
-                        response,
+                        tts_response,
                         voice=tts_config.get("voice"),
                         **{k: v for k, v in tts_config.items() if k != "voice"},
                     )
