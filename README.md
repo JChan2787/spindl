@@ -2,7 +2,7 @@
 
 A local-first AI character engine. Give your character a voice, a face, memory, and screen vision; all running on your hardware. Stream them on Twitch with OBS, or just talk. Technically speaking, it can run in your machine, otherwise this app provides cloud provider options (OpenRouter mostly).
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Tests: 2,329+](https://img.shields.io/badge/tests-2%2C329%2B-brightgreen)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Tests: 2,381+](https://img.shields.io/badge/tests-2%2C381%2B-brightgreen)
 
 ![SpindL Dashboard](docs/images/dashboard-01.png)
 
@@ -20,6 +20,7 @@ You talk, it listens, it talks back. The whole voice loop runs locally — mic �
 - **Stream Subtitles** — Separate Tauri 2 window for OBS compositing. Typewriter text synced to TTS duration, chroma key backgrounds, configurable fade. Just window-capture it in OBS.
 - **Stimuli** — The character doesn't just wait for you. It'll start talking on its own if you go idle, and it reads Twitch chat. You can write your own stimulus modules too.
 - **Prompt Workshop** — Block-based prompt editor. See exactly how many tokens each section costs, reorder them, override individual blocks with your own text, wrap them with injection prefixes/suffixes.
+- **Generation Control** — Temperature, top-p, max tokens, repeat penalty, repeat window, frequency penalty, and presence penalty — all adjustable from the dashboard mid-conversation. Values persist across restarts.
 - **Runtime Swapping** — Switch LLM or VLM providers mid-conversation from the dashboard. No restart needed.
 - **Chat Interface** — Text and voice in one view. Message history persists across sessions.
 - **Web Dashboard** — Next.js control panel. Character portrait with audio-reactive glow, real-time pipeline status, config, prompt editing, memory curation, session browser.
@@ -133,7 +134,7 @@ spindl/
 │   ├── llm/                  #   Prompt building, LLM providers, plugin pipeline
 │   │   ├── builtin/          #     llama.cpp, DeepSeek, OpenRouter providers
 │   │   ├── providers/        #     Pipeline content providers (history, persona, etc.)
-│   │   └── plugins/          #     History, budget, codex, reasoning, TTS cleanup
+│   │   └── plugins/          #     History, budget, codex, reasoning, TTS cleanup (dual-output)
 │   ├── memory/               #   ChromaDB store, RAG injector, reflection, summaries
 │   ├── orchestrator/         #   Central voice agent loop, config (Pydantic v2)
 │   ├── stimuli/              #   Autonomous behavior engine (idle timer, Twitch chat, custom modules)

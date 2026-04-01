@@ -377,7 +377,9 @@ Changes to the provider take effect immediately. Switching from a local model to
 
 ![Generation Parameters](images/dashboard_llm_params-01.png)
 
-Three sliders that control how the LLM generates responses:
+Sliders that control how the LLM generates responses, split into two sections:
+
+**Sampling**
 
 | Parameter | Range | What it does |
 |-----------|-------|-------------|
@@ -385,7 +387,16 @@ Three sliders that control how the LLM generates responses:
 | **Max Tokens** | 64 – 8192 | Maximum length of each response in tokens. Shorter limits produce concise answers; longer limits allow extended responses. Default: 2048 |
 | **Top P** | 0.0 (narrow) – 1.0 (full) | Nucleus sampling breadth. At 0.95, the model considers only the top 95% of probable tokens — cutting the long tail of unlikely completions. Lower values make responses more focused; 1.0 considers the full vocabulary. Default: 0.95 |
 
-Changes apply to the next LLM call — no restart needed. The current values are shown to the right of each slider.
+**Repetition Control**
+
+| Parameter | Range | What it does | Providers |
+|-----------|-------|-------------|-----------|
+| **Repeat Penalty** | 0.0 (off) – 2.0 (heavy) | Flat multiplier applied to tokens that have already appeared. Higher values discourage the model from repeating itself. Default: 1.1 | Local only (llama.cpp) |
+| **Repeat Last N** | 0 (disabled) – 2048 | Window size for the repeat penalty — how many recent tokens are checked. 0 disables the window entirely. Default: 64 | Local only (llama.cpp) |
+| **Frequency Penalty** | -2.0 – 2.0 | Scales with how often a token has appeared. Positive values penalize frequent tokens more heavily; negative values encourage repetition. Default: 0.0 | All providers |
+| **Presence Penalty** | -2.0 – 2.0 | Flat penalty applied once to any token that has appeared at all, regardless of frequency. Positive values encourage topic changes; negative values encourage staying on topic. Default: 0.0 | All providers |
+
+Changes apply to the next LLM call — no restart needed. The current values are shown to the right of each slider. All values persist across app restarts.
 
 ### Tool Use
 

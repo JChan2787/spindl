@@ -8,8 +8,9 @@ Guide for AI coding assistants working in the SpindL codebase.
 
 ```
 main (protected, always green CI)
- └── NANO-108-repetition-params    ← feature branch
- └── NANO-082-e2e-launch-matrix    ← feature branch
+ └── NANO-108-repetition-params              ← feature branch
+ └── NANO-109-dual-output-tts-cleanup       ← feature branch
+ └── NANO-082-e2e-launch-matrix             ← feature branch
 ```
 
 **Flow:**
@@ -88,7 +89,7 @@ characters/             User character data (gitignored)
 | `llm/` | Prompt building, LLM dispatch, plugins | `LLMProvider` (ABC), `LLMPipeline`, `PromptBuilder`, `PromptBlock` |
 | `llm/builtin/` | LLM backend implementations | `LlamaProvider`, `DeepSeekProvider`, `OpenRouterProvider` |
 | `llm/providers/` | Pipeline content providers | `HistoryProvider`, `PersonaProvider`, `InputProvider`, `VoiceStateProvider`, etc. |
-| `llm/plugins/` | Pre/post-processing pipeline | `PreProcessor` (ABC), `PostProcessor` (ABC), `BudgetEnforcer`, `HistoryInjector`, `ReasoningExtractor`, `SummarizationTrigger`, `CodexActivator`, `CodexCooldown`, `TTSCleanup` |
+| `llm/plugins/` | Pre/post-processing pipeline | `PreProcessor` (ABC), `PostProcessor` (ABC), `BudgetEnforcer`, `HistoryInjector`, `ReasoningExtractor`, `SummarizationTrigger`, `CodexActivator`, `CodexCooldown`, `TTSCleanupPlugin` (dual-output: raw→chat, cleaned→TTS/subtitles/history) |
 | `stt/` | Speech-to-text | `STTProvider` (ABC), `WhisperProvider`, `ParakeetProvider` |
 | `tts/` | Text-to-speech | `TTSProvider` (ABC), `KokoroProvider` |
 | `vision/` | Screen capture + VLM (local, cloud, unified) | `VLMProvider` (ABC), `ScreenCapture`, `VisionProvider`, `LLMVisionProvider` |
@@ -110,7 +111,7 @@ characters/             User character data (gitignored)
 1. Implement the relevant ABC (`LLMProvider`, `STTProvider`, `TTSProvider`, `VLMProvider`, `StimulusModule`, `Tool`)
 2. Register it in the corresponding registry module
 
-**Plugin pipeline.** LLM pre/post-processing uses `PreProcessor` and `PostProcessor` ABCs. Plugins are registered on the `LLMPipeline` and run in order.
+**Plugin pipeline.** LLM pre/post-processing uses `PreProcessor` and `PostProcessor` ABCs. Plugins are registered on the `LLMPipeline` and run in order. `TTSCleanupPlugin` is a dual-output `PostProcessor` — it stashes TTS-safe text in `context.metadata["tts_text"]` and returns the original response unchanged. Three consumers get different text: chat display (raw), TTS+subtitles (cleaned), conversation history (cleaned — steers LLM away from generating RP prose). The cleaned text is also stored as `content` in JSONL history, with the raw response preserved as `display_content`.
 
 **Event bus.** Components communicate via `EventBus` (pub/sub). Event types are defined in `core/events.py`. Use `EventBus.subscribe()` / `EventBus.publish()`. Supports priority ordering and one-shot subscriptions. High-frequency events (e.g., `AUDIO_LEVEL` at 50ms intervals) flow through the same bus — EventBridge forwards them to Socket.IO for frontend visualization.
 
@@ -135,7 +136,7 @@ characters/             User character data (gitignored)
 - Avatar: `AVATAR_MOOD`, `AVATAR_TOOL_MOOD`
 - Error: `PIPELINE_ERROR`
 
-Key event data: `ResponseReadyEvent` carries `emotion`, `emotion_confidence`, `stimulus_source`. `ToolInvokedEvent`/`ToolResultEvent` carry `tool_call_id` and `iteration`.
+Key event data: `ResponseReadyEvent` carries `emotion`, `emotion_confidence`, `stimulus_source`, `tts_text` (NANO-109: TTS-safe text, separate from display text). `ToolInvokedEvent`/`ToolResultEvent` carry `tool_call_id` and `iteration`.
 
 ### Prompt Composition (Block Model)
 
@@ -171,7 +172,7 @@ Uses [SillyTavern V2 spec](https://github.com/SillyTavern/SillyTavern). Key mode
 - `Character` — name, description, personality, scenario, greetings, avatar
 - `CharacterBook` / `CharacterBookEntry` — lorebook with keyword activation, cooldowns, sticky duration
 - `SpindlExtensions` — voice config, TTS settings, appearance, rules, summarization prompt
-- `GenerationConfig` — temperature, top_p, max_tokens, etc.
+- `GenerationConfig` — temperature, top_p, max_tokens, repeat_penalty, repeat_last_n, frequency_penalty, presence_penalty
 
 All validated via Pydantic at load time.
 
@@ -201,7 +202,7 @@ LLM response text → ONNXEmotionClassifier.classify()
 
 ### Subtitle Overlay
 
-Standalone Tauri 2 app (`spindl-subtitles/`). Connects to the orchestrator via Socket.IO, listens for `response_chunk` and `tts_playback` events. Duration-synced typewriter reveal with sentence boundary cropping. Chroma key background (black/green/magenta) via right-click context menu.
+Standalone Tauri 2 app (`spindl-subtitles/`). Connects to the orchestrator via Socket.IO, listens for `response` and `tts_status` events. Prefers `tts_text` (formatting-stripped) over raw `text` for display (NANO-109). Duration-synced typewriter reveal with sentence boundary cropping. Chroma key background (black/green/magenta) via right-click context menu.
 
 **Process management:** Spawned/killed by `GUIServer._subtitle_spawn()` / `_subtitle_kill()`. Auto-spawns on startup when `subtitles_enabled: true` in config. Uses `kill_process_tree` (psutil) for clean shutdown.
 
