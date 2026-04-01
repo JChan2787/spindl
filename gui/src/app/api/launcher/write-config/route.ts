@@ -161,14 +161,19 @@ export async function POST(request: Request) {
     // LLM Configuration
     // ========================================
     if (body.llmProviderType === "local") {
+      // Preserve existing llama keys not managed by the launcher (e.g. repeat_penalty from NANO-108)
+      const existingLlmProviders = (typeof existingConfig.llm === "object" && existingConfig.llm !== null
+        ? (existingConfig.llm as { providers?: Record<string, unknown> }).providers || {}
+        : {}) as Record<string, unknown>;
+      const existingLlama = (existingLlmProviders.llama || {}) as Record<string, unknown>;
+
       existingConfig.llm = {
         provider: "llama",
         plugin_paths: ["./plugins/llm"],
         providers: {
-          ...(typeof existingConfig.llm === "object" && existingConfig.llm !== null
-            ? (existingConfig.llm as { providers?: Record<string, unknown> }).providers || {}
-            : {}),
+          ...existingLlmProviders,
           llama: {
+            ...existingLlama,
             executable_path: body.llmLocal.executablePath,
             model_path: body.llmLocal.modelPath,
             host: body.llmLocal.host,
@@ -195,14 +200,19 @@ export async function POST(request: Request) {
       };
     } else {
       const providerName = body.llmCloud.provider;
+      // Preserve existing cloud provider keys not managed by the launcher
+      const existingCloudProviders = (typeof existingConfig.llm === "object" && existingConfig.llm !== null
+        ? (existingConfig.llm as { providers?: Record<string, unknown> }).providers || {}
+        : {}) as Record<string, unknown>;
+      const existingCloudProvider = (existingCloudProviders[providerName] || {}) as Record<string, unknown>;
+
       existingConfig.llm = {
         provider: providerName,
         plugin_paths: ["./plugins/llm"],
         providers: {
-          ...(typeof existingConfig.llm === "object" && existingConfig.llm !== null
-            ? (existingConfig.llm as { providers?: Record<string, unknown> }).providers || {}
-            : {}),
+          ...existingCloudProviders,
           [providerName]: {
+            ...existingCloudProvider,
             url: body.llmCloud.apiUrl,
             api_key: body.llmCloud.apiKey,
             model: body.llmCloud.model,
@@ -246,6 +256,12 @@ export async function POST(request: Request) {
     } else {
       // Separate VLM configuration
       if (body.vlmProviderType === "local") {
+        // Preserve existing VLM llama keys not managed by the launcher
+        const existingVlmProviders = (typeof existingConfig.vlm === "object" && existingConfig.vlm !== null
+          ? (existingConfig.vlm as { providers?: Record<string, unknown> }).providers || {}
+          : {}) as Record<string, unknown>;
+        const existingVlmLlama = (existingVlmProviders.llama || {}) as Record<string, unknown>;
+
         existingConfig.vlm = {
           provider: "llama",
           plugin_paths: ["./plugins/vlm"],
@@ -256,10 +272,9 @@ export async function POST(request: Request) {
             jpeg_quality: 95,
           },
           providers: {
-            ...(typeof existingConfig.vlm === "object" && existingConfig.vlm !== null
-              ? (existingConfig.vlm as { providers?: Record<string, unknown> }).providers || {}
-              : {}),
+            ...existingVlmProviders,
             llama: {
+              ...existingVlmLlama,
               model_type: body.vlmLocal.modelType,
               executable_path: body.vlmLocal.executablePath,
               model_path: body.vlmLocal.modelPath,
@@ -282,6 +297,12 @@ export async function POST(request: Request) {
           },
         };
       } else {
+        // Preserve existing VLM cloud keys not managed by the launcher
+        const existingVlmProviders = (typeof existingConfig.vlm === "object" && existingConfig.vlm !== null
+          ? (existingConfig.vlm as { providers?: Record<string, unknown> }).providers || {}
+          : {}) as Record<string, unknown>;
+        const existingVlmCloud = (existingVlmProviders.openai || {}) as Record<string, unknown>;
+
         existingConfig.vlm = {
           provider: "openai",
           plugin_paths: ["./plugins/vlm"],
@@ -292,10 +313,9 @@ export async function POST(request: Request) {
             jpeg_quality: 95,
           },
           providers: {
-            ...(typeof existingConfig.vlm === "object" && existingConfig.vlm !== null
-              ? (existingConfig.vlm as { providers?: Record<string, unknown> }).providers || {}
-              : {}),
+            ...existingVlmProviders,
             openai: {
+              ...existingVlmCloud,
               api_key: body.vlmCloud.apiKey,
               base_url: body.vlmCloud.baseUrl,
               model: body.vlmCloud.model,
