@@ -234,9 +234,10 @@ socket.on('disconnect', (reason) => {
 });
 
 // LLM response — full text arrives in one event
-socket.on('response', (data: { text: string; is_final: boolean }) => {
+// NANO-109: prefer tts_text (formatting-stripped) for subtitle display
+socket.on('response', (data: { text: string; tts_text?: string; is_final: boolean }) => {
   if (data.is_final && data.text) {
-    onNewResponse(data.text);
+    onNewResponse(data.tts_text ?? data.text);
   }
 });
 

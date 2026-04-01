@@ -123,6 +123,8 @@ class ResponseReadyEvent(Event):
     """Classified emotion mood string for avatar/chat display (NANO-094)."""
     emotion_confidence: Optional[float] = None
     """Confidence score (0-100) of the emotion classification (NANO-094)."""
+    tts_text: Optional[str] = None
+    """TTS-safe version of the response with formatting stripped (NANO-109)."""
 
 
 @dataclass

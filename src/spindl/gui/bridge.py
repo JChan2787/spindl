@@ -150,7 +150,7 @@ class EventBridge:
         )
 
     def _on_response(self, event: ResponseReadyEvent) -> None:
-        """Handle response ready event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion)."""
+        """Handle response ready event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text)."""
         if not self._should_emit():
             return
         self._emit_async(
@@ -163,6 +163,7 @@ class EventBridge:
                 stimulus_source=event.stimulus_source,
                 emotion=event.emotion,
                 emotion_confidence=event.emotion_confidence,
+                tts_text=event.tts_text,
             )
         )
 

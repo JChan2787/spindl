@@ -53,6 +53,7 @@ export interface ResponseEvent {
   stimulus_source?: string; // NANO-056: "patience" | "custom" | null
   emotion?: string; // NANO-094: Classified emotion mood string
   emotion_confidence?: number; // NANO-094: Normalized confidence (0.0-1.0)
+  tts_text?: string; // NANO-109: TTS-safe text with formatting stripped
 }
 
 export interface TTSStatusEvent {

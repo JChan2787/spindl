@@ -151,6 +151,7 @@ class ConversationHistoryManager:
         stimulus_source: str = None,
         activated_codex_entries: list = None,
         retrieved_memories: list = None,
+        tts_text: str = None,
     ) -> None:
         """
         Store the pending user input and assistant response to JSONL.
@@ -163,13 +164,20 @@ class ConversationHistoryManager:
         Reasoning is stored in JSONL for inspection but NOT replayed to the LLM
         (HistoryInjector only reads 'content', not 'reasoning').
 
+        NANO-109: When tts_text is provided, it becomes the 'content' field
+        (what HistoryInjector replays to the LLM). The raw response is preserved
+        as 'display_content' in JSONL for inspection. This steers the LLM away
+        from generating action markers and narrative prose by showing it clean
+        dialogue in its own conversation history.
+
         Args:
-            response: The assistant's response text
+            response: The assistant's raw response text
             reasoning: Optional thinking/reasoning content from the LLM (NANO-042)
             input_modality: Input source — "VOICE", "TEXT", or "stimulus" (NANO-075)
             stimulus_source: Stimulus identifier — "patience", "custom", etc. (NANO-075)
             activated_codex_entries: Codex entries activated for display (NANO-075)
             retrieved_memories: RAG memories retrieved for display (NANO-075)
+            tts_text: TTS-cleaned text for history replay (NANO-109)
         """
         if self._session_file is None or self._pending_user_input is None:
             return
@@ -189,14 +197,22 @@ class ConversationHistoryManager:
         if input_modality:
             user_turn["input_modality"] = input_modality
 
+        # NANO-109: Use cleaned text for history content (steers LLM output).
+        # Preserve raw response as display_content for JSONL inspection.
+        history_content = tts_text if tts_text else response
+
         assistant_turn = {
             "turn_id": self._next_turn_id + 1,
             "uuid": generate_uuid(),
             "role": "assistant",
-            "content": response,
+            "content": history_content,
             "timestamp": timestamp,
             "hidden": False,
         }
+
+        # NANO-109: Preserve raw response when tts_text differs
+        if tts_text and tts_text != response:
+            assistant_turn["display_content"] = response
 
         # NANO-042: Store reasoning alongside assistant turn for inspection
         if reasoning:
@@ -468,6 +484,11 @@ class HistoryRecorder(PostProcessor):
         # NANO-042: Pass reasoning from context metadata for JSONL persistence
         reasoning = context.metadata.get("reasoning")
 
+        # NANO-109: Use TTS-cleaned text for history content (steers LLM away
+        # from generating action markers and narrative prose). Raw response
+        # preserved as display_content in JSONL for inspection.
+        tts_text = context.metadata.get("tts_text")
+
         # NANO-075: Extract metadata for JSONL persistence (hydration survival)
         input_modality = context.metadata.get("input_modality")
         stimulus_source = context.metadata.get("stimulus_source")
@@ -500,6 +521,7 @@ class HistoryRecorder(PostProcessor):
             stimulus_source=stimulus_source,
             activated_codex_entries=activated_codex,
             retrieved_memories=retrieved_memories,
+            tts_text=tts_text,
         )
 
         if self._manager._debug:
