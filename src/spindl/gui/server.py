@@ -4277,6 +4277,10 @@ class GUIServer:
                     "temperature": config.llm_config.provider_config.get("temperature", 0.7),
                     "max_tokens": config.llm_config.provider_config.get("max_tokens", 256),
                     "top_p": config.llm_config.provider_config.get("top_p", 0.95),
+                    "repeat_penalty": config.llm_config.provider_config.get("repeat_penalty", 1.1),
+                    "repeat_last_n": config.llm_config.provider_config.get("repeat_last_n", 64),
+                    "frequency_penalty": config.llm_config.provider_config.get("frequency_penalty", 0.0),
+                    "presence_penalty": config.llm_config.provider_config.get("presence_penalty", 0.0),
                 },
                 "stimuli": self._build_stimuli_hydration(config.stimuli_config),
                 # NANO-065a: Tools runtime state

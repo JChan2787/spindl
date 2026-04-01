@@ -182,6 +182,10 @@ export interface ConfigLoadedEvent {
       temperature: number;
       max_tokens: number;
       top_p: number;
+      repeat_penalty: number;
+      repeat_last_n: number;
+      frequency_penalty: number;
+      presence_penalty: number;
     };
     // NANO-056: Stimuli system config
     stimuli?: {
