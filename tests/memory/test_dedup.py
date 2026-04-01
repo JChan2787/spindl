@@ -1,5 +1,6 @@
 """Tests for NANO-102: Memory deduplication — content-hash, similarity gate, session guard."""
 
+import hashlib
 import os
 import shutil
 import tempfile
@@ -23,9 +24,14 @@ from spindl.memory.memory_store import (
 
 
 def _make_embedding(text: str, dim: int = 64) -> list[float]:
-    """Deterministic fake embedding from hash. Same text = same vector."""
-    h = hash(text) % 10000
-    return [(h + i) / 10000.0 for i in range(dim)]
+    """Deterministic fake embedding from hash. Same text = same vector.
+
+    Uses SHA-256 digest bytes to fill each dimension independently,
+    producing vectors that are far apart for different inputs.
+    """
+    digest = hashlib.sha256(text.encode()).digest()
+    # Cycle through digest bytes to fill dim dimensions
+    return [digest[i % len(digest)] / 255.0 for i in range(dim)]
 
 
 def _make_similar_embedding(text: str, offset: float = 0.001, dim: int = 64) -> list[float]:

@@ -3,6 +3,7 @@
 NANO-043 Phase 4.
 """
 
+import hashlib
 import os
 import shutil
 import tempfile
@@ -30,8 +31,8 @@ def mock_embedding_client() -> MagicMock:
     client = MagicMock(spec=EmbeddingClient)
 
     def fake_embed(text: str) -> list[float]:
-        h = hash(text) % 10000
-        return [(h + i) / 10000.0 for i in range(64)]
+        digest = hashlib.sha256(text.encode()).digest()
+        return [digest[i % len(digest)] / 255.0 for i in range(64)]
 
     def fake_embed_batch(texts: list[str]) -> list[list[float]]:
         return [fake_embed(t) for t in texts]

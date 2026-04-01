@@ -7,6 +7,7 @@ Tests cover:
 - Data added after switch is in the new character's collections
 """
 
+import hashlib
 import os
 import shutil
 import tempfile
@@ -26,8 +27,8 @@ def mock_embedding_client() -> MagicMock:
     def fake_embed_batch(texts: list[str]) -> list[list[float]]:
         results = []
         for text in texts:
-            h = hash(text) % 10000
-            results.append([(h + i) / 10000.0 for i in range(64)])
+            digest = hashlib.sha256(text.encode()).digest()
+            results.append([digest[i % len(digest)] / 255.0 for i in range(64)])
         return results
 
     client.embed_batch.side_effect = fake_embed_batch
