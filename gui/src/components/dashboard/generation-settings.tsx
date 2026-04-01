@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Flame, Hash, Percent } from "lucide-react";
+import { Flame, Hash, Percent, Repeat, Rewind, TrendingDown, UserMinus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useSettingsStore } from "@/lib/stores";
@@ -154,6 +154,26 @@ export function GenerationSettings() {
     [handleChange]
   );
 
+  const handleRepeatPenaltyChange = useCallback(
+    (value: number) => handleChange({ repeat_penalty: value }),
+    [handleChange]
+  );
+
+  const handleRepeatLastNChange = useCallback(
+    (value: number) => handleChange({ repeat_last_n: value }),
+    [handleChange]
+  );
+
+  const handleFrequencyPenaltyChange = useCallback(
+    (value: number) => handleChange({ frequency_penalty: value }),
+    [handleChange]
+  );
+
+  const handlePresencePenaltyChange = useCallback(
+    (value: number) => handleChange({ presence_penalty: value }),
+    [handleChange]
+  );
+
   return (
     <Card>
       <CardHeader>
@@ -207,6 +227,66 @@ export function GenerationSettings() {
         <p className="text-xs text-muted-foreground">
           Temperature controls randomness. Max Tokens limits response length. Top P controls nucleus sampling breadth. Changes apply to the next LLM call.
         </p>
+
+        <div className="border-t border-border pt-4">
+          <p className="text-xs font-medium text-muted-foreground mb-4">Repetition Control</p>
+
+          <div className="space-y-6">
+            <Slider
+              label="Repeat Penalty"
+              value={config.repeat_penalty}
+              min={0}
+              max={2}
+              step={0.01}
+              icon={<Repeat className="h-3 w-3" />}
+              minLabel="0.0 (off)"
+              maxLabel="2.0 (heavy)"
+              onChange={handleRepeatPenaltyChange}
+            />
+
+            <Slider
+              label="Repeat Last N"
+              value={config.repeat_last_n}
+              min={0}
+              max={2048}
+              step={1}
+              icon={<Rewind className="h-3 w-3" />}
+              formatValue={(v) => v.toString()}
+              parseInput={(v) => parseInt(v, 10)}
+              minLabel="0 (disabled)"
+              maxLabel="2048"
+              onChange={handleRepeatLastNChange}
+            />
+
+            <Slider
+              label="Frequency Penalty"
+              value={config.frequency_penalty}
+              min={-2}
+              max={2}
+              step={0.01}
+              icon={<TrendingDown className="h-3 w-3" />}
+              minLabel="-2.0"
+              maxLabel="2.0"
+              onChange={handleFrequencyPenaltyChange}
+            />
+
+            <Slider
+              label="Presence Penalty"
+              value={config.presence_penalty}
+              min={-2}
+              max={2}
+              step={0.01}
+              icon={<UserMinus className="h-3 w-3" />}
+              minLabel="-2.0"
+              maxLabel="2.0"
+              onChange={handlePresencePenaltyChange}
+            />
+
+            <p className="text-xs text-muted-foreground">
+              Repeat Penalty and Repeat Last N are local-only (llama.cpp). Frequency and Presence Penalty apply to all providers.
+            </p>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

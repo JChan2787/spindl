@@ -1100,9 +1100,13 @@ class VoiceAgentOrchestrator:
         temperature: Optional[float] = ...,
         max_tokens: Optional[int] = ...,
         top_p: Optional[float] = ...,
+        repeat_penalty: Optional[float] = ...,
+        repeat_last_n: Optional[int] = ...,
+        frequency_penalty: Optional[float] = ...,
+        presence_penalty: Optional[float] = ...,
     ) -> None:
         """
-        Update generation parameters at runtime (NANO-053).
+        Update generation parameters at runtime (NANO-053, NANO-108).
 
         Applied as highest-priority overrides on the next LLM call.
         Also updates the provider_config in llm_config so save_to_yaml
@@ -1112,6 +1116,10 @@ class VoiceAgentOrchestrator:
             temperature: New temperature. Ellipsis (...) = keep current.
             max_tokens: New max tokens. Ellipsis (...) = keep current.
             top_p: New top_p. Ellipsis (...) = keep current.
+            repeat_penalty: New repeat_penalty. Ellipsis (...) = keep current.
+            repeat_last_n: New repeat_last_n. Ellipsis (...) = keep current.
+            frequency_penalty: New frequency_penalty. Ellipsis (...) = keep current.
+            presence_penalty: New presence_penalty. Ellipsis (...) = keep current.
         """
         if self._runtime_generation_overrides is None:
             self._runtime_generation_overrides = {}
@@ -1125,6 +1133,18 @@ class VoiceAgentOrchestrator:
         if top_p is not ...:
             self._runtime_generation_overrides["top_p"] = top_p
             self._config.llm_config.provider_config["top_p"] = top_p
+        if repeat_penalty is not ...:
+            self._runtime_generation_overrides["repeat_penalty"] = repeat_penalty
+            self._config.llm_config.provider_config["repeat_penalty"] = repeat_penalty
+        if repeat_last_n is not ...:
+            self._runtime_generation_overrides["repeat_last_n"] = repeat_last_n
+            self._config.llm_config.provider_config["repeat_last_n"] = repeat_last_n
+        if frequency_penalty is not ...:
+            self._runtime_generation_overrides["frequency_penalty"] = frequency_penalty
+            self._config.llm_config.provider_config["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not ...:
+            self._runtime_generation_overrides["presence_penalty"] = presence_penalty
+            self._config.llm_config.provider_config["presence_penalty"] = presence_penalty
 
         # Propagate to callbacks so next pipeline.run() uses them
         if self._callbacks:

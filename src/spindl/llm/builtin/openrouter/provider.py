@@ -224,6 +224,10 @@ class OpenRouterProvider(LLMProvider):
             payload["stop"] = kwargs["stop"]
         if "response_format" in kwargs:
             payload["response_format"] = kwargs["response_format"]
+        if "frequency_penalty" in kwargs and kwargs["frequency_penalty"] != 0.0:
+            payload["frequency_penalty"] = kwargs["frequency_penalty"]
+        if "presence_penalty" in kwargs and kwargs["presence_penalty"] != 0.0:
+            payload["presence_penalty"] = kwargs["presence_penalty"]
 
         # Make request
         try:

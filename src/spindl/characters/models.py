@@ -22,6 +22,8 @@ class GenerationConfig(BaseModel):
     top_k: int | None = None
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
+    repeat_penalty: float | None = None
+    repeat_last_n: int | None = None
 
 
 class SpindlExtensions(BaseModel):

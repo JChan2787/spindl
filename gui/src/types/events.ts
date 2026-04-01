@@ -331,11 +331,15 @@ export interface PromptConfigUpdatedEvent {
   persisted: boolean;
 }
 
-// NANO-053: Generation parameters
+// NANO-053, NANO-108: Generation parameters
 export interface GenerationParamsUpdatedEvent {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  repeat_penalty: number;
+  repeat_last_n: number;
+  frequency_penalty: number;
+  presence_penalty: number;
   persisted: boolean;
 }
 
@@ -915,6 +919,8 @@ export interface GenerationConfig {
   top_k?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  repeat_penalty?: number;
+  repeat_last_n?: number;
 }
 
 export interface SpindlExtensions {

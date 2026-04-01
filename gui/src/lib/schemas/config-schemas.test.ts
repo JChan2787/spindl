@@ -42,6 +42,10 @@ const VALID_LLM_LOCAL = {
   temperature: 0.7,
   maxTokens: 256,
   topP: 0.95,
+  repeatPenalty: 1.1,
+  repeatLastN: 64,
+  frequencyPenalty: 0.0,
+  presencePenalty: 0.0,
 };
 
 const VALID_LLM_CLOUD = {
@@ -53,6 +57,8 @@ const VALID_LLM_CLOUD = {
   timeout: 60,
   temperature: 0.7,
   maxTokens: 256,
+  frequencyPenalty: 0.0,
+  presencePenalty: 0.0,
 };
 
 const VALID_VLM_LOCAL = {
@@ -231,6 +237,77 @@ describe("LLMLocalConfigSchema", () => {
       topP: 1.5,
     });
     expect(result.success).toBe(false);
+  });
+
+  // NANO-108: repetition penalty params
+  it("rejects repeatPenalty > 2", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      repeatPenalty: 2.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects negative repeatLastN", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      repeatLastN: -1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects repeatLastN > 2048", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      repeatLastN: 3000,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects frequencyPenalty > 2", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      frequencyPenalty: 2.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects frequencyPenalty < -2", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      frequencyPenalty: -2.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects presencePenalty > 2", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      presencePenalty: 2.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts valid repetition params", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      repeatPenalty: 1.5,
+      repeatLastN: 128,
+      frequencyPenalty: 0.5,
+      presencePenalty: -0.3,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts edge values for repetition params", () => {
+    const result = LLMLocalConfigSchema.safeParse({
+      ...VALID_LLM_LOCAL,
+      repeatPenalty: 0.0,
+      repeatLastN: 0,
+      frequencyPenalty: -2.0,
+      presencePenalty: 2.0,
+    });
+    expect(result.success).toBe(true);
   });
 });
 
