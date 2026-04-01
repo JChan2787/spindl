@@ -1655,13 +1655,13 @@ class GUIServer:
                     pc = self._orchestrator._config.llm_config.provider_config
                     print(
                         f"[GUI] Generation params: "
-                        f"temp={pc.get('temperature')}, "
-                        f"max_tokens={pc.get('max_tokens')}, "
-                        f"top_p={pc.get('top_p')}, "
-                        f"repeat_penalty={pc.get('repeat_penalty')}, "
-                        f"repeat_last_n={pc.get('repeat_last_n')}, "
-                        f"freq_penalty={pc.get('frequency_penalty')}, "
-                        f"pres_penalty={pc.get('presence_penalty')}",
+                        f"temp={pc.get('temperature', 0.7)}, "
+                        f"max_tokens={pc.get('max_tokens', 256)}, "
+                        f"top_p={pc.get('top_p', 0.95)}, "
+                        f"repeat_penalty={pc.get('repeat_penalty', 1.1)}, "
+                        f"repeat_last_n={pc.get('repeat_last_n', 64)}, "
+                        f"freq_penalty={pc.get('frequency_penalty', 0.0)}, "
+                        f"pres_penalty={pc.get('presence_penalty', 0.0)}",
                         flush=True,
                     )
 
