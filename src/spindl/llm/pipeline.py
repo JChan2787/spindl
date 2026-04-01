@@ -565,6 +565,10 @@ class LLMPipeline:
             "temperature": 0.7,
             "max_tokens": 256,
             "top_p": 0.95,
+            "repeat_penalty": 1.1,
+            "repeat_last_n": 64,
+            "frequency_penalty": 0.0,
+            "presence_penalty": 0.0,
         }
 
         # Persona defaults
@@ -578,6 +582,14 @@ class LLMPipeline:
                 params["top_p"] = persona_gen["top_p"]
             if "stop" in persona_gen:
                 params["stop"] = persona_gen["stop"]
+            if "repeat_penalty" in persona_gen:
+                params["repeat_penalty"] = persona_gen["repeat_penalty"]
+            if "repeat_last_n" in persona_gen:
+                params["repeat_last_n"] = persona_gen["repeat_last_n"]
+            if "frequency_penalty" in persona_gen:
+                params["frequency_penalty"] = persona_gen["frequency_penalty"]
+            if "presence_penalty" in persona_gen:
+                params["presence_penalty"] = persona_gen["presence_penalty"]
 
         # Explicit overrides
         if override:

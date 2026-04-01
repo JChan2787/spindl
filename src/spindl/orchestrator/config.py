@@ -955,13 +955,17 @@ class OrchestratorConfig(BaseModel):
             data["llm"] = {}
         data["llm"]["provider"] = self.llm_config.provider
 
-        # LLM generation parameters — write to the active provider's section
+        # LLM generation parameters — write to the active provider's section (NANO-108)
         provider_name = self.llm_config.provider
         if "providers" in data["llm"] and provider_name in data["llm"]["providers"]:
             prov = data["llm"]["providers"][provider_name]
             prov["temperature"] = self.llm_config.provider_config.get("temperature", 0.7)
             prov["max_tokens"] = self.llm_config.provider_config.get("max_tokens", 256)
             prov["top_p"] = self.llm_config.provider_config.get("top_p", 0.95)
+            prov["repeat_penalty"] = self.llm_config.provider_config.get("repeat_penalty", 1.1)
+            prov["repeat_last_n"] = self.llm_config.provider_config.get("repeat_last_n", 64)
+            prov["frequency_penalty"] = self.llm_config.provider_config.get("frequency_penalty", 0.0)
+            prov["presence_penalty"] = self.llm_config.provider_config.get("presence_penalty", 0.0)
 
         # --- VLM ---
         if "vlm" not in data:

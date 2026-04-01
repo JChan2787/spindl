@@ -2,6 +2,53 @@
 
 Guide for AI coding assistants working in the SpindL codebase.
 
+## Git Workflow
+
+**Branch strategy:** Feature branches + pull requests. Never push directly to `main`.
+
+```
+main (protected, always green CI)
+ └── NANO-108-repetition-params    ← feature branch
+ └── NANO-082-e2e-launch-matrix    ← feature branch
+```
+
+**Flow:**
+1. `git checkout main && git pull`
+2. `git checkout -b NANO-XXX-short-description`
+3. Commit as you go (small, logical commits)
+4. `git push -u origin NANO-XXX-short-description`
+5. `gh pr create` — PR against `main` with summary + test plan
+6. CI must pass (pytest + Vitest + `next build`)
+7. Merge (squash or regular — either is fine)
+8. Delete the branch after merge
+
+**Branch naming:** `NANO-XXX-short-description` — matches the ticket system. Examples:
+- `NANO-108-repetition-params`
+- `NANO-082-e2e-launch-matrix`
+- `MTX-002-group-chat`
+
+**Commit messages:** Concise, imperative. Include ticket number when relevant.
+- `NANO-108: wire repeat_penalty through pipeline and provider`
+- `NANO-108: add repetition control sliders to dashboard`
+- `fix: socket handler missing validation for presence_penalty`
+
+**PR description format:**
+```
+## Summary
+- 1-3 bullet points
+
+## Test plan
+- [ ] Backend: pytest passes
+- [ ] Frontend: Vitest + next build pass
+- [ ] CI: green check on PR
+```
+
+**CI pipeline:** GitHub Actions (`.github/workflows/ci.yml`). Two parallel jobs:
+- Backend: `conda run -n spindl python -m pytest tests/ -m "not hardware" --tb=short -q`
+- Frontend: `cd gui && npm run test:run && npx next build`
+
+Runs on every push and every PR targeting `main`.
+
 ## Quick Reference
 
 | What | Command |

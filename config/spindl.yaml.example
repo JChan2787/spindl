@@ -48,6 +48,10 @@ llm:
       temperature: 0.7
       max_tokens: 2048
       top_p: 0.95
+      repeat_penalty: 1.1                         # Flat multiplier on repeated tokens (local only)
+      repeat_last_n: 64                            # Window size for repeat penalty (0 = disabled, local only)
+      frequency_penalty: 0.0                       # Scales with token frequency (-2.0 to 2.0)
+      presence_penalty: 0.0                        # Flat penalty on seen tokens (-2.0 to 2.0)
       # reasoning_format: deepseek                # Uncomment for models with <think> (Qwen3, DeepSeek)
       # reasoning_budget: -1                      # -1 = unlimited, 0 = disabled
 
@@ -61,6 +65,8 @@ llm:
       timeout: 60
       temperature: 0.7
       max_tokens: 2048
+      # frequency_penalty: 0.0
+      # presence_penalty: 0.0
 
     # --- Cloud: OpenRouter (200+ models) ---
     # Set OPENROUTER_API_KEY in .env

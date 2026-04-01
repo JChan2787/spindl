@@ -733,6 +733,105 @@ pipeline:
         assert config.llm_config.provider_config["max_tokens"] == 1024
         assert config.llm_config.provider_config["top_p"] == 0.85
 
+    # --- NANO-108: Repetition penalty params ---
+
+    def test_save_to_yaml_updates_repeat_penalty(self, tmp_path: Path) -> None:
+        """save_to_yaml persists repeat_penalty under llm provider section."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.llm_config.provider_config["repeat_penalty"] = 1.5
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "repeat_penalty: 1.5" in content
+
+    def test_save_to_yaml_updates_repeat_last_n(self, tmp_path: Path) -> None:
+        """save_to_yaml persists repeat_last_n under llm provider section."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.llm_config.provider_config["repeat_last_n"] = 128
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "repeat_last_n: 128" in content
+
+    def test_save_to_yaml_updates_frequency_penalty(self, tmp_path: Path) -> None:
+        """save_to_yaml persists frequency_penalty under llm provider section."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.llm_config.provider_config["frequency_penalty"] = 0.5
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "frequency_penalty: 0.5" in content
+
+    def test_save_to_yaml_updates_presence_penalty(self, tmp_path: Path) -> None:
+        """save_to_yaml persists presence_penalty under llm provider section."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.llm_config.provider_config["presence_penalty"] = -0.3
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "presence_penalty: -0.3" in content
+
+    def test_save_to_yaml_defaults_for_missing_repetition_params(self, tmp_path: Path) -> None:
+        """save_to_yaml writes defaults when repetition params not in provider_config."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "repeat_penalty: 1.1" in content
+        assert "repeat_last_n: 64" in content
+        assert "frequency_penalty: 0.0" in content
+        assert "presence_penalty: 0.0" in content
+
 
 class TestSaveToYamlStimuliPrompt:
     """Tests for save_to_yaml patience prompt persistence."""

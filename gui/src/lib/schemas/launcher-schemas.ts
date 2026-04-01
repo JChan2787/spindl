@@ -16,6 +16,10 @@ const timeoutSchema = z.number().min(1);
 const temperatureSchema = z.number().min(0).max(2);
 const contextSizeSchema = z.number().int().min(1);
 const maxTokensSchema = z.number().int().min(1);
+const repeatPenaltySchema = z.number().min(0).max(2);
+const repeatLastNSchema = z.number().int().min(0).max(2048);
+const frequencyPenaltySchema = z.number().min(-2).max(2);
+const presencePenaltySchema = z.number().min(-2).max(2);
 
 // ============================================
 // Sub-Config Schemas
@@ -36,6 +40,10 @@ export const LLMLocalConfigSchema = z.object({
   temperature: temperatureSchema.default(0.7),
   maxTokens: maxTokensSchema.default(256),
   topP: z.number().min(0).max(1).default(0.95),
+  repeatPenalty: repeatPenaltySchema.default(1.1),
+  repeatLastN: repeatLastNSchema.default(64),
+  frequencyPenalty: frequencyPenaltySchema.default(0.0),
+  presencePenalty: presencePenaltySchema.default(0.0),
   reasoningFormat: z.string().optional().default(""),
   reasoningBudget: z.number().optional().default(-1),
 });
@@ -49,6 +57,8 @@ export const LLMCloudConfigSchema = z.object({
   timeout: timeoutSchema.default(60),
   temperature: temperatureSchema.default(0.7),
   maxTokens: maxTokensSchema.default(256),
+  frequencyPenalty: frequencyPenaltySchema.default(0.0),
+  presencePenalty: presencePenaltySchema.default(0.0),
 });
 
 export const VLMLocalConfigSchema = z.object({

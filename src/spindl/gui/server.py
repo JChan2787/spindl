@@ -1594,11 +1594,15 @@ class GUIServer:
 
         @self.sio.event
         async def set_generation_params(sid: str, data: dict) -> None:
-            """Client updates generation parameters at runtime (NANO-053)."""
+            """Client updates generation parameters at runtime (NANO-053, NANO-108)."""
             if self._orchestrator:
                 temperature = ...
                 max_tokens = ...
                 top_p = ...
+                repeat_penalty = ...
+                repeat_last_n = ...
+                frequency_penalty = ...
+                presence_penalty = ...
                 updated = False
 
                 if "temperature" in data:
@@ -1616,20 +1620,48 @@ class GUIServer:
                     if 0.0 <= val <= 1.0:
                         top_p = val
                         updated = True
+                if "repeat_penalty" in data:
+                    val = float(data["repeat_penalty"])
+                    if 0.0 <= val <= 2.0:
+                        repeat_penalty = val
+                        updated = True
+                if "repeat_last_n" in data:
+                    val = int(data["repeat_last_n"])
+                    if 0 <= val <= 2048:
+                        repeat_last_n = val
+                        updated = True
+                if "frequency_penalty" in data:
+                    val = float(data["frequency_penalty"])
+                    if -2.0 <= val <= 2.0:
+                        frequency_penalty = val
+                        updated = True
+                if "presence_penalty" in data:
+                    val = float(data["presence_penalty"])
+                    if -2.0 <= val <= 2.0:
+                        presence_penalty = val
+                        updated = True
 
                 if updated:
                     self._orchestrator.update_generation_params(
                         temperature=temperature,
                         max_tokens=max_tokens,
                         top_p=top_p,
+                        repeat_penalty=repeat_penalty,
+                        repeat_last_n=repeat_last_n,
+                        frequency_penalty=frequency_penalty,
+                        presence_penalty=presence_penalty,
                     )
 
                     pc = self._orchestrator._config.llm_config.provider_config
                     print(
                         f"[GUI] Generation params: "
-                        f"temp={pc.get('temperature')}, "
-                        f"max_tokens={pc.get('max_tokens')}, "
-                        f"top_p={pc.get('top_p')}",
+                        f"temp={pc.get('temperature', 0.7)}, "
+                        f"max_tokens={pc.get('max_tokens', 256)}, "
+                        f"top_p={pc.get('top_p', 0.95)}, "
+                        f"repeat_penalty={pc.get('repeat_penalty', 1.1)}, "
+                        f"repeat_last_n={pc.get('repeat_last_n', 64)}, "
+                        f"freq_penalty={pc.get('frequency_penalty', 0.0)}, "
+                        f"pres_penalty={pc.get('presence_penalty', 0.0)}",
                         flush=True,
                     )
 
@@ -1649,6 +1681,10 @@ class GUIServer:
                             "temperature": pc.get("temperature", 0.7),
                             "max_tokens": pc.get("max_tokens", 256),
                             "top_p": pc.get("top_p", 0.95),
+                            "repeat_penalty": pc.get("repeat_penalty", 1.1),
+                            "repeat_last_n": pc.get("repeat_last_n", 64),
+                            "frequency_penalty": pc.get("frequency_penalty", 0.0),
+                            "presence_penalty": pc.get("presence_penalty", 0.0),
                             "persisted": persisted,
                         },
                         to=sid,
@@ -4241,6 +4277,10 @@ class GUIServer:
                     "temperature": config.llm_config.provider_config.get("temperature", 0.7),
                     "max_tokens": config.llm_config.provider_config.get("max_tokens", 256),
                     "top_p": config.llm_config.provider_config.get("top_p", 0.95),
+                    "repeat_penalty": config.llm_config.provider_config.get("repeat_penalty", 1.1),
+                    "repeat_last_n": config.llm_config.provider_config.get("repeat_last_n", 64),
+                    "frequency_penalty": config.llm_config.provider_config.get("frequency_penalty", 0.0),
+                    "presence_penalty": config.llm_config.provider_config.get("presence_penalty", 0.0),
                 },
                 "stimuli": self._build_stimuli_hydration(config.stimuli_config),
                 # NANO-065a: Tools runtime state

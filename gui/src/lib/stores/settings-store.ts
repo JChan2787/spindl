@@ -41,11 +41,15 @@ interface MemoryConfig {
   curation: CurationConfig;
 }
 
-// Generation parameters (NANO-053)
+// Generation parameters (NANO-053, NANO-108)
 export interface GenerationParamsConfig {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  repeat_penalty: number;
+  repeat_last_n: number;
+  frequency_penalty: number;
+  presence_penalty: number;
 }
 
 // Prompt injection wrapper config (NANO-045d + NANO-052 follow-up)
@@ -329,6 +333,10 @@ const DEFAULT_GENERATION: GenerationParamsConfig = {
   temperature: 0.7,
   max_tokens: 256,
   top_p: 0.95,
+  repeat_penalty: 1.1,
+  repeat_last_n: 64,
+  frequency_penalty: 0.0,
+  presence_penalty: 0.0,
 };
 
 const DEFAULT_AVATAR: AvatarRuntimeConfig = {
@@ -600,7 +608,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
       curation: { ...DEFAULT_CURATION, ...((config.settings?.memory as any)?.curation ?? {}) },
     },
     promptConfig: config.settings?.prompt ?? DEFAULT_PROMPT,
-    generationConfig: config.settings?.generation ?? DEFAULT_GENERATION,
+    generationConfig: { ...DEFAULT_GENERATION, ...(config.settings?.generation ?? {}) },
     stimuliConfig: { ...DEFAULT_STIMULI, ...(config.settings?.stimuli ?? {}) },
     toolsConfig: config.settings?.tools
       ? {

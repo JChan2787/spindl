@@ -53,6 +53,10 @@ class LlamaProvider(LLMProvider):
         self._default_temperature: float = 0.7
         self._default_max_tokens: int = 256
         self._default_top_p: float = 0.95
+        self._default_repeat_penalty: float = 1.1
+        self._default_repeat_last_n: int = 64
+        self._default_frequency_penalty: float = 0.0
+        self._default_presence_penalty: float = 0.0
         self._model_name: str = "llama.cpp"
         self._context_length: Optional[int] = None
         self._unified_vision: bool = False  # NANO-087: unified vision slot pinning
@@ -78,6 +82,10 @@ class LlamaProvider(LLMProvider):
         self._default_temperature = config.get("temperature", 0.7)
         self._default_max_tokens = config.get("max_tokens", 256)
         self._default_top_p = config.get("top_p", 0.95)
+        self._default_repeat_penalty = config.get("repeat_penalty", 1.1)
+        self._default_repeat_last_n = config.get("repeat_last_n", 64)
+        self._default_frequency_penalty = config.get("frequency_penalty", 0.0)
+        self._default_presence_penalty = config.get("presence_penalty", 0.0)
         self._unified_vision = config.get("unified_vision", False)  # NANO-087
 
         # Verify connection and get model info
@@ -202,6 +210,10 @@ class LlamaProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "top_p": kwargs.get("top_p", self._default_top_p),
+            "repeat_penalty": kwargs.get("repeat_penalty", self._default_repeat_penalty),
+            "repeat_last_n": kwargs.get("repeat_last_n", self._default_repeat_last_n),
+            "frequency_penalty": kwargs.get("frequency_penalty", self._default_frequency_penalty),
+            "presence_penalty": kwargs.get("presence_penalty", self._default_presence_penalty),
         }
 
         # Tool calling support
