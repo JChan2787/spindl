@@ -481,6 +481,28 @@ Once credentials are set, the **Twitch Chat** card appears on the Dashboard:
 
 When Twitch chat is active and the stimuli engine is enabled, incoming chat messages accumulate in the buffer. On each LLM turn, the buffered messages are formatted using the prompt template and injected as a prompt block — visible in the Prompt Workshop alongside other blocks like persona, scenario, and memories.
 
+### Addressing Others (Stream Deck)
+
+When you're streaming and need to talk to chat, a mod, Discord, or someone in the room, the character normally interprets your speech as directed at it. The **Addressing Others** system solves this with a hold-to-suppress button overlay.
+
+**How it works:**
+1. Enable **Stimuli** on the Dashboard
+2. In the **Addressing Others** section, configure your contexts — each one gets a label (shown on the button) and a custom prompt (injected after you release)
+3. Enable the **Stream Deck** toggle in **Settings** → **Avatar** to spawn the overlay window
+4. Hold a button while talking to someone else — the character suppresses voice responses
+5. Release the button — the character gets your speech with the context prompt, e.g., "The User just spoke to their Twitch mods"
+
+| Setting | What it does |
+|---------|-------------|
+| **+ Add** | Add a new addressing context (new button in Stream Deck) |
+| **Label** | Short name shown on the Stream Deck button (e.g., "Chat", "Mods", "Discord") |
+| **Prompt** | Custom prompt injected into the `### Context` block on release. Leave empty for the default fallback |
+| **Delete** (trash icon) | Remove a context. First context is permanent and cannot be removed |
+
+The Stream Deck window auto-resizes to fit the number of buttons. Multiple contexts can be configured, but only one can be active at a time — holding a second button releases the first. Context configs persist across restarts.
+
+**First-time setup:** If the Tauri overlay apps haven't been compiled yet, the Settings page shows an **Install Overlay Apps** button instead of toggles. Click it to build all three overlays (avatar, subtitles, stream deck) with live progress. This is a one-time process — the compiled binaries persist.
+
 ## Sessions
 
 ![Sessions Page](images/settings_sessions-01.png)
@@ -782,6 +804,7 @@ Configure the avatar and subtitle overlay in **Settings** → **Avatar**:
 | **Expression Fade Delay** | How long (in seconds) the avatar holds its current facial expression and body animation after TTS ends before fading back to neutral/idle. Without this delay, expressions snap to neutral the instant the character stops talking — the delay lets the mood linger naturally |
 | **Avatar Always On Top** | Keeps the avatar renderer window above all other windows. Useful when you want the avatar visible while working in other apps or during a stream |
 | **Subtitle Always On Top** | Same as above, but for the subtitle overlay window |
+| **Show Stream Deck** | Spawns the Stream Deck overlay window with addressing-others buttons. See [Addressing Others](#addressing-others-stream-deck) for configuration |
 
 ## Emotion Classifier (Optional)
 

@@ -2,7 +2,7 @@
 
 A local-first AI character engine. Give your character a voice, a face, memory, and screen vision; all running on your hardware. Stream them on Twitch with OBS, or just talk. Technically speaking, it can run in your machine, otherwise this app provides cloud provider options (OpenRouter mostly).
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Tests: 2,381+](https://img.shields.io/badge/tests-2%2C381%2B-brightgreen)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Tests: 2,400+](https://img.shields.io/badge/tests-2%2C400%2B-brightgreen)
 
 ![SpindL Dashboard](docs/images/dashboard-01.png)
 
@@ -19,6 +19,7 @@ You talk, it listens, it talks back. The whole voice loop runs locally — mic �
 - **Avatar** — Standalone Tauri 2 + Three.js desktop overlay. Loads VRM models, does lipsync, tracks your cursor, and reacts with facial expressions and body animations based on what it's saying. Emotion classifier picks the mood, which drives both per-character expression composites (custom blend shape recipes) and base animation slots (idle, happy, sad, angry, curious) using Mixamo FBX clips retargeted to VRM skeletons. Assign different VRM models and animation sets per character.
 - **Stream Subtitles** — Separate Tauri 2 window for OBS compositing. Typewriter text synced to TTS duration, chroma key backgrounds, configurable fade. Just window-capture it in OBS.
 - **Stimuli** — The character doesn't just wait for you. It'll start talking on its own if you go idle, and it reads Twitch chat. You can write your own stimulus modules too.
+- **Stream Deck** — Standalone Tauri 2 overlay with hold-to-activate buttons. Signal when you're talking to chat, mods, Discord, or someone in the room — the character suppresses responses while held and gets context-aware prompting on release. Multiple named contexts, each with its own button and custom prompt. Dynamic add/remove from the dashboard.
 - **Prompt Workshop** — Block-based prompt editor. See exactly how many tokens each section costs, reorder them, override individual blocks with your own text, wrap them with injection prefixes/suffixes.
 - **Generation Control** — Temperature, top-p, max tokens, repeat penalty, repeat window, frequency penalty, and presence penalty — all adjustable from the dashboard mid-conversation. Values persist across restarts.
 - **Runtime Swapping** — Switch LLM or VLM providers mid-conversation from the dashboard. No restart needed.
@@ -37,7 +38,9 @@ flowchart TD
     C -->|mood| G[Avatar Bridge]
     G -->|Socket.IO| H[SpindL Avatar]
     G -->|Socket.IO| I[SpindL Subtitles]
+    G -->|Socket.IO| M[SpindL Stream Deck]
     J[Web Dashboard] -->|"text + controls"| C
+    M -->|"addressing start/stop"| C
     C -.->|query| K[Memory]
     C -.->|capture| L[Screen Vision]
 ```
@@ -63,7 +66,7 @@ One launcher script starts everything. One config file controls it all.
 - A GGUF model file (Qwen3, Llama 3, etc.)
 
 **Optional:**
-- [Rust](https://rustup.rs/) 1.75+ (required for SpindL Avatar and SpindL Subtitles — Tauri 2 apps)
+- [Rust](https://rustup.rs/) 1.75+ (required for SpindL Avatar, SpindL Subtitles, and SpindL Stream Deck — Tauri 2 apps. First-time build via Install button in Settings, ~6.5GB disk for shared Cargo workspace)
 - A VLM-capable model (Gemma 3, LLaVA, etc.) or cloud VLM API key
 - An embedding model (for memory/RAG — e.g., nomic-embed-text-v1.5)
 
@@ -150,7 +153,9 @@ spindl/
 │       ├── components/       #   100+ feature components + Radix UI design system
 │       └── lib/              #   11 Zustand stores, Socket.IO client, Zod schemas
 ├── spindl-avatar/            # Standalone avatar renderer (Tauri 2 + Three.js + VRM)
-├── spindl-subtitles/            # Stream subtitle overlay (Tauri 2, OBS-compositable)
+├── spindl-subtitles/         # Stream subtitle overlay (Tauri 2, OBS-compositable)
+├── spindl-stream-deck/       # Addressing-others button overlay (Tauri 2, hold-to-activate)
+├── Cargo.toml                # Workspace root — shared target/ across all Tauri apps
 ├── tests/                    # 116 unit test modules (~29,000 lines)
 ├── tests_e2e/                # 8 E2E test modules (Playwright, 5-config matrix)
 ├── scripts/                  # Launcher, migration, standalone GUI

@@ -10,6 +10,7 @@ Guide for AI coding assistants working in the SpindL codebase.
 main (protected, always green CI)
  └── NANO-108-repetition-params              ← feature branch
  └── NANO-109-dual-output-tts-cleanup       ← feature branch
+ └── NANO-110-addressing-others-stream-deck ← feature branch
  └── NANO-082-e2e-launch-matrix             ← feature branch
 ```
 
@@ -73,6 +74,8 @@ scripts/                dev.py (unified launcher), launcher.py (headless), stand
 config/                 spindl.yaml.example (runtime config template)
 spindl-avatar/          Standalone avatar renderer (Tauri 2 + Three.js + VRM)
 spindl-subtitles/       Stream subtitle overlay (Tauri 2, OBS-compositable)
+spindl-stream-deck/     Addressing-others button overlay (Tauri 2, hold-to-activate)
+Cargo.toml              Workspace root — shared target/ across all 3 Tauri apps
 characters/             User character data (gitignored)
 ```
 
@@ -97,7 +100,7 @@ characters/             User character data (gitignored)
 | `characters/` | SillyTavern V2 card models | `Character` (Pydantic), `CharacterLoader` |
 | `codex/` | Lorebook/character book | `CodexActivationManager`, `CodexManager` |
 | `tools/` | Function calling framework | `Tool` (ABC), `ToolExecutor`, `ToolRegistry` |
-| `stimuli/` | Autonomous behavior engine (idle timer, Twitch chat) | `StimulusModule` (ABC), `StimuliEngine`, `PatienceModule`, `TwitchModule` |
+| `stimuli/` | Autonomous behavior engine (idle timer, Twitch chat, addressing-others) | `StimulusModule` (ABC), `StimuliEngine`, `PatienceModule`, `TwitchModule` |
 | `vts/` | VTubeStudio WebSocket driver | `VTSDriver` |
 | `launcher/` | Service process management | `ServiceRunner`, `HealthChecker`, `LogAggregator` |
 | `gui/` | Socket.IO server, response models | Socket handlers in `server.py`, `response_models.py` (Pydantic) |
@@ -206,6 +209,20 @@ Standalone Tauri 2 app (`spindl-subtitles/`). Connects to the orchestrator via S
 
 **Process management:** Spawned/killed by `GUIServer._subtitle_spawn()` / `_subtitle_kill()`. Auto-spawns on startup when `subtitles_enabled: true` in config. Uses `kill_process_tree` (psutil) for clean shutdown.
 
+### Stream Deck Overlay
+
+Standalone Tauri 2 app (`spindl-stream-deck/`). Dynamic button grid — one hold-to-activate button per addressing-others context. Connects to the orchestrator via Socket.IO on port 8765. Emits `addressing_others_start { context_id }` on hold, `addressing_others_stop` on release. Receives `stimuli_config_updated` for button grid rebuilds, `addressing_others_state` for multi-client sync, and `config_loaded` for initial hydration.
+
+**Addressing-others pipeline:** `set_addressing_others()` stops TTS + suppresses voice pipeline + pauses stimuli. `clear_addressing_others()` resolves a prompt from the active context config and stores it as a one-shot. Next pipeline call picks up the prompt via `BuildContext.addressing_others_prompt` → `ModalityContextProvider` appends it to the `### Context` block. One-shot is consumed after use.
+
+**Cargo workspace:** Root `Cargo.toml` declares all three Tauri apps as workspace members. Shared `target/` directory (~6.5GB total). `cargo build -p spindl-stream-deck --release` builds only the requested crate, reuses cached shared deps.
+
+**Tauri 2 capabilities:** Each Tauri app needs a `src-tauri/capabilities/default.json` granting window API permissions (e.g., `core:window:allow-set-size`). Without it, JS calls to `win.setSize()` are silently denied.
+
+**First-time install:** Settings page detects missing binaries via `check_tauri_install`. Shows Install button with live crate-by-crate progress. Builds all three apps sequentially — first app compiles shared deps, subsequent apps reuse cache. Toggles disabled until install completes.
+
+**Process management:** Spawned/killed by `GUIServer._stream_deck_spawn()` / `_stream_deck_kill()`. Auto-spawns on startup when `stream_deck_enabled: true` in config. Runs as compiled release binary (no Vite dev server needed — unlike avatar/subtitle which need Vite for runtime VRM/FBX loading).
+
 ### Process Shutdown Chain
 
 `dev.py` manages the full process tree. On Ctrl+C or dashboard Shutdown button:
@@ -213,7 +230,7 @@ Standalone Tauri 2 app (`spindl-subtitles/`). Connects to the orchestrator via S
 1. **Unix:** SIGINT → backend `finally` block → `shutdown_services()` (orchestrator, avatar, subtitles, services) → uvicorn exits → `dev.py` detects exit → tree-kills frontend
 2. **Windows:** `dev.py` uses `kill_process_tree` (psutil, `recursive=True`) to walk and terminate the entire process tree — backend, all services, avatar, subtitles, frontend
 
-`shutdown_services()` and `_shutdown_backend_async()` both call `_avatar_kill()` and `_subtitle_kill()` as defense-in-depth.
+`shutdown_services()` and `_shutdown_backend_async()` both call `_avatar_kill()`, `_subtitle_kill()`, and `_stream_deck_kill()` as defense-in-depth.
 
 ## Frontend Architecture
 
@@ -230,7 +247,7 @@ Standalone Tauri 2 app (`spindl-subtitles/`). Connects to the orchestrator via S
 | `/memories` | Memory curation — general, flashcards, summaries, search |
 | `/codex` | Knowledge base — global + per-character lorebook entries |
 | `/sessions` | Conversation history viewer |
-| `/settings` | Configuration — personas, VAD, pipeline settings, Twitch credentials, avatar/subtitle toggles |
+| `/settings` | Configuration — personas, VAD, pipeline settings, Twitch credentials, avatar/subtitle/stream-deck toggles, Tauri install flow |
 
 ### State Management
 
@@ -247,7 +264,7 @@ Standalone Tauri 2 app (`spindl-subtitles/`). Connects to the orchestrator via S
 | `memory-store` | Memory collections (general/flashcards/summaries), search, CRUD |
 | `prompt-store` | Current prompt snapshot (messages + token breakdown) |
 | `block-editor-store` | Block config editing state, drag-to-reorder, field overrides |
-| `settings-store` | VAD, pipeline, memory, generation params, stimuli, tools, LLM/VLM runtime, avatar config (emotion classifier, fade delay, subtitles, connection status) |
+| `settings-store` | VAD, pipeline, memory, generation params, stimuli (patience, twitch, addressing-others contexts), tools, LLM/VLM runtime, avatar config (emotion classifier, fade delay, subtitles, stream deck, Tauri install state, connection status) |
 | `session-store` | Conversation history, session resume/delete/summarize |
 
 **Data flow:** `SocketProvider` (root context) listens to 100+ socket events → calls Zustand store setters → components re-render via selectors.
@@ -333,7 +350,7 @@ Key sections:
 - `services:` — per-service config (enabled, platform, command, health_check, depends_on)
 - `providers:` — LLM, STT, TTS, VLM provider settings
 - `memory:` — enabled, relevance_threshold, top_k, reflection_interval, reflection_prompt, reflection_system_message, reflection_delimiter, scoring_w_relevance, scoring_w_recency
-- `stimuli:` — enabled, patience config (idle threshold, message count)
+- `stimuli:` — enabled, patience config (enabled, seconds, prompt), twitch config (enabled, channel, credentials), addressing_others config (contexts list with id/label/prompt)
 - `avatar:` — enabled, emotion_classifier, show_emotion_in_chat, confidence_threshold, expression_fade_delay
 - `vtubestudio:` — enabled, host, port, plugin name
 - `prompt_blocks:` — per-block overrides (order, enabled, content)
