@@ -116,6 +116,7 @@ export const AvatarConfigSchema = z.object({
   expression_fade_delay: z.number().min(0).max(10).default(1.0),
   subtitles_enabled: z.boolean().default(false),
   subtitle_fade_delay: z.number().min(0).max(10).default(1.5),
+  stream_deck_enabled: z.boolean().default(false), // NANO-110
   avatar_always_on_top: z.boolean().default(true),
   subtitle_always_on_top: z.boolean().default(true),
 });
