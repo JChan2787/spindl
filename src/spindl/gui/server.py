@@ -4906,6 +4906,53 @@ class GUIServer:
     # NANO-097: Avatar Process Management
     # ============================================================
 
+    @staticmethod
+    def _ensure_tauri_built(app_dir: Path, app_name: str) -> bool:
+        """
+        Ensure a Tauri app binary exists, building if necessary (NANO-110).
+
+        First-time users cloning the repo won't have compiled binaries.
+        This runs `cargo build` with visible output so they see progress
+        instead of a silent hang.
+
+        Args:
+            app_dir: Root of the Tauri app (e.g., spindl-avatar/).
+            app_name: Human-readable name for log messages.
+
+        Returns:
+            True if binary is ready, False if build failed.
+        """
+        import platform
+        ext = ".exe" if platform.system() == "Windows" else ""
+        cargo_name = app_dir.name  # e.g., "spindl-avatar"
+        binary = app_dir / "src-tauri" / "target" / "debug" / f"{cargo_name}{ext}"
+
+        if binary.exists():
+            return True
+
+        # Need to build — run cargo build with visible output
+        print(
+            f"[GUI] {app_name} binary not found — building (first-time only)...",
+            flush=True,
+        )
+        try:
+            result = subprocess.run(
+                ["cargo", "build"],
+                cwd=str(app_dir / "src-tauri"),
+                timeout=600,  # 10 minutes max
+            )
+            if result.returncode != 0:
+                print(f"[GUI] {app_name} cargo build failed (exit {result.returncode})", flush=True)
+                return False
+            print(f"[GUI] {app_name} build complete", flush=True)
+            return True
+        except subprocess.TimeoutExpired:
+            print(f"[GUI] {app_name} cargo build timed out", flush=True)
+            return False
+        except Exception as e:
+            print(f"[GUI] {app_name} cargo build error: {e}", flush=True)
+            return False
+
     async def _avatar_spawn(self) -> None:
         """Spawn the avatar renderer if no avatar client is already connected."""
         if self.has_avatar_client:
@@ -4925,6 +4972,10 @@ class GUIServer:
         avatar_dir = project_root / "spindl-avatar"
         if not avatar_dir.exists():
             print(f"[GUI] Avatar directory not found: {avatar_dir}", flush=True)
+            return
+
+        # Ensure binary is built (first-time users)
+        if not self._ensure_tauri_built(avatar_dir, "Avatar"):
             return
 
         try:
@@ -4990,6 +5041,10 @@ class GUIServer:
             print(f"[GUI] Subtitle directory not found: {subtitle_dir}", flush=True)
             return
 
+        # Ensure binary is built (first-time users)
+        if not self._ensure_tauri_built(subtitle_dir, "Subtitle"):
+            return
+
         try:
             self._subtitle_process = subprocess.Popen(
                 ["npm", "run", "tauri", "dev"],
@@ -5050,6 +5105,10 @@ class GUIServer:
         deck_dir = project_root / "spindl-stream-deck"
         if not deck_dir.exists():
             print(f"[GUI] Stream Deck directory not found: {deck_dir}", flush=True)
+            return
+
+        # Ensure binary is built (first-time users)
+        if not self._ensure_tauri_built(deck_dir, "Stream Deck"):
             return
 
         try:
