@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "SpindL Stream Deck",
+  "version": "0.1.0",
+  "identifier": "com.spindl.streamdeck",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1421",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "deck",
+        "title": "SpindL Stream Deck",
+        "width": 220,
+        "height": 120,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "resizable": true,
+        "skipTaskbar": true,
+        "transparent": false,
+        "shadow": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "global-shortcut": {}
+  }
+}
