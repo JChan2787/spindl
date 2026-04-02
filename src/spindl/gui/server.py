@@ -5244,15 +5244,16 @@ class GUIServer:
             return
 
         # Check binary exists — install must happen first via Install button
-        binary = self._tauri_binary_path(avatar_dir)
-        if not binary:
+        if not self._tauri_binary_exists(avatar_dir):
             print("[GUI] Avatar binary not installed — use Install button", flush=True)
             return
 
+        # Avatar needs npm run tauri dev (Vite serves VRM/FBX assets at runtime)
         try:
             self._avatar_process = subprocess.Popen(
-                [str(binary)],
+                ["npm", "run", "tauri", "dev"],
                 cwd=str(avatar_dir),
+                shell=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -5312,15 +5313,16 @@ class GUIServer:
             return
 
         # Check binary exists — install must happen first via Install button
-        binary = self._tauri_binary_path(subtitle_dir)
-        if not binary:
+        if not self._tauri_binary_exists(subtitle_dir):
             print("[GUI] Subtitle binary not installed — use Install button", flush=True)
             return
 
+        # Subtitle needs npm run tauri dev (Vite serves assets at runtime)
         try:
             self._subtitle_process = subprocess.Popen(
-                [str(binary)],
+                ["npm", "run", "tauri", "dev"],
                 cwd=str(subtitle_dir),
+                shell=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
