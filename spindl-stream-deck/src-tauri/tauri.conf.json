@@ -4,10 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.spindl.streamdeck",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:1421",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
