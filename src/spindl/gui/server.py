@@ -4983,12 +4983,14 @@ class GUIServer:
         ext = ".exe" if platform.system() == "Windows" else ""
         cargo_name = app_dir.name
         project_root = app_dir.parent
-        workspace = project_root / "target" / "debug" / f"{cargo_name}{ext}"
-        legacy = app_dir / "src-tauri" / "target" / "debug" / f"{cargo_name}{ext}"
-        if workspace.exists():
-            return workspace
-        if legacy.exists():
-            return legacy
+        # Check release first (installed via Install button), then debug (dev builds)
+        for profile in ("release", "debug"):
+            workspace = project_root / "target" / profile / f"{cargo_name}{ext}"
+            if workspace.exists():
+                return workspace
+            legacy = app_dir / "src-tauri" / "target" / profile / f"{cargo_name}{ext}"
+            if legacy.exists():
+                return legacy
         return None
 
     def _tauri_binary_exists(self, app_dir: Path) -> bool:
@@ -5035,7 +5037,7 @@ class GUIServer:
 
             try:
                 proc = subprocess.Popen(
-                    ["cargo", "build", "-p", cargo_name],
+                    ["cargo", "build", "--release", "-p", cargo_name],
                     cwd=str(project_root),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -5165,7 +5167,7 @@ class GUIServer:
                 compiling_count = 0
                 try:
                     proc = subprocess.Popen(
-                        ["cargo", "build", "-p", cargo_name],
+                        ["cargo", "build", "--release", "-p", cargo_name],
                         cwd=str(project_root),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
