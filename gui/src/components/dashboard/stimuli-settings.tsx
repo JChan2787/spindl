@@ -263,7 +263,7 @@ export function StimuliSettings() {
                 disabled={!effectiveConfig.patience_enabled}
               />
 
-              <div className={`space-y-2${!effectiveConfig.patience_enabled ? " opacity-50 pointer-events-none" : ""}`}>
+              <div className="space-y-2">
                 <Label className="flex items-center gap-2 text-sm">
                   <MessageSquare className="h-3 w-3" />
                   Idle Prompt
@@ -274,7 +274,6 @@ export function StimuliSettings() {
                   onBlur={handlePatiencePromptBlur}
                   rows={3}
                   className="text-xs resize-none"
-                  disabled={!effectiveConfig.patience_enabled}
                   placeholder="Prompt sent when idle timer fires..."
                 />
               </div>

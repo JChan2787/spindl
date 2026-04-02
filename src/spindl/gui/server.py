@@ -2532,10 +2532,11 @@ class GUIServer:
                 stimuli_data = self._build_stimuli_hydration(cfg)
                 stimuli_data["persisted"] = persisted
 
+                # Broadcast to all clients (including Stream Deck) so
+                # context button grids rebuild when contexts are added/removed
                 await self.sio.emit(
                     "stimuli_config_updated",
                     stimuli_data,
-                    to=sid,
                 )
 
             if not self._orchestrator:

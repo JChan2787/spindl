@@ -80,10 +80,13 @@ export function connect(port: number = DEFAULT_PORT): void {
     onStateChanged?.(state);
   });
 
-  // Request config on connect so buttons hydrate
-  socket.on("config_loaded", () => {
-    // Config loaded means orchestrator is running — request stimuli config
-    socket!.emit("request_config", {});
+  // Hydrate contexts from config_loaded (sent on connect when orchestrator is running)
+  socket.on("config_loaded", (event: { settings?: { stimuli?: StimuliConfigEvent } }) => {
+    const contexts = event.settings?.stimuli?.addressing_others_contexts;
+    if (contexts) {
+      console.log(`[StreamDeck] Initial contexts from config_loaded: ${contexts.length}`);
+      onContextsUpdated?.(contexts);
+    }
   });
 }
 
