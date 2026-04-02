@@ -4977,15 +4977,23 @@ class GUIServer:
     # NANO-097: Avatar Process Management
     # ============================================================
 
-    def _tauri_binary_exists(self, app_dir: Path) -> bool:
-        """Check if a Tauri app binary exists (workspace or legacy path)."""
+    def _tauri_binary_path(self, app_dir: Path) -> Optional[Path]:
+        """Return the Tauri app binary path if it exists, else None."""
         import platform
         ext = ".exe" if platform.system() == "Windows" else ""
         cargo_name = app_dir.name
         project_root = app_dir.parent
-        binary = project_root / "target" / "debug" / f"{cargo_name}{ext}"
+        workspace = project_root / "target" / "debug" / f"{cargo_name}{ext}"
         legacy = app_dir / "src-tauri" / "target" / "debug" / f"{cargo_name}{ext}"
-        return binary.exists() or legacy.exists()
+        if workspace.exists():
+            return workspace
+        if legacy.exists():
+            return legacy
+        return None
+
+    def _tauri_binary_exists(self, app_dir: Path) -> bool:
+        """Check if a Tauri app binary exists (workspace or legacy path)."""
+        return self._tauri_binary_path(app_dir) is not None
 
     def _tauri_install_in_background(self, app_dir: Path, app_name: str) -> None:
         """
@@ -5108,11 +5116,53 @@ class GUIServer:
         def _build_all() -> None:
             building_re = re.compile(r"\[=*>?\s*\]\s+(\d+)/(\d+)")
 
+            npm = "npm.cmd" if platform.system() == "Windows" else "npm"
+
             for i, (app_dir, app_name) in enumerate(apps):
                 cargo_name = app_dir.name
                 project_root = app_dir.parent
 
                 label = f"({i + 1}/{len(apps)}) {app_name}"
+
+                # Step 1: Build frontend dist (npm run build = tsc + vite build)
+                dist_dir = app_dir / "dist"
+                if not dist_dir.exists():
+                    _emit("building", f"{label}: building frontend...")
+                    print(f"[GUI] {app_name}: building frontend dist...", flush=True)
+                    try:
+                        npm_result = subprocess.run(
+                            [npm, "run", "build"],
+                            cwd=str(app_dir),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=120,
+                        )
+                        if npm_result.returncode != 0:
+                            # Try npm install first, then build
+                            subprocess.run(
+                                [npm, "install"],
+                                cwd=str(app_dir),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=120,
+                            )
+                            npm_result = subprocess.run(
+                                [npm, "run", "build"],
+                                cwd=str(app_dir),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=120,
+                            )
+                            if npm_result.returncode != 0:
+                                print(f"[GUI] {app_name} frontend build failed", flush=True)
+                                _emit("failed", f"{app_name} frontend build failed.")
+                                return
+                    except Exception as e:
+                        print(f"[GUI] {app_name} frontend build error: {e}", flush=True)
+                        _emit("failed", f"{app_name} frontend build error.")
+                        return
+
+                # Step 2: Build Rust binary
                 _emit("building", f"Installing {label}...")
                 print(f"[GUI] Building {label}...", flush=True)
 
@@ -5196,15 +5246,15 @@ class GUIServer:
             return
 
         # Check binary exists — install must happen first via Install button
-        if not self._tauri_binary_exists(avatar_dir):
+        binary = self._tauri_binary_path(avatar_dir)
+        if not binary:
             print("[GUI] Avatar binary not installed — use Install button", flush=True)
             return
 
         try:
             self._avatar_process = subprocess.Popen(
-                ["npm", "run", "tauri", "dev"],
+                [str(binary)],
                 cwd=str(avatar_dir),
-                shell=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -5264,15 +5314,15 @@ class GUIServer:
             return
 
         # Check binary exists — install must happen first via Install button
-        if not self._tauri_binary_exists(subtitle_dir):
+        binary = self._tauri_binary_path(subtitle_dir)
+        if not binary:
             print("[GUI] Subtitle binary not installed — use Install button", flush=True)
             return
 
         try:
             self._subtitle_process = subprocess.Popen(
-                ["npm", "run", "tauri", "dev"],
+                [str(binary)],
                 cwd=str(subtitle_dir),
-                shell=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -5331,15 +5381,15 @@ class GUIServer:
             return
 
         # Check binary exists — install must happen first via Install button
-        if not self._tauri_binary_exists(deck_dir):
+        binary = self._tauri_binary_path(deck_dir)
+        if not binary:
             print("[GUI] Stream Deck binary not installed — use Install button", flush=True)
             return
 
         try:
             self._stream_deck_process = subprocess.Popen(
-                ["npm", "run", "tauri", "dev"],
+                [str(binary)],
                 cwd=str(deck_dir),
-                shell=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
