@@ -30,7 +30,7 @@ export type OnConnectionChanged = (connected: boolean) => void;
 
 // ── Client ───────────────────────────────────────────────────────────
 
-const DEFAULT_PORT = 7860;
+const DEFAULT_PORT = 8765;
 const RECONNECT_DELAY = 2000;
 
 let socket: Socket | null = null;
