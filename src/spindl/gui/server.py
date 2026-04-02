@@ -2564,21 +2564,18 @@ class GUIServer:
             """Trigger background build of all Tauri app binaries (NANO-110)."""
             project_root = Path(__file__).parent.parent.parent.parent
 
-            # Build whichever apps are missing — shared workspace means first
-            # build compiles all deps, subsequent builds are near-instant
             apps = [
                 (project_root / "spindl-avatar", "Avatar"),
                 (project_root / "spindl-subtitles", "Subtitle"),
                 (project_root / "spindl-stream-deck", "Stream Deck"),
             ]
 
-            for app_dir, app_name in apps:
-                if app_dir.exists() and not self._tauri_binary_exists(app_dir):
-                    self._tauri_install_in_background(app_dir, app_name)
-                    # Only build one at a time — workspace lock prevents parallel cargo
-                    break
-            else:
-                # All installed already
+            missing = [
+                (d, n) for d, n in apps
+                if d.exists() and not self._tauri_binary_exists(d)
+            ]
+
+            if not missing:
                 await self.sio.emit("tauri_build_status", {
                     "app": "all",
                     "status": "ready",
@@ -2586,6 +2583,12 @@ class GUIServer:
                     "progress": 0,
                     "total": 0,
                 })
+                return
+
+            # Build all missing apps sequentially in one background thread.
+            # Shared workspace means first build compiles all deps,
+            # subsequent builds are near-instant (seconds).
+            self._tauri_install_all_in_background(missing)
 
         # ============================================================
         # NANO-110: Addressing Others — Socket Handlers
@@ -5072,6 +5075,103 @@ class GUIServer:
                 _emit("failed", f"{app_name} build error: {e}")
 
         thread = threading.Thread(target=_build, daemon=True, name=f"tauri-build-{app_key}")
+        thread.start()
+
+    def _tauri_install_all_in_background(self, apps: list[tuple[Path, str]]) -> None:
+        """
+        Build multiple Tauri apps sequentially in a background thread (NANO-110).
+
+        First app compiles all shared deps (~2-3 min). Subsequent apps reuse
+        the cached deps and compile in seconds. Emits 'ready' only after ALL
+        apps are built.
+        """
+        import asyncio
+        import platform
+        import re
+        import threading
+
+        ext = ".exe" if platform.system() == "Windows" else ""
+
+        def _emit(status: str, message: str, progress: int = 0, total: int = 0) -> None:
+            if self._event_loop and self.sio:
+                asyncio.run_coroutine_threadsafe(
+                    self.sio.emit("tauri_build_status", {
+                        "app": "all",
+                        "status": status,
+                        "message": message,
+                        "progress": progress,
+                        "total": total,
+                    }),
+                    self._event_loop,
+                )
+
+        def _build_all() -> None:
+            building_re = re.compile(r"\[=*>?\s*\]\s+(\d+)/(\d+)")
+
+            for i, (app_dir, app_name) in enumerate(apps):
+                cargo_name = app_dir.name
+                project_root = app_dir.parent
+
+                label = f"({i + 1}/{len(apps)}) {app_name}"
+                _emit("building", f"Installing {label}...")
+                print(f"[GUI] Building {label}...", flush=True)
+
+                compiling_count = 0
+                try:
+                    proc = subprocess.Popen(
+                        ["cargo", "build", "-p", cargo_name],
+                        cwd=str(project_root),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    )
+
+                    for line in iter(proc.stdout.readline, ""):
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        m = building_re.search(line)
+                        if m:
+                            current, total = int(m.group(1)), int(m.group(2))
+                            _emit("building", f"{label}: crate {current}/{total}", current, total)
+                        elif "Compiling" in line:
+                            compiling_count += 1
+                            parts = line.split("Compiling")
+                            crate = parts[-1].strip().split(" ")[0] if len(parts) > 1 else "..."
+                            _emit("building", f"{label}: {crate}", compiling_count, 0)
+
+                        print(f"[GUI] {app_name} build: {line}", flush=True)
+
+                    proc.stdout.close()
+                    ret = proc.wait(timeout=600)
+
+                    if ret != 0:
+                        print(f"[GUI] {app_name} build failed (exit {ret})", flush=True)
+                        _emit("failed", f"{app_name} build failed.")
+                        return
+
+                    print(f"[GUI] {app_name} build complete", flush=True)
+
+                except subprocess.TimeoutExpired:
+                    print(f"[GUI] {app_name} build timed out", flush=True)
+                    _emit("failed", f"{app_name} build timed out.")
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    return
+                except Exception as e:
+                    print(f"[GUI] {app_name} build error: {e}", flush=True)
+                    _emit("failed", f"{app_name} build error: {e}")
+                    return
+
+            # All done
+            _emit("ready", "All overlay apps installed successfully.")
+            print("[GUI] All Tauri apps built successfully", flush=True)
+
+        thread = threading.Thread(target=_build_all, daemon=True, name="tauri-install-all")
         thread.start()
 
     async def _avatar_spawn(self) -> None:
