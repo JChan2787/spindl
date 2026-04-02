@@ -496,6 +496,8 @@ export interface TauriBuildStatusEvent {
   app: string; // "avatar", "subtitle", "stream_deck"
   status: "building" | "ready" | "failed";
   message: string;
+  progress?: number; // current crate count
+  total?: number; // total crate count (0 if unknown)
 }
 
 // NANO-110: Addressing-others context

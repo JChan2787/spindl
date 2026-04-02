@@ -66,7 +66,7 @@ export function AvatarSettings() {
           {avatarConfig.avatar_building && (
             <span className="flex items-center gap-1 ml-1">
               <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span className="text-xs text-primary">Building (first time only)...</span>
+              <span className="text-xs text-primary">{avatarConfig.avatar_build_message || "Building..."}</span>
             </span>
           )}
           {avatarConfig.enabled && !avatarConfig.avatar_building && (
@@ -104,7 +104,7 @@ export function AvatarSettings() {
           {avatarConfig.subtitle_building && (
             <span className="flex items-center gap-1 ml-1">
               <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span className="text-xs text-primary">Building...</span>
+              <span className="text-xs text-primary">{avatarConfig.subtitle_build_message || "Building..."}</span>
             </span>
           )}
         </Label>
@@ -131,7 +131,7 @@ export function AvatarSettings() {
           {avatarConfig.stream_deck_building && (
             <span className="flex items-center gap-1 ml-1">
               <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span className="text-xs text-primary">Building...</span>
+              <span className="text-xs text-primary">{avatarConfig.stream_deck_build_message || "Building..."}</span>
             </span>
           )}
         </Label>

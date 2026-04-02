@@ -3162,6 +3162,31 @@ class GUIServer:
                     else:
                         self._stream_deck_kill()
 
+            else:
+                # Pre-launch: orchestrator not running yet, but Tauri app
+                # builds and spawns don't need services. Handle toggle-only
+                # fields so users can build/launch windows from settings page
+                # before going through the launcher flow.
+                enabled = data.get("enabled")
+                subtitles_enabled = data.get("subtitles_enabled")
+                stream_deck_enabled = data.get("stream_deck_enabled")
+
+                if enabled is not None:
+                    if bool(enabled):
+                        await self._avatar_spawn()
+                    else:
+                        self._avatar_kill()
+                if subtitles_enabled is not None:
+                    if bool(subtitles_enabled):
+                        await self._subtitle_spawn()
+                    else:
+                        self._subtitle_kill()
+                if stream_deck_enabled is not None:
+                    if bool(stream_deck_enabled):
+                        await self._stream_deck_spawn()
+                    else:
+                        self._stream_deck_kill()
+
         # ============================================================
         # NANO-099: Avatar Rescan Animations — Socket Handler
         # ============================================================
@@ -4924,6 +4949,7 @@ class GUIServer:
         """
         import asyncio
         import platform
+        import re
         ext = ".exe" if platform.system() == "Windows" else ""
         cargo_name = app_dir.name  # e.g., "spindl-avatar"
 
@@ -4944,49 +4970,72 @@ class GUIServer:
         )
         app_key = app_name.lower().replace(" ", "_")
 
-        # Emit building status to all connected clients
-        if self._event_loop and self.sio:
-            asyncio.run_coroutine_threadsafe(
-                self.sio.emit("tauri_build_status", {
-                    "app": app_key,
-                    "status": "building",
-                    "message": f"Building {app_name} (first time only — this may take a few minutes)...",
-                }),
-                self._event_loop,
-            )
-
-        try:
-            # Build via workspace — compiles only what's needed, shares deps
-            result = subprocess.run(
-                ["cargo", "build", "-p", cargo_name],
-                cwd=str(project_root),
-                timeout=600,  # 10 minutes max
-            )
-            if result.returncode != 0:
-                print(f"[GUI] {app_name} cargo build failed (exit {result.returncode})", flush=True)
-                if self._event_loop and self.sio:
-                    asyncio.run_coroutine_threadsafe(
-                        self.sio.emit("tauri_build_status", {
-                            "app": app_key,
-                            "status": "failed",
-                            "message": f"{app_name} build failed.",
-                        }),
-                        self._event_loop,
-                    )
-                return False
-            print(f"[GUI] {app_name} build complete", flush=True)
+        def _emit(status: str, message: str, progress: int = 0, total: int = 0) -> None:
             if self._event_loop and self.sio:
                 asyncio.run_coroutine_threadsafe(
                     self.sio.emit("tauri_build_status", {
                         "app": app_key,
-                        "status": "ready",
-                        "message": f"{app_name} build complete.",
+                        "status": status,
+                        "message": message,
+                        "progress": progress,
+                        "total": total,
                     }),
                     self._event_loop,
                 )
+
+        _emit("building", f"Building {app_name} (first time only)...")
+
+        # Parse cargo output for crate count progress
+        # Cargo prints: "   Compiling foo v1.0.0" and "    Building [=====> ] 42/391"
+        building_re = re.compile(r"\[=*>?\s*\]\s+(\d+)/(\d+)")
+        compiling_count = 0
+
+        try:
+            proc = subprocess.Popen(
+                ["cargo", "build", "-p", cargo_name],
+                cwd=str(project_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            for line in iter(proc.stdout.readline, ""):
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Parse "Building [=====>  ] 142/391" progress
+                m = building_re.search(line)
+                if m:
+                    current, total = int(m.group(1)), int(m.group(2))
+                    _emit("building", f"Compiling crate {current}/{total}...", current, total)
+                elif "Compiling" in line:
+                    compiling_count += 1
+                    # Extract crate name
+                    parts = line.split("Compiling")
+                    crate = parts[-1].strip().split(" ")[0] if len(parts) > 1 else "..."
+                    _emit("building", f"Compiling {crate}...", compiling_count, 0)
+
+                # Also print to console for dev visibility
+                print(f"[GUI] {app_name} build: {line}", flush=True)
+
+            proc.stdout.close()
+            ret = proc.wait(timeout=600)
+
+            if ret != 0:
+                print(f"[GUI] {app_name} cargo build failed (exit {ret})", flush=True)
+                _emit("failed", f"{app_name} build failed.")
+                return False
+
+            print(f"[GUI] {app_name} build complete", flush=True)
+            _emit("ready", f"{app_name} build complete.")
             return True
+
         except subprocess.TimeoutExpired:
             print(f"[GUI] {app_name} cargo build timed out", flush=True)
+            if proc:
+                proc.kill()
             return False
         except Exception as e:
             print(f"[GUI] {app_name} cargo build error: {e}", flush=True)

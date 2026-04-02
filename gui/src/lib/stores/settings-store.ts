@@ -143,8 +143,11 @@ export interface AvatarRuntimeConfig {
   avatar_connected: boolean; // NANO-097: avatar renderer is connected
   // NANO-110: Build status for Tauri apps (first-time only)
   avatar_building: boolean;
+  avatar_build_message: string;
   subtitle_building: boolean;
+  subtitle_build_message: string;
   stream_deck_building: boolean;
+  stream_deck_build_message: string;
 }
 
 // Provider states
@@ -366,8 +369,11 @@ const DEFAULT_AVATAR: AvatarRuntimeConfig = {
   subtitle_always_on_top: true,
   avatar_connected: false,
   avatar_building: false,
+  avatar_build_message: "",
   subtitle_building: false,
+  subtitle_build_message: "",
   stream_deck_building: false,
+  stream_deck_build_message: "",
 };
 
 const DEFAULT_STIMULI: StimuliConfig = {

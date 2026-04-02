@@ -547,15 +547,16 @@ export function SocketProvider({ children }: SocketProviderProps) {
     });
 
     // NANO-110: Tauri app build status (first-time build notification)
-    socket.on("tauri_build_status", (event: { app: string; status: string }) => {
+    socket.on("tauri_build_status", (event: { app: string; status: string; message?: string }) => {
       const current = useSettingsStore.getState().avatarConfig;
       const building = event.status === "building";
+      const msg = event.message || "";
       if (event.app === "avatar") {
-        setAvatarConfig({ ...current, avatar_building: building });
+        setAvatarConfig({ ...current, avatar_building: building, avatar_build_message: msg });
       } else if (event.app === "subtitle") {
-        setAvatarConfig({ ...current, subtitle_building: building });
+        setAvatarConfig({ ...current, subtitle_building: building, subtitle_build_message: msg });
       } else if (event.app === "stream_deck") {
-        setAvatarConfig({ ...current, stream_deck_building: building });
+        setAvatarConfig({ ...current, stream_deck_building: building, stream_deck_build_message: msg });
       }
     });
 
