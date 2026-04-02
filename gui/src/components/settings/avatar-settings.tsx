@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { User, Clock, Subtitles, Pin, Gamepad2 } from "lucide-react";
+import { User, Clock, Subtitles, Pin, Gamepad2, Loader2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
@@ -63,7 +63,13 @@ export function AvatarSettings() {
       <div className="flex items-center justify-between">
         <Label className="flex items-center gap-2 text-sm">
           Enable Avatar Bridge
-          {avatarConfig.enabled && (
+          {avatarConfig.avatar_building && (
+            <span className="flex items-center gap-1 ml-1">
+              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              <span className="text-xs text-primary">Building (first time only)...</span>
+            </span>
+          )}
+          {avatarConfig.enabled && !avatarConfig.avatar_building && (
             <span className="flex items-center gap-1 ml-1">
               <span
                 className={`inline-block h-2 w-2 rounded-full ${
@@ -95,6 +101,12 @@ export function AvatarSettings() {
         <Label className="flex items-center gap-2 text-sm">
           <Subtitles className="h-3.5 w-3.5" />
           Show Subtitles
+          {avatarConfig.subtitle_building && (
+            <span className="flex items-center gap-1 ml-1">
+              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              <span className="text-xs text-primary">Building...</span>
+            </span>
+          )}
         </Label>
         <button
           onClick={handleSubtitlesToggle}
@@ -116,6 +128,12 @@ export function AvatarSettings() {
         <Label className="flex items-center gap-2 text-sm">
           <Gamepad2 className="h-3.5 w-3.5" />
           Show Stream Deck
+          {avatarConfig.stream_deck_building && (
+            <span className="flex items-center gap-1 ml-1">
+              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              <span className="text-xs text-primary">Building...</span>
+            </span>
+          )}
         </Label>
         <button
           onClick={handleStreamDeckToggle}

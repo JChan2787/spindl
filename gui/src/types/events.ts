@@ -491,6 +491,13 @@ export interface OpenRouterModelsEvent {
 }
 
 // NANO-056: Stimuli system events
+// NANO-110: Tauri app build status (first-time build notification)
+export interface TauriBuildStatusEvent {
+  app: string; // "avatar", "subtitle", "stream_deck"
+  status: "building" | "ready" | "failed";
+  message: string;
+}
+
 // NANO-110: Addressing-others context
 export interface AddressingContext {
   id: string;
@@ -1331,6 +1338,8 @@ export interface ServerToClientEvents {
   stimulus_fired: (event: StimulusFiredEvent) => void;
   // NANO-110: Addressing-others state
   addressing_others_state: (event: AddressingOthersStateEvent) => void;
+  // NANO-110: Tauri build status
+  tauri_build_status: (event: TauriBuildStatusEvent) => void;
   // NANO-060b: VTubeStudio events
   vts_config_updated: (event: VTSConfigUpdatedEvent) => void;
   vts_status: (event: VTSStatusEvent) => void;

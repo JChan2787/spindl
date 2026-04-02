@@ -546,6 +546,19 @@ export function SocketProvider({ children }: SocketProviderProps) {
       });
     });
 
+    // NANO-110: Tauri app build status (first-time build notification)
+    socket.on("tauri_build_status", (event: { app: string; status: string }) => {
+      const current = useSettingsStore.getState().avatarConfig;
+      const building = event.status === "building";
+      if (event.app === "avatar") {
+        setAvatarConfig({ ...current, avatar_building: building });
+      } else if (event.app === "subtitle") {
+        setAvatarConfig({ ...current, subtitle_building: building });
+      } else if (event.app === "stream_deck") {
+        setAvatarConfig({ ...current, stream_deck_building: building });
+      }
+    });
+
     // NANO-060b: VTubeStudio events
     socket.on("vts_config_updated", (event) => {
       setVTSEnabled(event.enabled);
@@ -801,6 +814,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
       socket.off("avatar_config_updated");
       // NANO-097: Avatar connection status
       socket.off("avatar_connection_status");
+      // NANO-110: Tauri build status
+      socket.off("tauri_build_status");
       // NANO-060b: VTubeStudio
       socket.off("vts_config_updated");
       socket.off("vts_status");

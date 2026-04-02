@@ -4930,11 +4930,24 @@ class GUIServer:
         if binary.exists():
             return True
 
-        # Need to build — run cargo build with visible output
+        # Need to build — notify frontend and run cargo build with visible output
         print(
             f"[GUI] {app_name} binary not found — building (first-time only)...",
             flush=True,
         )
+
+        # Emit building status to all connected clients
+        if self._event_loop and self.sio:
+            import asyncio
+            asyncio.run_coroutine_threadsafe(
+                self.sio.emit("tauri_build_status", {
+                    "app": app_name.lower().replace(" ", "_"),
+                    "status": "building",
+                    "message": f"Building {app_name} (first time only — this may take a few minutes)...",
+                }),
+                self._event_loop,
+            )
+
         try:
             result = subprocess.run(
                 ["cargo", "build"],
@@ -4943,8 +4956,26 @@ class GUIServer:
             )
             if result.returncode != 0:
                 print(f"[GUI] {app_name} cargo build failed (exit {result.returncode})", flush=True)
+                if self._event_loop and self.sio:
+                    asyncio.run_coroutine_threadsafe(
+                        self.sio.emit("tauri_build_status", {
+                            "app": app_name.lower().replace(" ", "_"),
+                            "status": "failed",
+                            "message": f"{app_name} build failed.",
+                        }),
+                        self._event_loop,
+                    )
                 return False
             print(f"[GUI] {app_name} build complete", flush=True)
+            if self._event_loop and self.sio:
+                asyncio.run_coroutine_threadsafe(
+                    self.sio.emit("tauri_build_status", {
+                        "app": app_name.lower().replace(" ", "_"),
+                        "status": "ready",
+                        "message": f"{app_name} build complete.",
+                    }),
+                    self._event_loop,
+                )
             return True
         except subprocess.TimeoutExpired:
             print(f"[GUI] {app_name} cargo build timed out", flush=True)
