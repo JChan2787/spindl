@@ -86,6 +86,11 @@ class BuildContext:
     # When user interrupts, this contains what the assistant was saying
     last_assistant_message: Optional[str] = None
 
+    # Addressing-others prompt (NANO-110)
+    # When set, ModalityContextProvider appends this to the voice modality context.
+    # One-shot: consumed on the first pipeline call after addressing-others ends.
+    addressing_others_prompt: Optional[str] = None
+
     # Prompt block configuration (NANO-045a)
     # When set, PromptBuilder uses block-based assembly instead of template substitution.
     # None means legacy template path (byte-identical output).

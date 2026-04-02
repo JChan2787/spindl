@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Zap, Timer, MessageSquare } from "lucide-react";
+import { Zap, Timer, MessageSquare, Users, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useSettingsStore, selectEffectiveStimuliConfig } from "@/lib/stores";
+import { useSettingsStore, selectEffectiveStimuliConfig, type AddressingContextEntry } from "@/lib/stores";
 import { getSocket } from "@/lib/socket";
 
 interface SliderProps {
@@ -123,6 +123,81 @@ export function StimuliSettings() {
     }
   }, [localPrompt, updatePendingStimuli, emitChanges]);
 
+  // NANO-110: Addressing-others contexts
+  const contexts = effectiveConfig.addressing_others_contexts ?? [
+    { id: "ctx_0", label: "Others", prompt: "" },
+  ];
+
+  // Local state for context editing (emit on blur, same pattern as patience prompt)
+  const [localContexts, setLocalContexts] = useState<AddressingContextEntry[]>(contexts);
+  const contextsSyncedRef = useRef(JSON.stringify(contexts));
+
+  // Sync local state when backend config changes
+  useEffect(() => {
+    const serialized = JSON.stringify(contexts);
+    if (serialized !== contextsSyncedRef.current) {
+      setLocalContexts(contexts);
+      contextsSyncedRef.current = serialized;
+    }
+  }, [contexts]);
+
+  const emitContexts = useCallback(
+    (updated: AddressingContextEntry[]) => {
+      updatePendingStimuli({ addressing_others_contexts: updated });
+      emitChanges({ addressing_others_contexts: updated });
+      contextsSyncedRef.current = JSON.stringify(updated);
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleAddContext = useCallback(() => {
+    const newCtx: AddressingContextEntry = {
+      id: `ctx_${Date.now()}`,
+      label: "",
+      prompt: "",
+    };
+    const updated = [...localContexts, newCtx];
+    setLocalContexts(updated);
+    emitContexts(updated);
+  }, [localContexts, emitContexts]);
+
+  const handleRemoveContext = useCallback(
+    (index: number) => {
+      if (index === 0) return; // First context is permanent
+      const updated = localContexts.filter((_, i) => i !== index);
+      setLocalContexts(updated);
+      emitContexts(updated);
+    },
+    [localContexts, emitContexts]
+  );
+
+  const handleContextLabelChange = useCallback(
+    (index: number, label: string) => {
+      const updated = localContexts.map((ctx, i) =>
+        i === index ? { ...ctx, label } : ctx
+      );
+      setLocalContexts(updated);
+    },
+    [localContexts]
+  );
+
+  const handleContextPromptChange = useCallback(
+    (index: number, prompt: string) => {
+      const updated = localContexts.map((ctx, i) =>
+        i === index ? { ...ctx, prompt } : ctx
+      );
+      setLocalContexts(updated);
+    },
+    [localContexts]
+  );
+
+  const handleContextBlur = useCallback(() => {
+    const serialized = JSON.stringify(localContexts);
+    if (serialized !== contextsSyncedRef.current) {
+      emitContexts(localContexts);
+    }
+  }, [localContexts, emitContexts]);
+
   return (
     <Card>
       <CardHeader>
@@ -204,9 +279,71 @@ export function StimuliSettings() {
               </div>
             </div>
 
+            {/* NANO-110: Addressing Others section */}
+            <div className="border-t border-border pt-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2 text-sm font-medium">
+                  <Users className="h-3 w-3" />
+                  Addressing Others
+                </Label>
+                <button
+                  onClick={handleAddContext}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  title="Add context"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add
+                </button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Each context maps to a Stream Deck button. Hold to suppress voice input; on release, the prompt is injected into the next response.
+              </p>
+
+              <div className="space-y-3">
+                {localContexts.map((ctx, index) => (
+                  <div
+                    key={ctx.id}
+                    className="space-y-2 rounded-md border border-border p-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={ctx.label}
+                        onChange={(e) =>
+                          handleContextLabelChange(index, e.target.value)
+                        }
+                        onBlur={handleContextBlur}
+                        placeholder={index === 0 ? "Others" : "Label (e.g. Chat, Discord)"}
+                        className="flex-1 h-7 rounded-md border border-input bg-background px-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      />
+                      {index > 0 && (
+                        <button
+                          onClick={() => handleRemoveContext(index)}
+                          className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          title="Remove context"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                    <Textarea
+                      value={ctx.prompt}
+                      onChange={(e) =>
+                        handleContextPromptChange(index, e.target.value)
+                      }
+                      onBlur={handleContextBlur}
+                      rows={2}
+                      className="text-xs resize-none"
+                      placeholder="The User was just speaking to someone else — not you. The preceding input may reference a conversation you were not part of."
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <p className="text-xs text-muted-foreground">
-              The stimuli system enables autonomous behavior. The idle timer fires after the agent has been idle for the configured timeout.
-            </p>
+              The stimuli system enables autonomous behavior. The idle timer fires after the agent has been idle for the configured timeout.</p>
           </>
         )}
       </CardContent>

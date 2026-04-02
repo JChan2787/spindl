@@ -3,7 +3,7 @@ export { useAgentStore } from "./agent-store";
 export { usePromptStore } from "./prompt-store";
 export { useSessionStore } from "./session-store";
 export { useSettingsStore, selectEffectiveVadConfig, selectEffectivePipelineConfig, selectEffectiveMemoryConfig, selectEffectivePromptConfig, selectEffectiveGenerationConfig, selectEffectiveStimuliConfig, selectHasUnsavedChanges, fetchBaseAnimations, uploadBaseAnimation, clearBaseAnimation } from "./settings-store";
-export type { BaseAnimationsConfig } from "./settings-store";
+export type { BaseAnimationsConfig, AddressingContextEntry } from "./settings-store";
 export { useLauncherStore, selectActiveSTT, selectHasValidationErrors, selectIsFormComplete } from "./launcher-store";
 export {
   useCharacterStore,

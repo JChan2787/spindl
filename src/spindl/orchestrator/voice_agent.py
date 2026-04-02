@@ -131,6 +131,11 @@ class VoiceAgentOrchestrator:
         # Stimuli system (NANO-056)
         self._stimuli_engine: Optional[StimuliEngine] = None
 
+        # Addressing-others state (NANO-110)
+        self._addressing_others: bool = False
+        self._addressing_others_context_id: Optional[str] = None
+        self._addressing_others_prompt: Optional[str] = None  # one-shot for next pipeline call
+
         # VTubeStudio driver (NANO-060)
         self._vts_driver: Optional[VTSDriver] = None
 
@@ -472,6 +477,10 @@ class VoiceAgentOrchestrator:
         # NANO-076: Wire session file getter for snapshot sidecar persistence
         self._callbacks.set_session_file_getter(lambda: self.session_file)
 
+        # NANO-110: Wire addressing-others state getters
+        self._callbacks._is_addressing_others = lambda: self._addressing_others
+        self._callbacks._consume_addressing_others_prompt = self._consume_addressing_others_prompt
+
         # Wrapper to emit state change events
         def on_state_change_with_event(transition):
             # Original logging
@@ -791,6 +800,93 @@ class VoiceAgentOrchestrator:
     def _handle_barge_in(self) -> None:
         """Handle barge-in by stopping playback."""
         self._playback.stop()
+
+    def set_addressing_others(self, context_id: str) -> None:
+        """
+        Activate addressing-others mode (NANO-110).
+
+        Suppresses voice pipeline calls and stops TTS if playing.
+        Called when Stream Deck button is held or global hotkey pressed.
+
+        Args:
+            context_id: ID of the addressing context (e.g., "ctx_0").
+        """
+        self._addressing_others = True
+        self._addressing_others_context_id = context_id
+
+        # Stop TTS if persona is speaking — same as barge-in but no trigger
+        if (
+            self._playback
+            and self._state_machine
+            and self._state_machine.state == AgentState.SYSTEM_SPEAKING
+        ):
+            self._playback.stop()
+            # Transition to LISTENING, not USER_SPEAKING — we're suppressing input
+            self._state_machine.finish_system_speaking()
+
+        # Pause stimuli engine — reuse "user is busy" semantic
+        if self._stimuli_engine:
+            self._stimuli_engine.user_typing = True
+
+        logger.info("[NANO-110] Addressing others activated: context=%s", context_id)
+
+    def clear_addressing_others(self) -> None:
+        """
+        Deactivate addressing-others mode (NANO-110).
+
+        Resolves the prompt from the active context and stores it as a one-shot
+        for the next pipeline call. Resumes stimuli engine.
+        Called when Stream Deck button is released or global hotkey released.
+        """
+        from .config import AddressingContext
+        from ..llm.prompt_library import DEFAULT_ADDRESSING_OTHERS_PROMPT
+
+        # Resolve prompt from active context
+        context_id = self._addressing_others_context_id
+        resolved_prompt = DEFAULT_ADDRESSING_OTHERS_PROMPT
+        if context_id:
+            for ctx in self._config.stimuli_config.addressing_others_contexts:
+                if ctx.id == context_id:
+                    if ctx.prompt.strip():
+                        resolved_prompt = ctx.prompt.strip()
+                    break
+
+        # Store as one-shot — consumed by next pipeline.run() call
+        self._addressing_others_prompt = resolved_prompt
+
+        self._addressing_others = False
+        self._addressing_others_context_id = None
+
+        # Resume stimuli engine
+        if self._stimuli_engine:
+            self._stimuli_engine.user_typing = False
+
+        logger.info(
+            "[NANO-110] Addressing others deactivated: context=%s, prompt=%s",
+            context_id,
+            resolved_prompt[:60] + "..." if len(resolved_prompt) > 60 else resolved_prompt,
+        )
+
+    @property
+    def addressing_others(self) -> bool:
+        """Whether addressing-others mode is active (NANO-110)."""
+        return self._addressing_others
+
+    @property
+    def addressing_others_context_id(self) -> Optional[str]:
+        """Active addressing-others context ID, or None (NANO-110)."""
+        return self._addressing_others_context_id
+
+    def _consume_addressing_others_prompt(self) -> Optional[str]:
+        """
+        Consume and return the one-shot addressing-others prompt (NANO-110).
+
+        Returns the resolved prompt string if set, then clears it.
+        Called by callbacks before pipeline.run().
+        """
+        prompt = self._addressing_others_prompt
+        self._addressing_others_prompt = None
+        return prompt
 
     def _on_empty_transcription(self) -> None:
         """Handle empty transcription (noise/silence detected as speech)."""
@@ -1638,6 +1734,7 @@ class VoiceAgentOrchestrator:
         twitch_buffer_size: Optional[int] = None,
         twitch_max_message_length: Optional[int] = None,
         twitch_prompt_template: Optional[str] = None,
+        addressing_others_contexts: Optional[list] = None,
     ) -> None:
         """
         Update stimuli config at runtime (NANO-056).
@@ -1654,6 +1751,7 @@ class VoiceAgentOrchestrator:
             twitch_buffer_size: Max buffered messages.
             twitch_max_message_length: Max message length filter.
             twitch_prompt_template: Prompt template for Twitch stimulus.
+            addressing_others_contexts: List of AddressingContext dicts (NANO-110).
         """
         cfg = self._config.stimuli_config
 
@@ -1718,6 +1816,18 @@ class VoiceAgentOrchestrator:
                 cfg.twitch_max_message_length = twitch_max_message_length
             if twitch_prompt_template is not None:
                 cfg.twitch_prompt_template = twitch_prompt_template
+
+        # Addressing-others contexts (NANO-110) — config-only, no live module
+        if addressing_others_contexts is not None:
+            from .config import AddressingContext
+            cfg.addressing_others_contexts = [
+                AddressingContext(
+                    id=ctx.get("id", f"ctx_{i}"),
+                    label=ctx.get("label", "Others"),
+                    prompt=ctx.get("prompt", ""),
+                )
+                for i, ctx in enumerate(addressing_others_contexts)
+            ]
 
     def update_vts_config(
         self,

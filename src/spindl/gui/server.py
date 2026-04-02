@@ -2455,6 +2455,27 @@ class GUIServer:
                     if not twitch_prompt_template:
                         twitch_prompt_template = None
 
+                # Addressing-others contexts (NANO-110)
+                addressing_others_contexts = data.get("addressing_others_contexts")
+                if addressing_others_contexts is not None:
+                    if isinstance(addressing_others_contexts, list):
+                        # Validate: must have at least one entry
+                        if not addressing_others_contexts:
+                            addressing_others_contexts = None
+                        else:
+                            # Sanitize each context entry
+                            addressing_others_contexts = [
+                                {
+                                    "id": str(ctx.get("id", f"ctx_{i}")),
+                                    "label": str(ctx.get("label", "Others")).strip(),
+                                    "prompt": str(ctx.get("prompt", "")).strip(),
+                                }
+                                for i, ctx in enumerate(addressing_others_contexts)
+                                if isinstance(ctx, dict)
+                            ]
+                    else:
+                        addressing_others_contexts = None
+
                 self._orchestrator.update_stimuli_config(
                     enabled=enabled,
                     patience_enabled=patience_enabled,
@@ -2467,6 +2488,7 @@ class GUIServer:
                     twitch_buffer_size=twitch_buffer_size,
                     twitch_max_message_length=twitch_max_message_length,
                     twitch_prompt_template=twitch_prompt_template,
+                    addressing_others_contexts=addressing_others_contexts,
                 )
 
                 cfg = self._orchestrator._config.stimuli_config
@@ -2511,6 +2533,33 @@ class GUIServer:
                 # via test_twitch_credentials handler on Test Connection click.
                 # Orchestrator path handles persistence after launch.
                 pass
+
+        # ============================================================
+        # NANO-110: Addressing Others — Socket Handlers
+        # ============================================================
+
+        @self.sio.event
+        async def addressing_others_start(sid: str, data: dict) -> None:
+            """Stream Deck / hotkey activates addressing-others mode (NANO-110)."""
+            if not self._orchestrator:
+                return
+            context_id = data.get("context_id", "ctx_0")
+            self._orchestrator.set_addressing_others(str(context_id))
+            await self.sio.emit(
+                "addressing_others_state",
+                {"active": True, "context_id": context_id},
+            )
+
+        @self.sio.event
+        async def addressing_others_stop(sid: str, data: dict) -> None:
+            """Stream Deck / hotkey deactivates addressing-others mode (NANO-110)."""
+            if not self._orchestrator:
+                return
+            self._orchestrator.clear_addressing_others()
+            await self.sio.emit(
+                "addressing_others_state",
+                {"active": False, "context_id": None},
+            )
 
         @self.sio.event
         async def request_patience_progress(sid: str, data: dict) -> None:
@@ -4448,6 +4497,11 @@ class GUIServer:
             "twitch_has_credentials": bool(
                 resolved_channel and resolved_app_id and resolved_app_secret
             ),
+            # NANO-110: Addressing-others contexts
+            "addressing_others_contexts": [
+                {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
+                for ctx in cfg.addressing_others_contexts
+            ],
         }
 
     def _get_llm_provider_info(self, config) -> dict:

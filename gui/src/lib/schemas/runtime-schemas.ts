@@ -162,6 +162,13 @@ export const AvatarAnimationsSchema = z
 // Stimuli Schemas (NANO-056b)
 // ============================================
 
+// NANO-110: Addressing-others context entry schema
+const AddressingContextSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  prompt: z.string(),
+});
+
 /** Matches backend stimuli_config_updated emission */
 export const StimuliConfigUpdatedSchema = z.object({
   enabled: z.boolean(),
@@ -176,6 +183,8 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_max_message_length: z.number().int().min(50).max(1000),
   twitch_prompt_template: z.string(),
   twitch_has_credentials: z.boolean(),
+  // NANO-110: Addressing-others contexts
+  addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
   persisted: z.boolean().optional(),
 });
 

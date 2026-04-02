@@ -62,6 +62,13 @@ export interface PromptConfig {
   example_dialogue_suffix: string;
 }
 
+// NANO-110: Addressing-others context
+export interface AddressingContextEntry {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
 // Stimuli configuration (NANO-056)
 export interface StimuliConfig {
   enabled: boolean;
@@ -78,6 +85,8 @@ export interface StimuliConfig {
   twitch_prompt_template: string;
   // Resolved by backend — true when credentials available (config or env vars)
   twitch_has_credentials: boolean;
+  // NANO-110: Addressing-others contexts
+  addressing_others_contexts: AddressingContextEntry[];
 }
 
 // Twitch module status (NANO-056b)
@@ -365,6 +374,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_max_message_length: 300,
   twitch_prompt_template: "Recent Twitch chat messages:\n{messages}\nPick the most interesting message and respond to it naturally.",
   twitch_has_credentials: false,
+  addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
 };
 
 const DEFAULT_PROMPT: PromptConfig = {

@@ -254,6 +254,7 @@ class LLMPipeline:
         last_assistant_message: Optional[str] = None,
         stimulus_source: Optional[str] = None,
         stimulus_metadata: Optional[dict] = None,
+        addressing_others_prompt: Optional[str] = None,
     ) -> PipelineResult:
         """
         Execute full pipeline.
@@ -273,6 +274,9 @@ class LLMPipeline:
             stimulus_metadata: Optional metadata from stimulus module (NANO-056b).
                               Contains pre-formatted content for prompt block injection
                               (e.g., "twitch_content" for Twitch Chat block).
+            addressing_others_prompt: Optional one-shot prompt to append to voice modality
+                                     context (NANO-110). Set when user returns from
+                                     addressing someone else.
 
         Returns:
             PipelineResult with final response text and token usage statistics
@@ -291,6 +295,7 @@ class LLMPipeline:
             state_trigger=state_trigger,
             last_assistant_message=last_assistant_message,
             block_config=self._block_config,
+            addressing_others_prompt=addressing_others_prompt,
         )
 
         context = PipelineContext(
