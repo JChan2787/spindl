@@ -2597,7 +2597,9 @@ class GUIServer:
         @self.sio.event
         async def addressing_others_start(sid: str, data: dict) -> None:
             """Stream Deck / hotkey activates addressing-others mode (NANO-110)."""
+            print(f"[GUI] addressing_others_start received: {data}", flush=True)
             if not self._orchestrator:
+                print("[GUI] addressing_others_start: no orchestrator", flush=True)
                 return
             context_id = data.get("context_id", "ctx_0")
             self._orchestrator.set_addressing_others(str(context_id))
@@ -2609,6 +2611,7 @@ class GUIServer:
         @self.sio.event
         async def addressing_others_stop(sid: str, data: dict) -> None:
             """Stream Deck / hotkey deactivates addressing-others mode (NANO-110)."""
+            print(f"[GUI] addressing_others_stop received", flush=True)
             if not self._orchestrator:
                 return
             self._orchestrator.clear_addressing_others()
