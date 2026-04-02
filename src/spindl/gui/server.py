@@ -2545,6 +2545,49 @@ class GUIServer:
                 pass
 
         # ============================================================
+        # NANO-110: Tauri App Install — Socket Handlers
+        # ============================================================
+
+        @self.sio.event
+        async def check_tauri_install(sid: str, data: dict) -> None:
+            """Check which Tauri app binaries are installed (NANO-110)."""
+            project_root = Path(__file__).parent.parent.parent.parent
+            status = {
+                "avatar": self._tauri_binary_exists(project_root / "spindl-avatar"),
+                "subtitle": self._tauri_binary_exists(project_root / "spindl-subtitles"),
+                "stream_deck": self._tauri_binary_exists(project_root / "spindl-stream-deck"),
+            }
+            await self.sio.emit("tauri_install_status", status, to=sid)
+
+        @self.sio.event
+        async def install_tauri_apps(sid: str, data: dict) -> None:
+            """Trigger background build of all Tauri app binaries (NANO-110)."""
+            project_root = Path(__file__).parent.parent.parent.parent
+
+            # Build whichever apps are missing — shared workspace means first
+            # build compiles all deps, subsequent builds are near-instant
+            apps = [
+                (project_root / "spindl-avatar", "Avatar"),
+                (project_root / "spindl-subtitles", "Subtitle"),
+                (project_root / "spindl-stream-deck", "Stream Deck"),
+            ]
+
+            for app_dir, app_name in apps:
+                if app_dir.exists() and not self._tauri_binary_exists(app_dir):
+                    self._tauri_install_in_background(app_dir, app_name)
+                    # Only build one at a time — workspace lock prevents parallel cargo
+                    break
+            else:
+                # All installed already
+                await self.sio.emit("tauri_build_status", {
+                    "app": "all",
+                    "status": "ready",
+                    "message": "All overlay apps are already installed.",
+                    "progress": 0,
+                    "total": 0,
+                })
+
+        # ============================================================
         # NANO-110: Addressing Others — Socket Handlers
         # ============================================================
 
@@ -4931,42 +4974,32 @@ class GUIServer:
     # NANO-097: Avatar Process Management
     # ============================================================
 
-    def _ensure_tauri_built(self, app_dir: Path, app_name: str) -> bool:
+    def _tauri_binary_exists(self, app_dir: Path) -> bool:
+        """Check if a Tauri app binary exists (workspace or legacy path)."""
+        import platform
+        ext = ".exe" if platform.system() == "Windows" else ""
+        cargo_name = app_dir.name
+        project_root = app_dir.parent
+        binary = project_root / "target" / "debug" / f"{cargo_name}{ext}"
+        legacy = app_dir / "src-tauri" / "target" / "debug" / f"{cargo_name}{ext}"
+        return binary.exists() or legacy.exists()
+
+    def _tauri_install_in_background(self, app_dir: Path, app_name: str) -> None:
         """
-        Ensure a Tauri app binary exists, building if necessary (NANO-110).
+        Build a Tauri app binary in a background thread (NANO-110).
 
-        First-time users cloning the repo won't have compiled binaries.
-        This runs `cargo build` with visible output so they see progress
-        instead of a silent hang.
-
-        Args:
-            app_dir: Root of the Tauri app (e.g., spindl-avatar/).
-            app_name: Human-readable name for log messages.
-
-        Returns:
-            True if binary is ready, False if build failed.
+        Streams cargo compilation progress to the frontend via socket events.
+        Non-blocking — returns immediately, build runs in a daemon thread.
+        On completion, emits 'ready' or 'failed' status.
         """
         import asyncio
         import platform
         import re
+        import threading
+
         ext = ".exe" if platform.system() == "Windows" else ""
-        cargo_name = app_dir.name  # e.g., "spindl-avatar"
-
-        # Workspace root target (Cargo workspace shares one target/ dir)
+        cargo_name = app_dir.name
         project_root = app_dir.parent
-        binary = project_root / "target" / "debug" / f"{cargo_name}{ext}"
-
-        # Also check legacy per-app target (backwards compat)
-        legacy_binary = app_dir / "src-tauri" / "target" / "debug" / f"{cargo_name}{ext}"
-
-        if binary.exists() or legacy_binary.exists():
-            return True
-
-        # Need to build — notify frontend and run cargo build with visible output
-        print(
-            f"[GUI] {app_name} binary not found — building (first-time only)...",
-            flush=True,
-        )
         app_key = app_name.lower().replace(" ", "_")
 
         def _emit(status: str, message: str, progress: int = 0, total: int = 0) -> None:
@@ -4982,63 +5015,64 @@ class GUIServer:
                     self._event_loop,
                 )
 
-        _emit("building", f"Building {app_name} (first time only)...")
+        def _build() -> None:
+            _emit("building", f"Installing {app_name} (first time only — this may take a few minutes)...")
+            print(f"[GUI] {app_name} binary not found — building (first-time only)...", flush=True)
 
-        # Parse cargo output for crate count progress
-        # Cargo prints: "   Compiling foo v1.0.0" and "    Building [=====> ] 42/391"
-        building_re = re.compile(r"\[=*>?\s*\]\s+(\d+)/(\d+)")
-        compiling_count = 0
+            building_re = re.compile(r"\[=*>?\s*\]\s+(\d+)/(\d+)")
+            compiling_count = 0
 
-        try:
-            proc = subprocess.Popen(
-                ["cargo", "build", "-p", cargo_name],
-                cwd=str(project_root),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+            try:
+                proc = subprocess.Popen(
+                    ["cargo", "build", "-p", cargo_name],
+                    cwd=str(project_root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
 
-            for line in iter(proc.stdout.readline, ""):
-                line = line.strip()
-                if not line:
-                    continue
+                for line in iter(proc.stdout.readline, ""):
+                    line = line.strip()
+                    if not line:
+                        continue
 
-                # Parse "Building [=====>  ] 142/391" progress
-                m = building_re.search(line)
-                if m:
-                    current, total = int(m.group(1)), int(m.group(2))
-                    _emit("building", f"Compiling crate {current}/{total}...", current, total)
-                elif "Compiling" in line:
-                    compiling_count += 1
-                    # Extract crate name
-                    parts = line.split("Compiling")
-                    crate = parts[-1].strip().split(" ")[0] if len(parts) > 1 else "..."
-                    _emit("building", f"Compiling {crate}...", compiling_count, 0)
+                    m = building_re.search(line)
+                    if m:
+                        current, total = int(m.group(1)), int(m.group(2))
+                        _emit("building", f"Compiling crate {current}/{total}...", current, total)
+                    elif "Compiling" in line:
+                        compiling_count += 1
+                        parts = line.split("Compiling")
+                        crate = parts[-1].strip().split(" ")[0] if len(parts) > 1 else "..."
+                        _emit("building", f"Compiling {crate}...", compiling_count, 0)
 
-                # Also print to console for dev visibility
-                print(f"[GUI] {app_name} build: {line}", flush=True)
+                    print(f"[GUI] {app_name} build: {line}", flush=True)
 
-            proc.stdout.close()
-            ret = proc.wait(timeout=600)
+                proc.stdout.close()
+                ret = proc.wait(timeout=600)
 
-            if ret != 0:
-                print(f"[GUI] {app_name} cargo build failed (exit {ret})", flush=True)
-                _emit("failed", f"{app_name} build failed.")
-                return False
+                if ret != 0:
+                    print(f"[GUI] {app_name} cargo build failed (exit {ret})", flush=True)
+                    _emit("failed", f"{app_name} build failed.")
+                    return
 
-            print(f"[GUI] {app_name} build complete", flush=True)
-            _emit("ready", f"{app_name} build complete.")
-            return True
+                print(f"[GUI] {app_name} build complete", flush=True)
+                _emit("ready", f"{app_name} installed successfully.")
 
-        except subprocess.TimeoutExpired:
-            print(f"[GUI] {app_name} cargo build timed out", flush=True)
-            if proc:
-                proc.kill()
-            return False
-        except Exception as e:
-            print(f"[GUI] {app_name} cargo build error: {e}", flush=True)
-            return False
+            except subprocess.TimeoutExpired:
+                print(f"[GUI] {app_name} cargo build timed out", flush=True)
+                _emit("failed", f"{app_name} build timed out.")
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"[GUI] {app_name} cargo build error: {e}", flush=True)
+                _emit("failed", f"{app_name} build error: {e}")
+
+        thread = threading.Thread(target=_build, daemon=True, name=f"tauri-build-{app_key}")
+        thread.start()
 
     async def _avatar_spawn(self) -> None:
         """Spawn the avatar renderer if no avatar client is already connected."""
@@ -5061,8 +5095,9 @@ class GUIServer:
             print(f"[GUI] Avatar directory not found: {avatar_dir}", flush=True)
             return
 
-        # Ensure binary is built (first-time users)
-        if not self._ensure_tauri_built(avatar_dir, "Avatar"):
+        # Check binary exists — install must happen first via Install button
+        if not self._tauri_binary_exists(avatar_dir):
+            print("[GUI] Avatar binary not installed — use Install button", flush=True)
             return
 
         try:
@@ -5128,8 +5163,9 @@ class GUIServer:
             print(f"[GUI] Subtitle directory not found: {subtitle_dir}", flush=True)
             return
 
-        # Ensure binary is built (first-time users)
-        if not self._ensure_tauri_built(subtitle_dir, "Subtitle"):
+        # Check binary exists — install must happen first via Install button
+        if not self._tauri_binary_exists(subtitle_dir):
+            print("[GUI] Subtitle binary not installed — use Install button", flush=True)
             return
 
         try:
@@ -5194,8 +5230,9 @@ class GUIServer:
             print(f"[GUI] Stream Deck directory not found: {deck_dir}", flush=True)
             return
 
-        # Ensure binary is built (first-time users)
-        if not self._ensure_tauri_built(deck_dir, "Stream Deck"):
+        # Check binary exists — install must happen first via Install button
+        if not self._tauri_binary_exists(deck_dir):
+            print("[GUI] Stream Deck binary not installed — use Install button", flush=True)
             return
 
         try:

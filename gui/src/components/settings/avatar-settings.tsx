@@ -1,14 +1,28 @@
 "use client";
 
-import { useCallback } from "react";
-import { User, Clock, Subtitles, Pin, Gamepad2, Loader2 } from "lucide-react";
+import { useCallback, useEffect } from "react";
+import { User, Clock, Subtitles, Pin, Gamepad2, Loader2, Download } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
-import { useSettingsStore } from "@/lib/stores";
+import { useSettingsStore, useConnectionStore } from "@/lib/stores";
 
 export function AvatarSettings() {
   const avatarConfig = useSettingsStore((s) => s.avatarConfig);
+  const connected = useConnectionStore((s) => s.connected);
+
+  // Check install status on mount
+  useEffect(() => {
+    if (connected) {
+      const socket = getSocket();
+      socket.emit("check_tauri_install", {});
+    }
+  }, [connected]);
+
+  const handleInstall = useCallback(() => {
+    const socket = getSocket();
+    socket.emit("install_tauri_apps", {});
+  }, []);
 
   const handleToggle = useCallback(() => {
     const socket = getSocket();
@@ -53,23 +67,51 @@ export function AvatarSettings() {
     socket.emit("set_avatar_config", { subtitle_always_on_top: !avatarConfig.subtitle_always_on_top });
   }, [avatarConfig.subtitle_always_on_top]);
 
+  const notInstalled = !avatarConfig.tauri_installed;
+  const installing = avatarConfig.tauri_installing;
+
   return (
     <CollapsibleCard
       id="avatar"
       title="Avatar"
       icon={<User className="h-4 w-4" />}
     >
+      {/* NANO-110: Install banner — shown when binaries don't exist */}
+      {notInstalled && (
+        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+          {installing ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm font-medium">Installing overlay apps...</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {avatarConfig.tauri_install_message || "Preparing build..."}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Overlay windows (avatar, subtitles, stream deck) need to be compiled before first use.
+                This is a one-time install that takes a few minutes.
+              </p>
+              <button
+                onClick={handleInstall}
+                className="flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                <Download className="h-3 w-3" />
+                Install Overlay Apps
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Enable toggle */}
       <div className="flex items-center justify-between">
         <Label className="flex items-center gap-2 text-sm">
           Enable Avatar Bridge
-          {avatarConfig.avatar_building && (
-            <span className="flex items-center gap-1 ml-1">
-              <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span className="text-xs text-primary">{avatarConfig.avatar_build_message || "Building..."}</span>
-            </span>
-          )}
-          {avatarConfig.enabled && !avatarConfig.avatar_building && (
+          {avatarConfig.enabled && (
             <span className="flex items-center gap-1 ml-1">
               <span
                 className={`inline-block h-2 w-2 rounded-full ${
@@ -84,7 +126,8 @@ export function AvatarSettings() {
         </Label>
         <button
           onClick={handleToggle}
-          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+          disabled={notInstalled}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             avatarConfig.enabled ? "bg-primary" : "bg-muted"
           }`}
         >
@@ -101,16 +144,10 @@ export function AvatarSettings() {
         <Label className="flex items-center gap-2 text-sm">
           <Subtitles className="h-3.5 w-3.5" />
           Show Subtitles
-          {avatarConfig.subtitle_building && (
-            <span className="flex items-center gap-1 ml-1">
-              <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span className="text-xs text-primary">{avatarConfig.subtitle_build_message || "Building..."}</span>
-            </span>
-          )}
         </Label>
         <button
           onClick={handleSubtitlesToggle}
-          disabled={!avatarConfig.enabled}
+          disabled={notInstalled || !avatarConfig.enabled}
           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             avatarConfig.subtitles_enabled ? "bg-primary" : "bg-muted"
           }`}
@@ -128,16 +165,11 @@ export function AvatarSettings() {
         <Label className="flex items-center gap-2 text-sm">
           <Gamepad2 className="h-3.5 w-3.5" />
           Show Stream Deck
-          {avatarConfig.stream_deck_building && (
-            <span className="flex items-center gap-1 ml-1">
-              <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span className="text-xs text-primary">{avatarConfig.stream_deck_build_message || "Building..."}</span>
-            </span>
-          )}
         </Label>
         <button
           onClick={handleStreamDeckToggle}
-          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+          disabled={notInstalled}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             avatarConfig.stream_deck_enabled ? "bg-primary" : "bg-muted"
           }`}
         >

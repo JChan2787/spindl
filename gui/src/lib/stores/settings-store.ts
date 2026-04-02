@@ -141,13 +141,10 @@ export interface AvatarRuntimeConfig {
   avatar_always_on_top: boolean;
   subtitle_always_on_top: boolean;
   avatar_connected: boolean; // NANO-097: avatar renderer is connected
-  // NANO-110: Build status for Tauri apps (first-time only)
-  avatar_building: boolean;
-  avatar_build_message: string;
-  subtitle_building: boolean;
-  subtitle_build_message: string;
-  stream_deck_building: boolean;
-  stream_deck_build_message: string;
+  // NANO-110: Tauri app install status
+  tauri_installed: boolean; // true if all binaries exist
+  tauri_installing: boolean; // true if install is in progress
+  tauri_install_message: string; // live progress message
 }
 
 // Provider states
@@ -368,12 +365,9 @@ const DEFAULT_AVATAR: AvatarRuntimeConfig = {
   avatar_always_on_top: true,
   subtitle_always_on_top: true,
   avatar_connected: false,
-  avatar_building: false,
-  avatar_build_message: "",
-  subtitle_building: false,
-  subtitle_build_message: "",
-  stream_deck_building: false,
-  stream_deck_build_message: "",
+  tauri_installed: false,
+  tauri_installing: false,
+  tauri_install_message: "",
 };
 
 const DEFAULT_STIMULI: StimuliConfig = {

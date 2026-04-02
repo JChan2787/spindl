@@ -493,11 +493,18 @@ export interface OpenRouterModelsEvent {
 // NANO-056: Stimuli system events
 // NANO-110: Tauri app build status (first-time build notification)
 export interface TauriBuildStatusEvent {
-  app: string; // "avatar", "subtitle", "stream_deck"
+  app: string; // "avatar", "subtitle", "stream_deck", "all"
   status: "building" | "ready" | "failed";
   message: string;
   progress?: number; // current crate count
   total?: number; // total crate count (0 if unknown)
+}
+
+// NANO-110: Tauri app install check result
+export interface TauriInstallStatusEvent {
+  avatar: boolean;
+  subtitle: boolean;
+  stream_deck: boolean;
 }
 
 // NANO-110: Addressing-others context
@@ -1340,8 +1347,9 @@ export interface ServerToClientEvents {
   stimulus_fired: (event: StimulusFiredEvent) => void;
   // NANO-110: Addressing-others state
   addressing_others_state: (event: AddressingOthersStateEvent) => void;
-  // NANO-110: Tauri build status
+  // NANO-110: Tauri build/install status
   tauri_build_status: (event: TauriBuildStatusEvent) => void;
+  tauri_install_status: (event: TauriInstallStatusEvent) => void;
   // NANO-060b: VTubeStudio events
   vts_config_updated: (event: VTSConfigUpdatedEvent) => void;
   vts_status: (event: VTSStatusEvent) => void;
@@ -1415,6 +1423,9 @@ export interface ClientToServerEvents {
   request_twitch_status: (payload: Record<string, never>) => void;
   test_twitch_credentials: (payload: { app_id: string; app_secret: string; channel: string }) => void;
   typing_active: (payload: { active: boolean }) => void;
+  // NANO-110: Tauri install
+  check_tauri_install: (payload: Record<string, never>) => void;
+  install_tauri_apps: (payload: Record<string, never>) => void;
   // NANO-110: Addressing-others
   addressing_others_start: (payload: { context_id: string }) => void;
   addressing_others_stop: (payload: Record<string, never>) => void;
