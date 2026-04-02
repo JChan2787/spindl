@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { User, Clock, Subtitles, Pin } from "lucide-react";
+import { User, Clock, Subtitles, Pin, Gamepad2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
@@ -19,6 +19,11 @@ export function AvatarSettings() {
     const socket = getSocket();
     socket.emit("set_avatar_config", { subtitles_enabled: !avatarConfig.subtitles_enabled });
   }, [avatarConfig.subtitles_enabled]);
+
+  const handleStreamDeckToggle = useCallback(() => {
+    const socket = getSocket();
+    socket.emit("set_avatar_config", { stream_deck_enabled: !avatarConfig.stream_deck_enabled });
+  }, [avatarConfig.stream_deck_enabled]);
 
   const handleSubtitleFadeChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,6 +106,26 @@ export function AvatarSettings() {
           <span
             className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
               avatarConfig.subtitles_enabled ? "translate-x-4" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Stream Deck toggle (NANO-110) */}
+      <div className="flex items-center justify-between">
+        <Label className="flex items-center gap-2 text-sm">
+          <Gamepad2 className="h-3.5 w-3.5" />
+          Show Stream Deck
+        </Label>
+        <button
+          onClick={handleStreamDeckToggle}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+            avatarConfig.stream_deck_enabled ? "bg-primary" : "bg-muted"
+          }`}
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+              avatarConfig.stream_deck_enabled ? "translate-x-4" : "translate-x-0.5"
             }`}
           />
         </button>

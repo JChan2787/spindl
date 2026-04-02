@@ -111,6 +111,10 @@ class GUIServer:
         self._subtitle_process: Optional[subprocess.Popen] = None
         self._subtitle_spawned_by_us: bool = False
 
+        # NANO-110: Stream Deck process management
+        self._stream_deck_process: Optional[subprocess.Popen] = None
+        self._stream_deck_spawned_by_us: bool = False
+
         # Callback for when services are ready (standalone mode)
         # Can be sync or async callable
         self._on_services_ready: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
@@ -528,6 +532,12 @@ class GUIServer:
         if orchestrator._config.avatar_config.subtitles_enabled and self._event_loop:
             asyncio.run_coroutine_threadsafe(
                 self._subtitle_spawn(), self._event_loop
+            )
+
+        # NANO-110: Auto-spawn stream deck if enabled in config at startup
+        if orchestrator._config.avatar_config.stream_deck_enabled and self._event_loop:
+            asyncio.run_coroutine_threadsafe(
+                self._stream_deck_spawn(), self._event_loop
             )
 
     async def _hydrate_connected_clients(self) -> None:
@@ -3039,6 +3049,7 @@ class GUIServer:
                 subtitle_fade_delay = data.get("subtitle_fade_delay")
                 avatar_always_on_top = data.get("avatar_always_on_top")
                 subtitle_always_on_top = data.get("subtitle_always_on_top")
+                stream_deck_enabled = data.get("stream_deck_enabled")
 
                 if enabled is not None:
                     config.avatar_config.enabled = bool(enabled)
@@ -3084,6 +3095,9 @@ class GUIServer:
                 if subtitle_always_on_top is not None:
                     config.avatar_config.subtitle_always_on_top = bool(subtitle_always_on_top)
                     updated = True
+                if stream_deck_enabled is not None:
+                    config.avatar_config.stream_deck_enabled = bool(stream_deck_enabled)
+                    updated = True
 
                 if updated:
                     cfg = config.avatar_config
@@ -3122,6 +3136,7 @@ class GUIServer:
                             "subtitle_fade_delay": cfg.subtitle_fade_delay,
                             "avatar_always_on_top": cfg.avatar_always_on_top,
                             "subtitle_always_on_top": cfg.subtitle_always_on_top,
+                            "stream_deck_enabled": cfg.stream_deck_enabled,
                             "persisted": persisted,
                         },
                     )
@@ -3139,6 +3154,13 @@ class GUIServer:
                         await self._subtitle_spawn()
                     else:
                         self._subtitle_kill()
+
+                # NANO-110: Stream Deck process management on toggle
+                if stream_deck_enabled is not None:
+                    if bool(stream_deck_enabled):
+                        await self._stream_deck_spawn()
+                    else:
+                        self._stream_deck_kill()
 
         # ============================================================
         # NANO-099: Avatar Rescan Animations — Socket Handler
@@ -4367,6 +4389,7 @@ class GUIServer:
                     "subtitle_fade_delay": config.avatar_config.subtitle_fade_delay,
                     "avatar_always_on_top": config.avatar_config.avatar_always_on_top,
                     "subtitle_always_on_top": config.avatar_config.subtitle_always_on_top,
+                    "stream_deck_enabled": config.avatar_config.stream_deck_enabled,
                 },
                 # NANO-065b: LLM provider runtime state
                 "llm": self._orchestrator.get_llm_state(),
@@ -5012,6 +5035,68 @@ class GUIServer:
         finally:
             self._subtitle_process = None
             self._subtitle_spawned_by_us = False
+
+    # ============================================================
+    # NANO-110: Stream Deck Process Management
+    # ============================================================
+
+    async def _stream_deck_spawn(self) -> None:
+        """Spawn the stream deck overlay if not already running."""
+        if self._stream_deck_process and self._stream_deck_process.poll() is None:
+            print("[GUI] Stream Deck process already running", flush=True)
+            return
+
+        project_root = Path(__file__).parent.parent.parent.parent
+        deck_dir = project_root / "spindl-stream-deck"
+        if not deck_dir.exists():
+            print(f"[GUI] Stream Deck directory not found: {deck_dir}", flush=True)
+            return
+
+        try:
+            self._stream_deck_process = subprocess.Popen(
+                ["npm", "run", "tauri", "dev"],
+                cwd=str(deck_dir),
+                shell=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._stream_deck_spawned_by_us = True
+            print(
+                f"[GUI] Stream Deck process spawned (PID: {self._stream_deck_process.pid})",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[GUI] Failed to spawn stream deck: {e}", flush=True)
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
+
+    def _stream_deck_kill(self) -> None:
+        """Kill the stream deck process if we spawned it."""
+        if not self._stream_deck_spawned_by_us or not self._stream_deck_process:
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
+            return
+
+        if self._stream_deck_process.poll() is not None:
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
+            return
+
+        try:
+            terminated, force_killed = kill_process_tree(
+                self._stream_deck_process.pid, timeout=5.0
+            )
+            print(
+                f"[GUI] Stream Deck process killed "
+                f"(terminated: {len(terminated)}, force-killed: {len(force_killed)})",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[GUI] Failed to kill stream deck process: {e}", flush=True)
+        finally:
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
 
     @property
     def client_count(self) -> int:

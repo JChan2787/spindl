@@ -137,6 +137,7 @@ export interface AvatarRuntimeConfig {
   expression_fade_delay: number;
   subtitles_enabled: boolean; // NANO-100: subtitle overlay window
   subtitle_fade_delay: number; // NANO-100: seconds to hold subtitle after TTS
+  stream_deck_enabled: boolean; // NANO-110: stream deck overlay window
   avatar_always_on_top: boolean;
   subtitle_always_on_top: boolean;
   avatar_connected: boolean; // NANO-097: avatar renderer is connected
@@ -356,6 +357,7 @@ const DEFAULT_AVATAR: AvatarRuntimeConfig = {
   expression_fade_delay: 1.0,
   subtitles_enabled: false,
   subtitle_fade_delay: 1.5,
+  stream_deck_enabled: false,
   avatar_always_on_top: true,
   subtitle_always_on_top: true,
   avatar_connected: false,

@@ -625,6 +625,7 @@ export interface AvatarConfigUpdatedEvent {
   expression_fade_delay: number;
   subtitles_enabled: boolean; // NANO-100
   subtitle_fade_delay: number; // NANO-100
+  stream_deck_enabled: boolean; // NANO-110
   avatar_always_on_top: boolean;
   subtitle_always_on_top: boolean;
   persisted: boolean;
@@ -638,6 +639,7 @@ export interface SetAvatarConfigPayload {
   expression_fade_delay?: number;
   subtitles_enabled?: boolean; // NANO-100
   subtitle_fade_delay?: number; // NANO-100
+  stream_deck_enabled?: boolean; // NANO-110
   avatar_always_on_top?: boolean;
   subtitle_always_on_top?: boolean;
 }

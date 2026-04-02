@@ -588,6 +588,7 @@ class AvatarConfig(BaseModel):
     show_emotion_in_chat: bool = True
     subtitles_enabled: bool = False  # NANO-100: Show subtitle overlay window in avatar app
     subtitle_fade_delay: float = 1.5  # NANO-100: Seconds to hold subtitle text after TTS ends
+    stream_deck_enabled: bool = False  # NANO-110: Show stream deck overlay window
     avatar_always_on_top: bool = True  # Avatar window always-on-top z-order
     subtitle_always_on_top: bool = True  # Subtitle window always-on-top z-order
     global_animations_dir: str = "spindl-avatar/public/animations"  # Shared animation FBX pool path (NANO-098)
@@ -624,6 +625,9 @@ class AvatarConfig(BaseModel):
             ),
             subtitle_fade_delay=data.get(
                 "subtitle_fade_delay", defaults.subtitle_fade_delay
+            ),
+            stream_deck_enabled=data.get(
+                "stream_deck_enabled", defaults.stream_deck_enabled
             ),
             avatar_always_on_top=data.get(
                 "avatar_always_on_top", defaults.avatar_always_on_top
@@ -1075,6 +1079,7 @@ class OrchestratorConfig(BaseModel):
         av["subtitle_fade_delay"] = self.avatar_config.subtitle_fade_delay
         av["avatar_always_on_top"] = self.avatar_config.avatar_always_on_top
         av["subtitle_always_on_top"] = self.avatar_config.subtitle_always_on_top
+        av["stream_deck_enabled"] = self.avatar_config.stream_deck_enabled
         # NANO-099: base_animations is managed by the Next.js API route
         # (/api/avatar/base-animations). Do NOT write it here.
 
