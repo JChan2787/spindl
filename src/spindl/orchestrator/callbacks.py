@@ -160,6 +160,8 @@ class OrchestratorCallbacks:
                 # NANO-110: Suppress voice pipeline while addressing others
                 if self._is_addressing_others and self._is_addressing_others():
                     logger.info("[NANO-110] Voice input suppressed — addressing others")
+                    if self._on_empty_transcription is not None:
+                        self._on_empty_transcription()
                     return
 
                 # 1. Transcribe speech to text

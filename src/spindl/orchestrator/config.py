@@ -1026,8 +1026,10 @@ class OrchestratorConfig(BaseModel):
         if "stimuli" not in data:
             data["stimuli"] = {}
         stim = data["stimuli"]
+        stim["enabled"] = self.stimuli_config.enabled
         if "patience" not in stim:
             stim["patience"] = {}
+        stim["patience"]["enabled"] = self.stimuli_config.patience_enabled
         stim["patience"]["seconds"] = self.stimuli_config.patience_seconds
         stim["patience"]["prompt"] = self.stimuli_config.patience_prompt
 
@@ -1035,6 +1037,7 @@ class OrchestratorConfig(BaseModel):
         if "twitch" not in stim:
             stim["twitch"] = {}
         tw = stim["twitch"]
+        tw["enabled"] = self.stimuli_config.twitch_enabled
         tw["channel"] = self.stimuli_config.twitch_channel
         tw["app_id"] = self.stimuli_config.twitch_app_id
         tw["app_secret"] = self.stimuli_config.twitch_app_secret

@@ -1759,6 +1759,10 @@ class VoiceAgentOrchestrator:
             cfg.enabled = enabled
             if self._stimuli_engine:
                 self._stimuli_engine.enabled = enabled
+                # Reset activity timers when enabling so patience doesn't
+                # fire immediately from stale elapsed time since engine start
+                if enabled:
+                    self._stimuli_engine.reset_activity()
 
         if self._stimuli_engine:
             # Find the PATIENCE module and update it
