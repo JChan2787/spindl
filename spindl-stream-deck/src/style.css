@@ -1,0 +1,112 @@
+/* SpindL Stream Deck — NANO-110 */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0a0a0f;
+  color: #e4e4e7;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#app {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100vh;
+}
+
+/* ── Status bar ──────────────────────────────────────── */
+
+.status {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 4px 0;
+  border-radius: 4px;
+}
+
+.status.connected {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.status.disconnected {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* ── Button grid ─────────────────────────────────────── */
+
+.button-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.deck-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #18181b;
+  color: #a1a1aa;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  touch-action: none;
+}
+
+.deck-btn:hover {
+  background: #1e1e24;
+  border-color: #3f3f46;
+  color: #e4e4e7;
+}
+
+.deck-btn:active,
+.deck-btn.active {
+  background: #7c3aed;
+  border-color: #8b5cf6;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(139, 92, 246, 0.3);
+}
+
+/* Active pulsing glow */
+.deck-btn.active {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(139, 92, 246, 0.5);
+  }
+}
+
+/* ── Drag region (top edge) ──────────────────────────── */
+
+body::before {
+  content: "";
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  -webkit-app-region: drag;
+}

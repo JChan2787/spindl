@@ -30,11 +30,14 @@ class ModalityContextProvider(ContextProvider):
         modality_key = "text" if context.input_modality == InputModality.STIMULUS else context.input_modality.value
         modality_text = MODALITY_CONTEXT.get(modality_key)
 
-        if modality_text:
-            return modality_text.strip()
+        if not modality_text:
+            return None
 
-        # Fallback for unknown modality - shouldn't happen with enum
-        return None
+        # NANO-110: Append addressing-others context when returning from addressing someone else
+        if context.addressing_others_prompt:
+            modality_text = f"{modality_text.strip()}\n\n{context.addressing_others_prompt.strip()}"
+
+        return modality_text.strip()
 
 
 class ModalityRulesProvider(ContextProvider):

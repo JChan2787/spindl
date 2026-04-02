@@ -1,29 +1,24 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "SpindL Subtitles",
+  "productName": "SpindL Stream Deck",
   "version": "0.1.0",
-  "identifier": "com.spindl.subtitles",
+  "identifier": "com.spindl.streamdeck",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:48121",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "label": "subtitles",
-        "title": "SpindL Subtitles",
-        "width": 800,
-        "height": 150,
-        "x": 560,
-        "y": 880,
+        "label": "deck",
+        "title": "SpindL Stream Deck",
+        "width": 220,
+        "height": 120,
         "alwaysOnTop": true,
         "decorations": false,
         "resizable": true,
         "skipTaskbar": true,
         "transparent": false,
-        "shadow": false
+        "shadow": true
       }
     ],
     "security": {
@@ -40,5 +35,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  }
+  },
+  "plugins": {}
 }

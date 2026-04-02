@@ -34,6 +34,7 @@ Thanks for reading, and thanks for giving SpindL a shot.
   - [Runtime VLM Provider](#runtime-vlm-provider)
   - [Stimuli System](#stimuli-system)
   - [Twitch Integration](#twitch-integration)
+  - [Addressing Others](#addressing-others)
 - [Sessions](#sessions)
   - [Session Transcript](#session-transcript)
   - [Session Memories](#session-memories)
@@ -52,11 +53,13 @@ Thanks for reading, and thanks for giving SpindL a shot.
   - [Reflection Prompt](#reflection-prompt)
   - [How Retrieval Works](#how-retrieval-works)
 - [Avatar (Optional)](#avatar-optional)
+  - [First-Time Install](#first-time-install)
   - [Per-Character Avatar & Animations](#per-character-avatar--animations)
   - [Base Animations](#base-animations)
   - [Avatar Settings](#avatar-settings)
 - [Emotion Classifier (Optional)](#emotion-classifier-optional)
 - [Stream Subtitles (Optional)](#stream-subtitles-optional)
+- [Stream Deck (Optional)](#stream-deck-optional)
 
 ---
 
@@ -481,6 +484,25 @@ Once credentials are set, the **Twitch Chat** card appears on the Dashboard:
 
 When Twitch chat is active and the stimuli engine is enabled, incoming chat messages accumulate in the buffer. On each LLM turn, the buffered messages are formatted using the prompt template and injected as a prompt block — visible in the Prompt Workshop alongside other blocks like persona, scenario, and memories.
 
+### Addressing Others
+
+![Addressing Others — Context Configuration](images/stimuli_addressing_others-01.png)
+
+When you're streaming and need to talk to chat, a mod, Discord, or someone in the room, the character normally interprets all mic input as directed speech and responds to overheard fragments. The **Addressing Others** section under Stimuli lets you define named contexts — each one maps to a button in the Stream Deck overlay (see [Stream Deck](#stream-deck-optional)). Hold a button while talking to someone else; on release, the character receives your speech with a context-aware prompt injected into the system prompt.
+
+Configure your contexts in the **Addressing Others** section of the Stimuli card:
+
+| Setting | What it does |
+|---------|-------------|
+| **+ Add** | Add a new addressing context. Each context creates a corresponding button in the Stream Deck overlay |
+| **Label** | Short name shown on the Stream Deck button (e.g., "People IRL", "Mods", "Chat") |
+| **Prompt** | Custom prompt injected into the `### Context` block when the button is released. This tells the character *who* the User was addressing and how to handle the overheard speech. Leave empty to use the default fallback |
+| **Delete** (trash icon) | Remove a context. The first context is permanent and cannot be removed |
+
+Each context's prompt is injected as a one-shot — it appears in the next LLM call after the button is released, then clears automatically. This means the character gets one chance to acknowledge the interruption before returning to normal conversation.
+
+Write prompts that guide the character's behavior without over-constraining it. For example, a "Mods" context might say: *"The User just spoke directly to our Twitch channel mods. As Spindle, you can either chime in and ask what was that about, or just ignore it to respect your User's actions at that time."* — giving the character discretion rather than a rigid instruction.
+
 ## Sessions
 
 ![Sessions Page](images/settings_sessions-01.png)
@@ -717,7 +739,23 @@ When the character is about to respond, the `RAGInjector` queries all relevant c
 
 You don't need to manage any of this manually — it happens automatically during conversation. The Memories page is for reviewing what the system has stored, curating the important bits, and removing noise.
 
+
 ## Avatar (Optional)
+
+### First-Time Install
+
+![Install Overlay Apps — Settings](images/window_dependencies-01.png)
+
+If the Tauri overlay apps (avatar, subtitles, stream deck) haven't been compiled yet, the Settings page shows an **Install Overlay Apps** button in the Avatar card. All overlay toggles are grayed out until the binaries are built.
+
+![Install in Progress](images/window_dependencies-02.png)
+
+Click **Install Overlay Apps** to start the build. A spinner shows live crate-by-crate compilation progress — e.g., "(1/3) Avatar: toml_parser". The first app takes a few minutes as it compiles shared Rust dependencies (Tauri framework, WebKit bindings, etc.); subsequent apps reuse the cached dependencies and finish in seconds. Once complete, the Install banner disappears and all overlay toggles become active.
+
+This is a one-time process — the compiled binaries persist across restarts. Requires [Rust](https://rustup.rs/) 1.75+.
+
+> **Note:** After installing and enabling the overlays, the avatar and subtitle windows may take a moment to appear after pressing **Launch Services**. These apps start a Vite dev server for runtime asset loading (VRM models, FBX animations) before the window becomes visible. The Stream Deck window appears immediately since it runs as a direct binary with no dev server.
+
 
 ![Avatar + Dashboard](images/dashboard-02.png)
 
@@ -782,6 +820,7 @@ Configure the avatar and subtitle overlay in **Settings** → **Avatar**:
 | **Expression Fade Delay** | How long (in seconds) the avatar holds its current facial expression and body animation after TTS ends before fading back to neutral/idle. Without this delay, expressions snap to neutral the instant the character stops talking — the delay lets the mood linger naturally |
 | **Avatar Always On Top** | Keeps the avatar renderer window above all other windows. Useful when you want the avatar visible while working in other apps or during a stream |
 | **Subtitle Always On Top** | Same as above, but for the subtitle overlay window |
+| **Show Stream Deck** | Spawns the Stream Deck overlay window with addressing-others buttons. See [Addressing Others](#addressing-others-stream-deck) for configuration |
 
 ## Emotion Classifier (Optional)
 
@@ -812,3 +851,19 @@ npm install
 ```
 
 **Usage:** Enable **Show Subtitles** in **Settings** → **Avatar**. SpindL auto-spawns the subtitle process. In OBS, add a Window Capture for the subtitle window and apply a chroma key filter. Right-click the subtitle window to swap background color (black, chroma green, chroma magenta). Subtitle fade delay is configurable via a Settings slider.
+
+## Stream Deck (Optional)
+
+![Stream Deck Overlay](images/stream_deck_window-01.png)
+
+The Stream Deck is a standalone Tauri 2 overlay (`spindl-stream-deck/`) — a small always-on-top window with hold-to-activate buttons. Each button corresponds to an addressing-others context configured in the Stimuli card (see [Addressing Others](#addressing-others)). The window auto-resizes to fit the number of buttons, and the button labels update in real time when you edit contexts in the dashboard.
+
+**How it works:**
+
+1. Hold a button — the character suppresses voice responses. TTS stops if the character is mid-sentence, and VAD continues running but all speech is discarded.
+2. Talk to whoever you need to — chat, mods, Discord, someone in the room.
+3. Release the button — the character receives your next utterance with the context-specific prompt injected into the system prompt's `### Context` block.
+
+Only one context can be active at a time. The **LIVE** / **DISCONNECTED** status bar at the top shows the Socket.IO connection state to the orchestrator.
+
+**Setup:** Enable **Show Stream Deck** in **Settings** → **Avatar**. SpindL auto-spawns the Stream Deck process on startup. The overlay connects to the same Socket.IO server as the dashboard, avatar, and subtitles (port 8765). Context additions and removals in the dashboard are reflected in the Stream Deck immediately — no restart needed.

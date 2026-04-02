@@ -1,14 +1,28 @@
 "use client";
 
-import { useCallback } from "react";
-import { User, Clock, Subtitles, Pin } from "lucide-react";
+import { useCallback, useEffect } from "react";
+import { User, Clock, Subtitles, Pin, Gamepad2, Loader2, Download } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
-import { useSettingsStore } from "@/lib/stores";
+import { useSettingsStore, useConnectionStore } from "@/lib/stores";
 
 export function AvatarSettings() {
   const avatarConfig = useSettingsStore((s) => s.avatarConfig);
+  const connected = useConnectionStore((s) => s.connected);
+
+  // Check install status on mount
+  useEffect(() => {
+    if (connected) {
+      const socket = getSocket();
+      socket.emit("check_tauri_install", {});
+    }
+  }, [connected]);
+
+  const handleInstall = useCallback(() => {
+    const socket = getSocket();
+    socket.emit("install_tauri_apps", {});
+  }, []);
 
   const handleToggle = useCallback(() => {
     const socket = getSocket();
@@ -19,6 +33,11 @@ export function AvatarSettings() {
     const socket = getSocket();
     socket.emit("set_avatar_config", { subtitles_enabled: !avatarConfig.subtitles_enabled });
   }, [avatarConfig.subtitles_enabled]);
+
+  const handleStreamDeckToggle = useCallback(() => {
+    const socket = getSocket();
+    socket.emit("set_avatar_config", { stream_deck_enabled: !avatarConfig.stream_deck_enabled });
+  }, [avatarConfig.stream_deck_enabled]);
 
   const handleSubtitleFadeChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,12 +67,46 @@ export function AvatarSettings() {
     socket.emit("set_avatar_config", { subtitle_always_on_top: !avatarConfig.subtitle_always_on_top });
   }, [avatarConfig.subtitle_always_on_top]);
 
+  const notInstalled = !avatarConfig.tauri_installed;
+  const installing = avatarConfig.tauri_installing;
+
   return (
     <CollapsibleCard
       id="avatar"
       title="Avatar"
       icon={<User className="h-4 w-4" />}
     >
+      {/* NANO-110: Install banner — shown when binaries don't exist */}
+      {notInstalled && (
+        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+          {installing ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm font-medium">Installing overlay apps...</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {avatarConfig.tauri_install_message || "Preparing build..."}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Overlay windows (avatar, subtitles, stream deck) need to be compiled before first use.
+                This is a one-time install that takes a few minutes.
+              </p>
+              <button
+                onClick={handleInstall}
+                className="flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                <Download className="h-3 w-3" />
+                Install Overlay Apps
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Enable toggle */}
       <div className="flex items-center justify-between">
         <Label className="flex items-center gap-2 text-sm">
@@ -73,7 +126,8 @@ export function AvatarSettings() {
         </Label>
         <button
           onClick={handleToggle}
-          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+          disabled={notInstalled}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             avatarConfig.enabled ? "bg-primary" : "bg-muted"
           }`}
         >
@@ -93,7 +147,7 @@ export function AvatarSettings() {
         </Label>
         <button
           onClick={handleSubtitlesToggle}
-          disabled={!avatarConfig.enabled}
+          disabled={notInstalled || !avatarConfig.enabled}
           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             avatarConfig.subtitles_enabled ? "bg-primary" : "bg-muted"
           }`}
@@ -101,6 +155,27 @@ export function AvatarSettings() {
           <span
             className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
               avatarConfig.subtitles_enabled ? "translate-x-4" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Stream Deck toggle (NANO-110) */}
+      <div className="flex items-center justify-between">
+        <Label className="flex items-center gap-2 text-sm">
+          <Gamepad2 className="h-3.5 w-3.5" />
+          Show Stream Deck
+        </Label>
+        <button
+          onClick={handleStreamDeckToggle}
+          disabled={notInstalled}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            avatarConfig.stream_deck_enabled ? "bg-primary" : "bg-muted"
+          }`}
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+              avatarConfig.stream_deck_enabled ? "translate-x-4" : "translate-x-0.5"
             }`}
           />
         </button>

@@ -5,7 +5,7 @@
   "identifier": "com.spindl.avatar",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:48120",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },

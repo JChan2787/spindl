@@ -62,6 +62,13 @@ export interface PromptConfig {
   example_dialogue_suffix: string;
 }
 
+// NANO-110: Addressing-others context
+export interface AddressingContextEntry {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
 // Stimuli configuration (NANO-056)
 export interface StimuliConfig {
   enabled: boolean;
@@ -78,6 +85,8 @@ export interface StimuliConfig {
   twitch_prompt_template: string;
   // Resolved by backend — true when credentials available (config or env vars)
   twitch_has_credentials: boolean;
+  // NANO-110: Addressing-others contexts
+  addressing_others_contexts: AddressingContextEntry[];
 }
 
 // Twitch module status (NANO-056b)
@@ -128,9 +137,14 @@ export interface AvatarRuntimeConfig {
   expression_fade_delay: number;
   subtitles_enabled: boolean; // NANO-100: subtitle overlay window
   subtitle_fade_delay: number; // NANO-100: seconds to hold subtitle after TTS
+  stream_deck_enabled: boolean; // NANO-110: stream deck overlay window
   avatar_always_on_top: boolean;
   subtitle_always_on_top: boolean;
   avatar_connected: boolean; // NANO-097: avatar renderer is connected
+  // NANO-110: Tauri app install status
+  tauri_installed: boolean; // true if all binaries exist
+  tauri_installing: boolean; // true if install is in progress
+  tauri_install_message: string; // live progress message
 }
 
 // Provider states
@@ -347,9 +361,13 @@ const DEFAULT_AVATAR: AvatarRuntimeConfig = {
   expression_fade_delay: 1.0,
   subtitles_enabled: false,
   subtitle_fade_delay: 1.5,
+  stream_deck_enabled: false,
   avatar_always_on_top: true,
   subtitle_always_on_top: true,
   avatar_connected: false,
+  tauri_installed: false,
+  tauri_installing: false,
+  tauri_install_message: "",
 };
 
 const DEFAULT_STIMULI: StimuliConfig = {
@@ -365,6 +383,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_max_message_length: 300,
   twitch_prompt_template: "Recent Twitch chat messages:\n{messages}\nPick the most interesting message and respond to it naturally.",
   twitch_has_credentials: false,
+  addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
 };
 
 const DEFAULT_PROMPT: PromptConfig = {

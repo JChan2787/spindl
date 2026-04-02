@@ -421,6 +421,29 @@ class PromptConfig(BaseModel):
         )
 
 
+class AddressingContext(BaseModel):
+    """
+    A single addressing-others context (NANO-110).
+
+    Each context maps to one button in the Stream Deck and carries a prompt
+    that tells the persona who the User was addressing when they return.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(description="Unique identifier, e.g. 'ctx_0', 'ctx_1'")
+    label: str = Field(default="Others", description="Short label for Stream Deck button")
+    prompt: str = Field(
+        default="",
+        description="Custom prompt. Empty = default fallback.",
+    )
+
+
+def _default_addressing_contexts() -> list[AddressingContext]:
+    """Create the default addressing-others context list (one permanent entry)."""
+    return [AddressingContext(id="ctx_0", label="Others", prompt="")]
+
+
 class StimuliConfig(BaseModel):
     """
     Stimuli system configuration (NANO-056).
@@ -429,6 +452,7 @@ class StimuliConfig(BaseModel):
     - Master enable/disable
     - PATIENCE idle timer settings
     - Twitch chat integration settings (NANO-056b)
+    - Addressing-others contexts (NANO-110)
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -454,12 +478,33 @@ class StimuliConfig(BaseModel):
         "Pick the most interesting message and respond to it naturally."
     )
 
+    # Addressing-others contexts (NANO-110)
+    addressing_others_contexts: list[AddressingContext] = Field(
+        default_factory=_default_addressing_contexts,
+    )
+
     @classmethod
     def from_dict(cls, data: dict) -> "StimuliConfig":
         """Parse stimuli config from YAML dict."""
         defaults = cls()
         patience = data.get("patience", {})
         twitch = data.get("twitch", {})
+
+        # Parse addressing-others contexts (NANO-110)
+        addressing = data.get("addressing_others", {})
+        raw_contexts = addressing.get("contexts", [])
+        if raw_contexts:
+            contexts = [
+                AddressingContext(
+                    id=ctx.get("id", f"ctx_{i}"),
+                    label=ctx.get("label", "Others"),
+                    prompt=ctx.get("prompt", ""),
+                )
+                for i, ctx in enumerate(raw_contexts)
+            ]
+        else:
+            contexts = _default_addressing_contexts()
+
         return cls(
             enabled=data.get("enabled", defaults.enabled),
             patience_enabled=patience.get("enabled", defaults.patience_enabled),
@@ -478,6 +523,7 @@ class StimuliConfig(BaseModel):
             twitch_prompt_template=twitch.get(
                 "prompt_template", defaults.twitch_prompt_template
             ),
+            addressing_others_contexts=contexts,
         )
 
 
@@ -542,6 +588,7 @@ class AvatarConfig(BaseModel):
     show_emotion_in_chat: bool = True
     subtitles_enabled: bool = False  # NANO-100: Show subtitle overlay window in avatar app
     subtitle_fade_delay: float = 1.5  # NANO-100: Seconds to hold subtitle text after TTS ends
+    stream_deck_enabled: bool = False  # NANO-110: Show stream deck overlay window
     avatar_always_on_top: bool = True  # Avatar window always-on-top z-order
     subtitle_always_on_top: bool = True  # Subtitle window always-on-top z-order
     global_animations_dir: str = "spindl-avatar/public/animations"  # Shared animation FBX pool path (NANO-098)
@@ -578,6 +625,9 @@ class AvatarConfig(BaseModel):
             ),
             subtitle_fade_delay=data.get(
                 "subtitle_fade_delay", defaults.subtitle_fade_delay
+            ),
+            stream_deck_enabled=data.get(
+                "stream_deck_enabled", defaults.stream_deck_enabled
             ),
             avatar_always_on_top=data.get(
                 "avatar_always_on_top", defaults.avatar_always_on_top
@@ -976,8 +1026,10 @@ class OrchestratorConfig(BaseModel):
         if "stimuli" not in data:
             data["stimuli"] = {}
         stim = data["stimuli"]
+        stim["enabled"] = self.stimuli_config.enabled
         if "patience" not in stim:
             stim["patience"] = {}
+        stim["patience"]["enabled"] = self.stimuli_config.patience_enabled
         stim["patience"]["seconds"] = self.stimuli_config.patience_seconds
         stim["patience"]["prompt"] = self.stimuli_config.patience_prompt
 
@@ -985,12 +1037,22 @@ class OrchestratorConfig(BaseModel):
         if "twitch" not in stim:
             stim["twitch"] = {}
         tw = stim["twitch"]
+        tw["enabled"] = self.stimuli_config.twitch_enabled
         tw["channel"] = self.stimuli_config.twitch_channel
         tw["app_id"] = self.stimuli_config.twitch_app_id
         tw["app_secret"] = self.stimuli_config.twitch_app_secret
         tw["buffer_size"] = self.stimuli_config.twitch_buffer_size
         tw["max_message_length"] = self.stimuli_config.twitch_max_message_length
         tw["prompt_template"] = self.stimuli_config.twitch_prompt_template
+
+        # Addressing-others contexts (NANO-110, nested under stimuli)
+        if "addressing_others" not in stim:
+            stim["addressing_others"] = {}
+        ao = stim["addressing_others"]
+        ao["contexts"] = [
+            {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
+            for ctx in self.stimuli_config.addressing_others_contexts
+        ]
 
         # --- Tools ---
         if "tools" not in data:
@@ -1020,6 +1082,7 @@ class OrchestratorConfig(BaseModel):
         av["subtitle_fade_delay"] = self.avatar_config.subtitle_fade_delay
         av["avatar_always_on_top"] = self.avatar_config.avatar_always_on_top
         av["subtitle_always_on_top"] = self.avatar_config.subtitle_always_on_top
+        av["stream_deck_enabled"] = self.avatar_config.stream_deck_enabled
         # NANO-099: base_animations is managed by the Next.js API route
         # (/api/avatar/base-animations). Do NOT write it here.
 

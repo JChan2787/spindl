@@ -111,6 +111,10 @@ class OrchestratorCallbacks:
         # NANO-094: Emotion classifier (set post-construction via setter)
         self._emotion_classifier = None
 
+        # NANO-110: Addressing-others state getters (set by orchestrator)
+        self._is_addressing_others: Optional[Callable[[], bool]] = None
+        self._consume_addressing_others_prompt: Optional[Callable[[], Optional[str]]] = None
+
         # Processing state
         self._processing_thread: Optional[threading.Thread] = None
         self._last_transcription: Optional[str] = None
@@ -153,6 +157,13 @@ class OrchestratorCallbacks:
             self._processing_start_time = time.time()
 
             try:
+                # NANO-110: Suppress voice pipeline while addressing others
+                if self._is_addressing_others and self._is_addressing_others():
+                    logger.info("[NANO-110] Voice input suppressed — addressing others")
+                    if self._on_empty_transcription is not None:
+                        self._on_empty_transcription()
+                    return
+
                 # 1. Transcribe speech to text
                 transcription = self._stt.transcribe(audio)
                 self._last_transcription = transcription
@@ -188,6 +199,11 @@ class OrchestratorCallbacks:
                 # When interrupted, this tells the model what it was saying
                 last_msg = self._last_response if state_trigger == "barge_in" else None
 
+                # NANO-110: Consume one-shot addressing-others prompt
+                addressing_prompt = None
+                if self._consume_addressing_others_prompt:
+                    addressing_prompt = self._consume_addressing_others_prompt()
+
                 # 5. Generate response via LLM pipeline (returns PipelineResult)
                 result = self._pipeline.run(
                     transcription,
@@ -196,6 +212,7 @@ class OrchestratorCallbacks:
                     state_trigger=state_trigger,
                     input_modality=InputModality.VOICE,
                     last_assistant_message=last_msg,
+                    addressing_others_prompt=addressing_prompt,
                 )
                 response = result.content
                 tts_response = result.tts_text or response  # NANO-109

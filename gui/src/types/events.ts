@@ -491,6 +491,35 @@ export interface OpenRouterModelsEvent {
 }
 
 // NANO-056: Stimuli system events
+// NANO-110: Tauri app build status (first-time build notification)
+export interface TauriBuildStatusEvent {
+  app: string; // "avatar", "subtitle", "stream_deck", "all"
+  status: "building" | "ready" | "failed";
+  message: string;
+  progress?: number; // current crate count
+  total?: number; // total crate count (0 if unknown)
+}
+
+// NANO-110: Tauri app install check result
+export interface TauriInstallStatusEvent {
+  avatar: boolean;
+  subtitle: boolean;
+  stream_deck: boolean;
+}
+
+// NANO-110: Addressing-others context
+export interface AddressingContext {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
+// NANO-110: Addressing-others state broadcast
+export interface AddressingOthersStateEvent {
+  active: boolean;
+  context_id: string | null;
+}
+
 export interface StimuliConfigUpdatedEvent {
   enabled: boolean;
   patience_enabled: boolean;
@@ -505,6 +534,8 @@ export interface StimuliConfigUpdatedEvent {
   twitch_max_message_length: number;
   twitch_prompt_template: string;
   twitch_has_credentials: boolean;
+  // NANO-110: Addressing-others contexts
+  addressing_others_contexts: AddressingContext[];
   persisted: boolean;
 }
 
@@ -543,6 +574,8 @@ export interface SetStimuliConfigPayload {
   twitch_buffer_size?: number;
   twitch_max_message_length?: number;
   twitch_prompt_template?: string;
+  // NANO-110: Addressing-others contexts
+  addressing_others_contexts?: AddressingContext[];
 }
 
 // NANO-060b: VTubeStudio events
@@ -608,6 +641,7 @@ export interface AvatarConfigUpdatedEvent {
   expression_fade_delay: number;
   subtitles_enabled: boolean; // NANO-100
   subtitle_fade_delay: number; // NANO-100
+  stream_deck_enabled: boolean; // NANO-110
   avatar_always_on_top: boolean;
   subtitle_always_on_top: boolean;
   persisted: boolean;
@@ -621,6 +655,7 @@ export interface SetAvatarConfigPayload {
   expression_fade_delay?: number;
   subtitles_enabled?: boolean; // NANO-100
   subtitle_fade_delay?: number; // NANO-100
+  stream_deck_enabled?: boolean; // NANO-110
   avatar_always_on_top?: boolean;
   subtitle_always_on_top?: boolean;
 }
@@ -1310,6 +1345,11 @@ export interface ServerToClientEvents {
   twitch_status: (event: TwitchStatusEvent) => void;
   twitch_credentials_result: (event: { success: boolean; error: string | null }) => void;
   stimulus_fired: (event: StimulusFiredEvent) => void;
+  // NANO-110: Addressing-others state
+  addressing_others_state: (event: AddressingOthersStateEvent) => void;
+  // NANO-110: Tauri build/install status
+  tauri_build_status: (event: TauriBuildStatusEvent) => void;
+  tauri_install_status: (event: TauriInstallStatusEvent) => void;
   // NANO-060b: VTubeStudio events
   vts_config_updated: (event: VTSConfigUpdatedEvent) => void;
   vts_status: (event: VTSStatusEvent) => void;
@@ -1383,6 +1423,12 @@ export interface ClientToServerEvents {
   request_twitch_status: (payload: Record<string, never>) => void;
   test_twitch_credentials: (payload: { app_id: string; app_secret: string; channel: string }) => void;
   typing_active: (payload: { active: boolean }) => void;
+  // NANO-110: Tauri install
+  check_tauri_install: (payload: Record<string, never>) => void;
+  install_tauri_apps: (payload: Record<string, never>) => void;
+  // NANO-110: Addressing-others
+  addressing_others_start: (payload: { context_id: string }) => void;
+  addressing_others_stop: (payload: Record<string, never>) => void;
   // NANO-060b: VTubeStudio
   set_vts_config: (payload: SetVTSConfigPayload) => void;
   request_vts_status: (payload: RequestVTSStatusPayload) => void;

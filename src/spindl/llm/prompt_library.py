@@ -96,3 +96,11 @@ MODALITY_CONTEXT: dict[str, str] = {
     "voice": "This is a live voice conversation. Your response will be spoken aloud via TTS.",
     "text": "This is a text conversation.",
 }
+
+# Default addressing-others prompt (NANO-110).
+# Appended to voice modality context when user returns from addressing someone else.
+# Used as fallback when the addressing context's prompt field is empty.
+DEFAULT_ADDRESSING_OTHERS_PROMPT = (
+    "The User was just speaking to someone else \u2014 not you. "
+    "The preceding input may reference a conversation you were not part of."
+)

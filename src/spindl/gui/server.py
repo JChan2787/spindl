@@ -111,6 +111,10 @@ class GUIServer:
         self._subtitle_process: Optional[subprocess.Popen] = None
         self._subtitle_spawned_by_us: bool = False
 
+        # NANO-110: Stream Deck process management
+        self._stream_deck_process: Optional[subprocess.Popen] = None
+        self._stream_deck_spawned_by_us: bool = False
+
         # Callback for when services are ready (standalone mode)
         # Can be sync or async callable
         self._on_services_ready: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
@@ -528,6 +532,12 @@ class GUIServer:
         if orchestrator._config.avatar_config.subtitles_enabled and self._event_loop:
             asyncio.run_coroutine_threadsafe(
                 self._subtitle_spawn(), self._event_loop
+            )
+
+        # NANO-110: Auto-spawn stream deck if enabled in config at startup
+        if orchestrator._config.avatar_config.stream_deck_enabled and self._event_loop:
+            asyncio.run_coroutine_threadsafe(
+                self._stream_deck_spawn(), self._event_loop
             )
 
     async def _hydrate_connected_clients(self) -> None:
@@ -2455,6 +2465,27 @@ class GUIServer:
                     if not twitch_prompt_template:
                         twitch_prompt_template = None
 
+                # Addressing-others contexts (NANO-110)
+                addressing_others_contexts = data.get("addressing_others_contexts")
+                if addressing_others_contexts is not None:
+                    if isinstance(addressing_others_contexts, list):
+                        # Validate: must have at least one entry
+                        if not addressing_others_contexts:
+                            addressing_others_contexts = None
+                        else:
+                            # Sanitize each context entry
+                            addressing_others_contexts = [
+                                {
+                                    "id": str(ctx.get("id", f"ctx_{i}")),
+                                    "label": str(ctx.get("label", "Others")).strip(),
+                                    "prompt": str(ctx.get("prompt", "")).strip(),
+                                }
+                                for i, ctx in enumerate(addressing_others_contexts)
+                                if isinstance(ctx, dict)
+                            ]
+                    else:
+                        addressing_others_contexts = None
+
                 self._orchestrator.update_stimuli_config(
                     enabled=enabled,
                     patience_enabled=patience_enabled,
@@ -2467,6 +2498,7 @@ class GUIServer:
                     twitch_buffer_size=twitch_buffer_size,
                     twitch_max_message_length=twitch_max_message_length,
                     twitch_prompt_template=twitch_prompt_template,
+                    addressing_others_contexts=addressing_others_contexts,
                 )
 
                 cfg = self._orchestrator._config.stimuli_config
@@ -2500,10 +2532,11 @@ class GUIServer:
                 stimuli_data = self._build_stimuli_hydration(cfg)
                 stimuli_data["persisted"] = persisted
 
+                # Broadcast to all clients (including Stream Deck) so
+                # context button grids rebuild when contexts are added/removed
                 await self.sio.emit(
                     "stimuli_config_updated",
                     stimuli_data,
-                    to=sid,
                 )
 
             if not self._orchestrator:
@@ -2511,6 +2544,82 @@ class GUIServer:
                 # via test_twitch_credentials handler on Test Connection click.
                 # Orchestrator path handles persistence after launch.
                 pass
+
+        # ============================================================
+        # NANO-110: Tauri App Install — Socket Handlers
+        # ============================================================
+
+        @self.sio.event
+        async def check_tauri_install(sid: str, data: dict) -> None:
+            """Check which Tauri app binaries are installed (NANO-110)."""
+            project_root = Path(__file__).parent.parent.parent.parent
+            status = {
+                "avatar": self._tauri_binary_exists(project_root / "spindl-avatar"),
+                "subtitle": self._tauri_binary_exists(project_root / "spindl-subtitles"),
+                "stream_deck": self._tauri_binary_exists(project_root / "spindl-stream-deck"),
+            }
+            await self.sio.emit("tauri_install_status", status, to=sid)
+
+        @self.sio.event
+        async def install_tauri_apps(sid: str, data: dict) -> None:
+            """Trigger background build of all Tauri app binaries (NANO-110)."""
+            project_root = Path(__file__).parent.parent.parent.parent
+
+            apps = [
+                (project_root / "spindl-avatar", "Avatar"),
+                (project_root / "spindl-subtitles", "Subtitle"),
+                (project_root / "spindl-stream-deck", "Stream Deck"),
+            ]
+
+            missing = [
+                (d, n) for d, n in apps
+                if d.exists() and not self._tauri_binary_exists(d)
+            ]
+
+            if not missing:
+                await self.sio.emit("tauri_build_status", {
+                    "app": "all",
+                    "status": "ready",
+                    "message": "All overlay apps are already installed.",
+                    "progress": 0,
+                    "total": 0,
+                })
+                return
+
+            # Build all missing apps sequentially in one background thread.
+            # Shared workspace means first build compiles all deps,
+            # subsequent builds are near-instant (seconds).
+            self._tauri_install_all_in_background(missing)
+
+        # ============================================================
+        # NANO-110: Addressing Others — Socket Handlers
+        # ============================================================
+
+        @self.sio.event
+        async def addressing_others_start(sid: str, data: dict) -> None:
+            """Stream Deck / hotkey activates addressing-others mode (NANO-110)."""
+            print(f"[GUI] addressing_others_start received: {data}", flush=True)
+            if not self._orchestrator:
+                print("[GUI] addressing_others_start: no orchestrator", flush=True)
+                return
+            context_id = data.get("context_id", "ctx_0")
+            self._orchestrator.set_addressing_others(str(context_id))
+            await self.sio.emit(
+                "addressing_others_state",
+                {"active": True, "context_id": context_id},
+            )
+
+        @self.sio.event
+        async def addressing_others_stop(sid: str, data: dict) -> None:
+            """Stream Deck / hotkey deactivates addressing-others mode (NANO-110)."""
+            print(f"[GUI] addressing_others_stop received", flush=True)
+            if not self._orchestrator:
+                return
+            self._orchestrator.clear_addressing_others()
+            await self.sio.emit(
+                "addressing_others_state",
+                {"active": False, "context_id": None},
+            )
 
         @self.sio.event
         async def request_patience_progress(sid: str, data: dict) -> None:
@@ -2990,6 +3099,7 @@ class GUIServer:
                 subtitle_fade_delay = data.get("subtitle_fade_delay")
                 avatar_always_on_top = data.get("avatar_always_on_top")
                 subtitle_always_on_top = data.get("subtitle_always_on_top")
+                stream_deck_enabled = data.get("stream_deck_enabled")
 
                 if enabled is not None:
                     config.avatar_config.enabled = bool(enabled)
@@ -3035,6 +3145,9 @@ class GUIServer:
                 if subtitle_always_on_top is not None:
                     config.avatar_config.subtitle_always_on_top = bool(subtitle_always_on_top)
                     updated = True
+                if stream_deck_enabled is not None:
+                    config.avatar_config.stream_deck_enabled = bool(stream_deck_enabled)
+                    updated = True
 
                 if updated:
                     cfg = config.avatar_config
@@ -3073,6 +3186,7 @@ class GUIServer:
                             "subtitle_fade_delay": cfg.subtitle_fade_delay,
                             "avatar_always_on_top": cfg.avatar_always_on_top,
                             "subtitle_always_on_top": cfg.subtitle_always_on_top,
+                            "stream_deck_enabled": cfg.stream_deck_enabled,
                             "persisted": persisted,
                         },
                     )
@@ -3090,6 +3204,38 @@ class GUIServer:
                         await self._subtitle_spawn()
                     else:
                         self._subtitle_kill()
+
+                # NANO-110: Stream Deck process management on toggle
+                if stream_deck_enabled is not None:
+                    if bool(stream_deck_enabled):
+                        await self._stream_deck_spawn()
+                    else:
+                        self._stream_deck_kill()
+
+            else:
+                # Pre-launch: orchestrator not running yet, but Tauri app
+                # builds and spawns don't need services. Handle toggle-only
+                # fields so users can build/launch windows from settings page
+                # before going through the launcher flow.
+                enabled = data.get("enabled")
+                subtitles_enabled = data.get("subtitles_enabled")
+                stream_deck_enabled = data.get("stream_deck_enabled")
+
+                if enabled is not None:
+                    if bool(enabled):
+                        await self._avatar_spawn()
+                    else:
+                        self._avatar_kill()
+                if subtitles_enabled is not None:
+                    if bool(subtitles_enabled):
+                        await self._subtitle_spawn()
+                    else:
+                        self._subtitle_kill()
+                if stream_deck_enabled is not None:
+                    if bool(stream_deck_enabled):
+                        await self._stream_deck_spawn()
+                    else:
+                        self._stream_deck_kill()
 
         # ============================================================
         # NANO-099: Avatar Rescan Animations — Socket Handler
@@ -4066,9 +4212,10 @@ class GUIServer:
                     print(f"[GUI] Error stopping orchestrator: {e}", flush=True)
                     # Continue with shutdown even if orchestrator stop fails
 
-            # Step 1b: Stop avatar and subtitle processes
+            # Step 1b: Stop avatar, subtitle, and stream deck processes
             self._avatar_kill()
             self._subtitle_kill()
+            self._stream_deck_kill()
 
             # Step 2: Stop services
             if self._service_runner:
@@ -4139,9 +4286,10 @@ class GUIServer:
         self._on_services_ready = callback
 
     def shutdown_services(self) -> None:
-        """Shutdown all launched services, avatar, and subtitle processes."""
+        """Shutdown all launched services, avatar, subtitle, and stream deck processes."""
         self._avatar_kill()
         self._subtitle_kill()
+        self._stream_deck_kill()
         if self._service_runner:
             print("[GUI] Shutting down services...", flush=True)
             self._service_runner.shutdown_all()
@@ -4318,6 +4466,7 @@ class GUIServer:
                     "subtitle_fade_delay": config.avatar_config.subtitle_fade_delay,
                     "avatar_always_on_top": config.avatar_config.avatar_always_on_top,
                     "subtitle_always_on_top": config.avatar_config.subtitle_always_on_top,
+                    "stream_deck_enabled": config.avatar_config.stream_deck_enabled,
                 },
                 # NANO-065b: LLM provider runtime state
                 "llm": self._orchestrator.get_llm_state(),
@@ -4448,6 +4597,11 @@ class GUIServer:
             "twitch_has_credentials": bool(
                 resolved_channel and resolved_app_id and resolved_app_secret
             ),
+            # NANO-110: Addressing-others contexts
+            "addressing_others_contexts": [
+                {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
+                for ctx in cfg.addressing_others_contexts
+            ],
         }
 
     def _get_llm_provider_info(self, config) -> dict:
@@ -4829,6 +4983,251 @@ class GUIServer:
     # NANO-097: Avatar Process Management
     # ============================================================
 
+    def _tauri_binary_path(self, app_dir: Path) -> Optional[Path]:
+        """Return the Tauri app binary path if it exists, else None."""
+        import platform
+        ext = ".exe" if platform.system() == "Windows" else ""
+        cargo_name = app_dir.name
+        project_root = app_dir.parent
+        # Check release first (installed via Install button), then debug (dev builds)
+        for profile in ("release", "debug"):
+            workspace = project_root / "target" / profile / f"{cargo_name}{ext}"
+            if workspace.exists():
+                return workspace
+            legacy = app_dir / "src-tauri" / "target" / profile / f"{cargo_name}{ext}"
+            if legacy.exists():
+                return legacy
+        return None
+
+    def _tauri_binary_exists(self, app_dir: Path) -> bool:
+        """Check if a Tauri app binary exists (workspace or legacy path)."""
+        return self._tauri_binary_path(app_dir) is not None
+
+    def _tauri_install_in_background(self, app_dir: Path, app_name: str) -> None:
+        """
+        Build a Tauri app binary in a background thread (NANO-110).
+
+        Streams cargo compilation progress to the frontend via socket events.
+        Non-blocking — returns immediately, build runs in a daemon thread.
+        On completion, emits 'ready' or 'failed' status.
+        """
+        import asyncio
+        import platform
+        import re
+        import threading
+
+        ext = ".exe" if platform.system() == "Windows" else ""
+        cargo_name = app_dir.name
+        project_root = app_dir.parent
+        app_key = app_name.lower().replace(" ", "_")
+
+        def _emit(status: str, message: str, progress: int = 0, total: int = 0) -> None:
+            if self._event_loop and self.sio:
+                asyncio.run_coroutine_threadsafe(
+                    self.sio.emit("tauri_build_status", {
+                        "app": app_key,
+                        "status": status,
+                        "message": message,
+                        "progress": progress,
+                        "total": total,
+                    }),
+                    self._event_loop,
+                )
+
+        def _build() -> None:
+            _emit("building", f"Installing {app_name} (first time only — this may take a few minutes)...")
+            print(f"[GUI] {app_name} binary not found — building (first-time only)...", flush=True)
+
+            building_re = re.compile(r"\[=*>?\s*\]\s+(\d+)/(\d+)")
+            compiling_count = 0
+
+            try:
+                proc = subprocess.Popen(
+                    ["cargo", "build", "--release", "-p", cargo_name],
+                    cwd=str(project_root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+
+                for line in iter(proc.stdout.readline, ""):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    m = building_re.search(line)
+                    if m:
+                        current, total = int(m.group(1)), int(m.group(2))
+                        _emit("building", f"Compiling crate {current}/{total}...", current, total)
+                    elif "Compiling" in line:
+                        compiling_count += 1
+                        parts = line.split("Compiling")
+                        crate = parts[-1].strip().split(" ")[0] if len(parts) > 1 else "..."
+                        _emit("building", f"Compiling {crate}...", compiling_count, 0)
+
+                    print(f"[GUI] {app_name} build: {line}", flush=True)
+
+                proc.stdout.close()
+                ret = proc.wait(timeout=600)
+
+                if ret != 0:
+                    print(f"[GUI] {app_name} cargo build failed (exit {ret})", flush=True)
+                    _emit("failed", f"{app_name} build failed.")
+                    return
+
+                print(f"[GUI] {app_name} build complete", flush=True)
+                _emit("ready", f"{app_name} installed successfully.")
+
+            except subprocess.TimeoutExpired:
+                print(f"[GUI] {app_name} cargo build timed out", flush=True)
+                _emit("failed", f"{app_name} build timed out.")
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"[GUI] {app_name} cargo build error: {e}", flush=True)
+                _emit("failed", f"{app_name} build error: {e}")
+
+        thread = threading.Thread(target=_build, daemon=True, name=f"tauri-build-{app_key}")
+        thread.start()
+
+    def _tauri_install_all_in_background(self, apps: list[tuple[Path, str]]) -> None:
+        """
+        Build multiple Tauri apps sequentially in a background thread (NANO-110).
+
+        First app compiles all shared deps (~2-3 min). Subsequent apps reuse
+        the cached deps and compile in seconds. Emits 'ready' only after ALL
+        apps are built.
+        """
+        import asyncio
+        import platform
+        import re
+        import threading
+
+        ext = ".exe" if platform.system() == "Windows" else ""
+
+        def _emit(status: str, message: str, progress: int = 0, total: int = 0) -> None:
+            if self._event_loop and self.sio:
+                asyncio.run_coroutine_threadsafe(
+                    self.sio.emit("tauri_build_status", {
+                        "app": "all",
+                        "status": status,
+                        "message": message,
+                        "progress": progress,
+                        "total": total,
+                    }),
+                    self._event_loop,
+                )
+
+        def _build_all() -> None:
+            building_re = re.compile(r"\[=*>?\s*\]\s+(\d+)/(\d+)")
+
+            npm = "npm.cmd" if platform.system() == "Windows" else "npm"
+
+            for i, (app_dir, app_name) in enumerate(apps):
+                cargo_name = app_dir.name
+                project_root = app_dir.parent
+
+                label = f"({i + 1}/{len(apps)}) {app_name}"
+
+                # Step 1: Build frontend dist (vite build — skip tsc for resilience)
+                dist_dir = app_dir / "dist"
+                npx = "npx.cmd" if platform.system() == "Windows" else "npx"
+                if not dist_dir.exists():
+                    _emit("building", f"{label}: building frontend...")
+                    print(f"[GUI] {app_name}: building frontend dist...", flush=True)
+                    try:
+                        # Ensure node_modules exist
+                        node_modules = app_dir / "node_modules"
+                        if not node_modules.exists():
+                            subprocess.run(
+                                [npm, "install"],
+                                cwd=str(app_dir),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=120,
+                            )
+                        # vite build directly — more resilient than tsc + vite
+                        vite_result = subprocess.run(
+                            [npx, "vite", "build"],
+                            cwd=str(app_dir),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=120,
+                        )
+                        if vite_result.returncode != 0:
+                            print(f"[GUI] {app_name} frontend build failed", flush=True)
+                            _emit("failed", f"{app_name} frontend build failed.")
+                            return
+                    except Exception as e:
+                        print(f"[GUI] {app_name} frontend build error: {e}", flush=True)
+                        _emit("failed", f"{app_name} frontend build error.")
+                        return
+
+                # Step 2: Build Rust binary
+                _emit("building", f"Installing {label}...")
+                print(f"[GUI] Building {label}...", flush=True)
+
+                compiling_count = 0
+                try:
+                    proc = subprocess.Popen(
+                        ["cargo", "build", "--release", "-p", cargo_name],
+                        cwd=str(project_root),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    )
+
+                    for line in iter(proc.stdout.readline, ""):
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        m = building_re.search(line)
+                        if m:
+                            current, total = int(m.group(1)), int(m.group(2))
+                            _emit("building", f"{label}: crate {current}/{total}", current, total)
+                        elif "Compiling" in line:
+                            compiling_count += 1
+                            parts = line.split("Compiling")
+                            crate = parts[-1].strip().split(" ")[0] if len(parts) > 1 else "..."
+                            _emit("building", f"{label}: {crate}", compiling_count, 0)
+
+                        print(f"[GUI] {app_name} build: {line}", flush=True)
+
+                    proc.stdout.close()
+                    ret = proc.wait(timeout=600)
+
+                    if ret != 0:
+                        print(f"[GUI] {app_name} build failed (exit {ret})", flush=True)
+                        _emit("failed", f"{app_name} build failed.")
+                        return
+
+                    print(f"[GUI] {app_name} build complete", flush=True)
+
+                except subprocess.TimeoutExpired:
+                    print(f"[GUI] {app_name} build timed out", flush=True)
+                    _emit("failed", f"{app_name} build timed out.")
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    return
+                except Exception as e:
+                    print(f"[GUI] {app_name} build error: {e}", flush=True)
+                    _emit("failed", f"{app_name} build error: {e}")
+                    return
+
+            # All done
+            _emit("ready", "All overlay apps installed successfully.")
+            print("[GUI] All Tauri apps built successfully", flush=True)
+
+        thread = threading.Thread(target=_build_all, daemon=True, name="tauri-install-all")
+        thread.start()
+
     async def _avatar_spawn(self) -> None:
         """Spawn the avatar renderer if no avatar client is already connected."""
         if self.has_avatar_client:
@@ -4850,6 +5249,12 @@ class GUIServer:
             print(f"[GUI] Avatar directory not found: {avatar_dir}", flush=True)
             return
 
+        # Check binary exists — install must happen first via Install button
+        if not self._tauri_binary_exists(avatar_dir):
+            print("[GUI] Avatar binary not installed — use Install button", flush=True)
+            return
+
+        # Avatar needs npm run tauri dev (Vite serves VRM/FBX assets at runtime)
         try:
             self._avatar_process = subprocess.Popen(
                 ["npm", "run", "tauri", "dev"],
@@ -4913,6 +5318,12 @@ class GUIServer:
             print(f"[GUI] Subtitle directory not found: {subtitle_dir}", flush=True)
             return
 
+        # Check binary exists — install must happen first via Install button
+        if not self._tauri_binary_exists(subtitle_dir):
+            print("[GUI] Subtitle binary not installed — use Install button", flush=True)
+            return
+
+        # Subtitle needs npm run tauri dev (Vite serves assets at runtime)
         try:
             self._subtitle_process = subprocess.Popen(
                 ["npm", "run", "tauri", "dev"],
@@ -4958,6 +5369,73 @@ class GUIServer:
         finally:
             self._subtitle_process = None
             self._subtitle_spawned_by_us = False
+
+    # ============================================================
+    # NANO-110: Stream Deck Process Management
+    # ============================================================
+
+    async def _stream_deck_spawn(self) -> None:
+        """Spawn the stream deck overlay if not already running."""
+        if self._stream_deck_process and self._stream_deck_process.poll() is None:
+            print("[GUI] Stream Deck process already running", flush=True)
+            return
+
+        project_root = Path(__file__).parent.parent.parent.parent
+        deck_dir = project_root / "spindl-stream-deck"
+        if not deck_dir.exists():
+            print(f"[GUI] Stream Deck directory not found: {deck_dir}", flush=True)
+            return
+
+        # Check binary exists — install must happen first via Install button
+        binary = self._tauri_binary_path(deck_dir)
+        if not binary:
+            print("[GUI] Stream Deck binary not installed — use Install button", flush=True)
+            return
+
+        try:
+            self._stream_deck_process = subprocess.Popen(
+                [str(binary)],
+                cwd=str(deck_dir),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._stream_deck_spawned_by_us = True
+            print(
+                f"[GUI] Stream Deck process spawned (PID: {self._stream_deck_process.pid})",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[GUI] Failed to spawn stream deck: {e}", flush=True)
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
+
+    def _stream_deck_kill(self) -> None:
+        """Kill the stream deck process if we spawned it."""
+        if not self._stream_deck_spawned_by_us or not self._stream_deck_process:
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
+            return
+
+        if self._stream_deck_process.poll() is not None:
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
+            return
+
+        try:
+            terminated, force_killed = kill_process_tree(
+                self._stream_deck_process.pid, timeout=5.0
+            )
+            print(
+                f"[GUI] Stream Deck process killed "
+                f"(terminated: {len(terminated)}, force-killed: {len(force_killed)})",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[GUI] Failed to kill stream deck process: {e}", flush=True)
+        finally:
+            self._stream_deck_process = None
+            self._stream_deck_spawned_by_us = False
 
     @property
     def client_count(self) -> int:

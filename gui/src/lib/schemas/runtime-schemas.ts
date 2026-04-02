@@ -116,6 +116,7 @@ export const AvatarConfigSchema = z.object({
   expression_fade_delay: z.number().min(0).max(10).default(1.0),
   subtitles_enabled: z.boolean().default(false),
   subtitle_fade_delay: z.number().min(0).max(10).default(1.5),
+  stream_deck_enabled: z.boolean().default(false), // NANO-110
   avatar_always_on_top: z.boolean().default(true),
   subtitle_always_on_top: z.boolean().default(true),
 });
@@ -162,6 +163,13 @@ export const AvatarAnimationsSchema = z
 // Stimuli Schemas (NANO-056b)
 // ============================================
 
+// NANO-110: Addressing-others context entry schema
+const AddressingContextSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  prompt: z.string(),
+});
+
 /** Matches backend stimuli_config_updated emission */
 export const StimuliConfigUpdatedSchema = z.object({
   enabled: z.boolean(),
@@ -176,6 +184,8 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_max_message_length: z.number().int().min(50).max(1000),
   twitch_prompt_template: z.string(),
   twitch_has_credentials: z.boolean(),
+  // NANO-110: Addressing-others contexts
+  addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
   persisted: z.boolean().optional(),
 });
 

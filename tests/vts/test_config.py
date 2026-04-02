@@ -194,13 +194,6 @@ vtubestudio:
         # Stimuli enabled should remain true (not changed by VTS write)
         reloaded = OrchestratorConfig.from_yaml(str(config_file))
         assert reloaded.vtubestudio_config.enabled is True
-        # Verify stimuli wasn't touched - check raw content
-        lines = content.split("\n")
-        in_stimuli = False
-        for line in lines:
-            if line.strip() == "stimuli:":
-                in_stimuli = True
-            elif line.strip() == "vtubestudio:":
-                in_stimuli = False
-            elif in_stimuli and "enabled:" in line:
-                assert "true" in line, f"Stimuli enabled was modified: {line}"
+        # Verify stimuli master enabled wasn't changed from true
+        reloaded_stimuli = reloaded.stimuli_config
+        assert reloaded_stimuli.enabled is True, "Stimuli enabled was modified"

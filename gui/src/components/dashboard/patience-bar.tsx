@@ -26,9 +26,9 @@ export function PatienceBar() {
   const { connected } = useConnectionStore();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Poll for progress every 1s when stimuli enabled and connected
+  // Poll for progress every 1s when stimuli + patience enabled and connected
   useEffect(() => {
-    if (!connected || !effectiveConfig.enabled) {
+    if (!connected || !effectiveConfig.enabled || !effectiveConfig.patience_enabled) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -52,10 +52,10 @@ export function PatienceBar() {
         intervalRef.current = null;
       }
     };
-  }, [connected, effectiveConfig.enabled]);
+  }, [connected, effectiveConfig.enabled, effectiveConfig.patience_enabled]);
 
-  // Don't render if stimuli disabled or no connection
-  if (!effectiveConfig.enabled || !connected) {
+  // Don't render if stimuli/patience disabled or no connection
+  if (!effectiveConfig.enabled || !effectiveConfig.patience_enabled || !connected) {
     return null;
   }
 
