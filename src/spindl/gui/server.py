@@ -5124,21 +5124,16 @@ class GUIServer:
 
                 label = f"({i + 1}/{len(apps)}) {app_name}"
 
-                # Step 1: Build frontend dist (npm run build = tsc + vite build)
+                # Step 1: Build frontend dist (vite build — skip tsc for resilience)
                 dist_dir = app_dir / "dist"
+                npx = "npx.cmd" if platform.system() == "Windows" else "npx"
                 if not dist_dir.exists():
                     _emit("building", f"{label}: building frontend...")
                     print(f"[GUI] {app_name}: building frontend dist...", flush=True)
                     try:
-                        npm_result = subprocess.run(
-                            [npm, "run", "build"],
-                            cwd=str(app_dir),
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            timeout=120,
-                        )
-                        if npm_result.returncode != 0:
-                            # Try npm install first, then build
+                        # Ensure node_modules exist
+                        node_modules = app_dir / "node_modules"
+                        if not node_modules.exists():
                             subprocess.run(
                                 [npm, "install"],
                                 cwd=str(app_dir),
@@ -5146,17 +5141,18 @@ class GUIServer:
                                 stderr=subprocess.DEVNULL,
                                 timeout=120,
                             )
-                            npm_result = subprocess.run(
-                                [npm, "run", "build"],
-                                cwd=str(app_dir),
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                timeout=120,
-                            )
-                            if npm_result.returncode != 0:
-                                print(f"[GUI] {app_name} frontend build failed", flush=True)
-                                _emit("failed", f"{app_name} frontend build failed.")
-                                return
+                        # vite build directly — more resilient than tsc + vite
+                        vite_result = subprocess.run(
+                            [npx, "vite", "build"],
+                            cwd=str(app_dir),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=120,
+                        )
+                        if vite_result.returncode != 0:
+                            print(f"[GUI] {app_name} frontend build failed", flush=True)
+                            _emit("failed", f"{app_name} frontend build failed.")
+                            return
                     except Exception as e:
                         print(f"[GUI] {app_name} frontend build error: {e}", flush=True)
                         _emit("failed", f"{app_name} frontend build error.")
