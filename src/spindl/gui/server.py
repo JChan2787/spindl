@@ -4211,9 +4211,10 @@ class GUIServer:
                     print(f"[GUI] Error stopping orchestrator: {e}", flush=True)
                     # Continue with shutdown even if orchestrator stop fails
 
-            # Step 1b: Stop avatar and subtitle processes
+            # Step 1b: Stop avatar, subtitle, and stream deck processes
             self._avatar_kill()
             self._subtitle_kill()
+            self._stream_deck_kill()
 
             # Step 2: Stop services
             if self._service_runner:
@@ -4284,9 +4285,10 @@ class GUIServer:
         self._on_services_ready = callback
 
     def shutdown_services(self) -> None:
-        """Shutdown all launched services, avatar, and subtitle processes."""
+        """Shutdown all launched services, avatar, subtitle, and stream deck processes."""
         self._avatar_kill()
         self._subtitle_kill()
+        self._stream_deck_kill()
         if self._service_runner:
             print("[GUI] Shutting down services...", flush=True)
             self._service_runner.shutdown_all()
