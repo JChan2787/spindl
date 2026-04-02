@@ -4922,12 +4922,19 @@ class GUIServer:
         Returns:
             True if binary is ready, False if build failed.
         """
+        import asyncio
         import platform
         ext = ".exe" if platform.system() == "Windows" else ""
         cargo_name = app_dir.name  # e.g., "spindl-avatar"
-        binary = app_dir / "src-tauri" / "target" / "debug" / f"{cargo_name}{ext}"
 
-        if binary.exists():
+        # Workspace root target (Cargo workspace shares one target/ dir)
+        project_root = app_dir.parent
+        binary = project_root / "target" / "debug" / f"{cargo_name}{ext}"
+
+        # Also check legacy per-app target (backwards compat)
+        legacy_binary = app_dir / "src-tauri" / "target" / "debug" / f"{cargo_name}{ext}"
+
+        if binary.exists() or legacy_binary.exists():
             return True
 
         # Need to build — notify frontend and run cargo build with visible output
@@ -4935,13 +4942,13 @@ class GUIServer:
             f"[GUI] {app_name} binary not found — building (first-time only)...",
             flush=True,
         )
+        app_key = app_name.lower().replace(" ", "_")
 
         # Emit building status to all connected clients
         if self._event_loop and self.sio:
-            import asyncio
             asyncio.run_coroutine_threadsafe(
                 self.sio.emit("tauri_build_status", {
-                    "app": app_name.lower().replace(" ", "_"),
+                    "app": app_key,
                     "status": "building",
                     "message": f"Building {app_name} (first time only — this may take a few minutes)...",
                 }),
@@ -4949,9 +4956,10 @@ class GUIServer:
             )
 
         try:
+            # Build via workspace — compiles only what's needed, shares deps
             result = subprocess.run(
-                ["cargo", "build"],
-                cwd=str(app_dir / "src-tauri"),
+                ["cargo", "build", "-p", cargo_name],
+                cwd=str(project_root),
                 timeout=600,  # 10 minutes max
             )
             if result.returncode != 0:
@@ -4959,7 +4967,7 @@ class GUIServer:
                 if self._event_loop and self.sio:
                     asyncio.run_coroutine_threadsafe(
                         self.sio.emit("tauri_build_status", {
-                            "app": app_name.lower().replace(" ", "_"),
+                            "app": app_key,
                             "status": "failed",
                             "message": f"{app_name} build failed.",
                         }),
@@ -4970,7 +4978,7 @@ class GUIServer:
             if self._event_loop and self.sio:
                 asyncio.run_coroutine_threadsafe(
                     self.sio.emit("tauri_build_status", {
-                        "app": app_name.lower().replace(" ", "_"),
+                        "app": app_key,
                         "status": "ready",
                         "message": f"{app_name} build complete.",
                     }),

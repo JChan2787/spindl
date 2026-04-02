@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "spindl-avatar/src-tauri",
+    "spindl-subtitles/src-tauri",
+    "spindl-stream-deck/src-tauri",
+]
+resolver = "2"

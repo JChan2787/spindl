@@ -116,3 +116,6 @@ config/spindl.yaml.e2e_*
 
 # VTubeStudio auth token (local plugin credential)
 vtubeStudio_token.txt
+
+# Cargo workspace build artifacts (shared across all Tauri apps)
+/target/
