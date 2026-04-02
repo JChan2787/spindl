@@ -4931,8 +4931,7 @@ class GUIServer:
     # NANO-097: Avatar Process Management
     # ============================================================
 
-    @staticmethod
-    def _ensure_tauri_built(app_dir: Path, app_name: str) -> bool:
+    def _ensure_tauri_built(self, app_dir: Path, app_name: str) -> bool:
         """
         Ensure a Tauri app binary exists, building if necessary (NANO-110).
 
