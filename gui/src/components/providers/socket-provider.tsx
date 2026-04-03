@@ -215,6 +215,26 @@ export function SocketProvider({ children }: SocketProviderProps) {
       }
     });
 
+    // NANO-111 Session 606: Sentence-level text synced with TTS delivery.
+    // Text appears right before each sentence's audio plays — [text][tts][text][tts].
+    socket.on("llm_chunk", (event) => {
+      if (!currentAssistantMsgId) {
+        // First sentence — create the chat bubble
+        currentAssistantMsgId = addAssistantMessage({
+          text: event.text,
+          isFinal: false,
+        });
+      } else {
+        // Subsequent sentences — append to existing bubble
+        const msg = useChatStore.getState().messages.find((m) => m.id === currentAssistantMsgId);
+        if (msg) {
+          updateAssistantMessage(currentAssistantMsgId, {
+            text: msg.text + " " + event.text,
+          });
+        }
+      }
+    });
+
     // NANO-037: codex entries, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus source
     // NANO-111: When llm_chunk already created the message, finalize with metadata only
     socket.on("response", (event) => {

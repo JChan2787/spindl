@@ -364,6 +364,7 @@ class LlamaProvider(LLMProvider):
             "frequency_penalty": kwargs.get("frequency_penalty", self._default_frequency_penalty),
             "presence_penalty": kwargs.get("presence_penalty", self._default_presence_penalty),
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
 
         # Tool calling support

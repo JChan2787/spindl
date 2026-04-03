@@ -178,6 +178,8 @@ class LLMPipeline:
         self._post_processors: list[PostProcessor] = post_processors or []
         self._tool_executor: Optional["ToolExecutor"] = tool_executor
         self._block_config: Optional[list[PromptBlock]] = None
+        # NANO-111: Deferred post-processor result from run_stream()
+        self._last_stream_result: Optional[PipelineResult] = None
         # Codex injection wrappers (NANO-045d)
         self._codex_prefix: str = "The following facts are always true in this context:"
         self._codex_suffix: str = ""
@@ -466,12 +468,14 @@ class LLMPipeline:
         can_stream = _inner.get_properties().supports_streaming
 
         if not can_stream:
-            # Fallback: run blocking pipeline, yield single chunk
+            # Fallback: run blocking pipeline, yield single chunk.
+            # Also handles tool execution transparently via run().
             result = self.run(
                 user_input, persona, generation_params, state_trigger,
                 input_modality, last_assistant_message, stimulus_source,
                 stimulus_metadata, addressing_others_prompt,
             )
+            self._last_stream_result = result  # Caller reads this after consuming chunks
             tts_text = result.tts_text or result.content
             yield StreamingPipelineChunk(
                 display_text=result.content,
@@ -521,10 +525,6 @@ class LLMPipeline:
         # 3. Resolve generation parameters
         params = self._resolve_generation_params(persona, generation_params)
 
-        # NANO-111: Stash context for callers that need metadata after streaming
-        self._last_stream_context = context
-        self._last_stream_block_contents = context.metadata.get("block_contents")
-
         # 4. Stream LLM tokens, segment into sentences
         segmenter = SentenceSegmenter()
 
@@ -535,10 +535,27 @@ class LLMPipeline:
                 tts_cleanup = plugin
                 break
 
+        # Accumulate full response for deferred post-processors
+        accumulated_content = []
+        accumulated_reasoning = []
+        stream_input_tokens = 0
+        stream_output_tokens = 0
+        stream_reasoning_tokens = None
+
         for chunk in self.provider.generate_stream(
             messages=context.messages,
             **params,
         ):
+            # Track content and token usage across all chunks
+            if chunk.content:
+                accumulated_content.append(chunk.content)
+            if chunk.reasoning:
+                accumulated_reasoning.append(chunk.reasoning)
+            if chunk.is_final:
+                stream_input_tokens = chunk.input_tokens or 0
+                stream_output_tokens = chunk.output_tokens or 0
+                stream_reasoning_tokens = chunk.reasoning_tokens
+
             # NANO-111: Fire token callback for real-time dashboard display
             if on_token and chunk.content:
                 on_token(chunk.content, chunk.is_final)
@@ -565,6 +582,45 @@ class LLMPipeline:
                     index=sentence.index,
                     is_final=sentence.is_final,
                 )
+
+        # --- Deferred post-processing (NANO-111 Session 606) ---
+        # All chunks have been yielded. Now run post-processors on the
+        # accumulated response — same as run() steps 5-8.
+        full_response = "".join(accumulated_content)
+        full_reasoning = "".join(accumulated_reasoning) if accumulated_reasoning else None
+
+        # 5. Stash reasoning in context metadata for post-processors (NANO-042)
+        if full_reasoning:
+            context.metadata["reasoning"] = full_reasoning
+
+        # 6. Run post-processors on accumulated content
+        response_text = full_response
+        for plugin in self._post_processors:
+            response_text = plugin.process(context, response_text)
+
+        # 7. Extract activated codex entries for GUI display (NANO-037 Phase 2)
+        activated_codex = self._extract_codex_display_data(context)
+
+        # 8. Extract retrieved memories for GUI display (NANO-044)
+        retrieved_memories = self._extract_rag_display_data(context)
+
+        # Store result for caller to retrieve after consuming all chunks
+        self._last_stream_result = PipelineResult(
+            content=response_text,
+            usage=TokenUsage(
+                input_tokens=stream_input_tokens,
+                output_tokens=stream_output_tokens,
+                reasoning_tokens=stream_reasoning_tokens,
+            ),
+            messages=context.messages,
+            input_modality=input_modality.value,
+            state_trigger=state_trigger,
+            activated_codex_entries=activated_codex,
+            retrieved_memories=retrieved_memories,
+            reasoning=context.metadata.get("reasoning"),
+            tts_text=context.metadata.get("tts_text"),
+            block_contents=context.metadata.get("block_contents"),
+        )
 
     def build_snapshot(self, persona: dict) -> dict:
         """

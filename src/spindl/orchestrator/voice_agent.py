@@ -739,7 +739,12 @@ class VoiceAgentOrchestrator:
         # Start playback
         self._playback.play(audio)
 
-    def _on_response_ready_streaming(self, first_chunk: np.ndarray) -> None:
+    def _on_response_ready_streaming(
+        self,
+        first_chunk: np.ndarray,
+        on_chunk_start=None,
+        on_chunk_end=None,
+    ) -> None:
         """
         Called when the first TTS audio chunk is ready for streaming playback (NANO-111 Phase 2).
 
@@ -757,13 +762,26 @@ class VoiceAgentOrchestrator:
         self._state_machine.start_system_speaking()
 
         # Start streaming playback with first chunk
-        self._playback.play_streaming(first_chunk)
+        self._playback.play_streaming(
+            first_chunk,
+            on_chunk_start=on_chunk_start,
+            on_chunk_end=on_chunk_end,
+        )
 
-    def _append_playback_audio(self, chunk: np.ndarray) -> None:
+    def _append_playback_audio(
+        self,
+        chunk: np.ndarray,
+        on_chunk_start=None,
+        on_chunk_end=None,
+    ) -> None:
         """Append an audio chunk to the currently streaming playback (NANO-111 Phase 2)."""
         if not self._running:
             return
-        self._playback.append_audio(chunk)
+        self._playback.append_audio(
+            chunk,
+            on_chunk_start=on_chunk_start,
+            on_chunk_end=on_chunk_end,
+        )
 
     def _finalize_playback_streaming(self) -> None:
         """Signal that no more audio chunks will arrive (NANO-111 Phase 2)."""
