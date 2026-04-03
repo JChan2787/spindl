@@ -143,7 +143,7 @@ class PatienceModule(StimulusModule):
         Returns:
             Dict with elapsed, total, and progress (0.0 to 1.0).
         """
-        if self._paused:
+        if self._paused or not self._running:
             return {
                 "elapsed": 0.0,
                 "total": self._timeout,
