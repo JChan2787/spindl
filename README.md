@@ -4,6 +4,8 @@ A local-first AI character engine. Give your character a voice, a face, memory, 
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Tests: 2,400+](https://img.shields.io/badge/tests-2%2C400%2B-brightgreen)
 
+DEMO VIDEO: [Youtube](https://www.youtube.com/watch?v=WwQ7wQR-7rw)
+
 ![SpindL Dashboard](docs/images/dashboard-01.png)
 
 ## What It Does
