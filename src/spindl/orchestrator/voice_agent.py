@@ -1771,6 +1771,10 @@ class VoiceAgentOrchestrator:
                     if patience_enabled is not None:
                         module.enabled = patience_enabled
                         cfg.patience_enabled = patience_enabled
+                        if patience_enabled:
+                            module.start()
+                        else:
+                            module.stop()
                     if patience_seconds is not None:
                         module.timeout_seconds = patience_seconds
                         cfg.patience_seconds = patience_seconds
@@ -1785,6 +1789,10 @@ class VoiceAgentOrchestrator:
                     if twitch_enabled is not None:
                         module.enabled = twitch_enabled
                         cfg.twitch_enabled = twitch_enabled
+                        if twitch_enabled:
+                            module.start()
+                        else:
+                            module.stop()
                     if twitch_channel is not None:
                         module.channel = twitch_channel
                         cfg.twitch_channel = twitch_channel
