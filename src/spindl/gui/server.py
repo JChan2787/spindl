@@ -4467,6 +4467,7 @@ class GUIServer:
                     "avatar_always_on_top": config.avatar_config.avatar_always_on_top,
                     "subtitle_always_on_top": config.avatar_config.subtitle_always_on_top,
                     "stream_deck_enabled": config.avatar_config.stream_deck_enabled,
+                    "avatar_connected": self.has_avatar_client,
                 },
                 # NANO-065b: LLM provider runtime state
                 "llm": self._orchestrator.get_llm_state(),
