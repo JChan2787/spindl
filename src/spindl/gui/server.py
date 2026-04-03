@@ -4869,6 +4869,10 @@ class GUIServer:
         """Emit streaming LLM sentence chunk for real-time dashboard text (NANO-111)."""
         await self.sio.emit("llm_chunk", {"text": text, "is_final": is_final})
 
+    async def emit_llm_token(self, token: str, is_final: bool) -> None:
+        """Emit token-level LLM text for real-time dashboard display (NANO-111)."""
+        await self.sio.emit("llm_token", {"token": token, "is_final": is_final})
+
     async def emit_avatar_load_model(
         self,
         vrm_path: str,

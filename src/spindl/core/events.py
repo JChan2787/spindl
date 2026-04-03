@@ -55,6 +55,7 @@ class EventType(Enum):
 
     # Streaming events (NANO-111)
     LLM_CHUNK = auto()  # Sentence-level chunk from streaming LLM response
+    LLM_TOKEN = auto()  # Token-level text from streaming LLM (for dashboard display)
 
     # Error events
     PIPELINE_ERROR = auto()  # Processing error occurred
@@ -390,3 +391,20 @@ class LLMChunkEvent(Event):
     """Sentence text for display."""
     is_final: bool = False
     """True if this is the last sentence in the response."""
+
+
+@dataclass
+class LLMTokenEvent(Event):
+    """
+    Token-level text from streaming LLM response (NANO-111).
+
+    Emitted for every StreamChunk from the LLM provider — each token or
+    small group of tokens as they're generated. The dashboard uses these
+    for real-time word-by-word text display (like ChatGPT).
+    """
+
+    event_type: EventType = field(default=EventType.LLM_TOKEN, init=False)
+    token: str = ""
+    """Token text (typically 1-3 words per chunk)."""
+    is_final: bool = False
+    """True on the last token in the response."""

@@ -1377,6 +1377,10 @@ export interface ServerToClientEvents {
   audio_level: (event: AudioLevelEvent) => void;
   // NANO-073b: Mic input level for voice overlay
   mic_level: (event: MicLevelEvent) => void;
+  // NANO-111: Streaming LLM sentence chunks
+  llm_chunk: (event: { text: string; is_final: boolean }) => void;
+  // NANO-111: Token-level LLM text for real-time display
+  llm_token: (event: { token: string; is_final: boolean }) => void;
 }
 
 export interface ClientToServerEvents {

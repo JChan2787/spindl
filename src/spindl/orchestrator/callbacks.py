@@ -98,6 +98,11 @@ class OrchestratorCallbacks:
         self._on_error = on_error
         self._on_pause_listening = on_pause_listening
         self._on_resume_listening = on_resume_listening
+
+        # NANO-111 Phase 2: Streaming playback callbacks (set by voice agent)
+        self._on_response_ready_streaming: Optional[Callable[[np.ndarray], None]] = None
+        self._append_playback_audio: Optional[Callable[[np.ndarray], None]] = None
+        self._finalize_playback_streaming: Optional[Callable[[], None]] = None
         self._event_bus = event_bus
         self._context_manager = context_manager
 
@@ -195,25 +200,27 @@ class OrchestratorCallbacks:
                 state_trigger = self._pending_state_trigger
                 self._pending_state_trigger = None
 
-                # NANO-111: Check if streaming is available
+                # NANO-111: Check if streaming playback callbacks are wired
+                # The pipeline's run_stream() handles provider/tool fallback internally —
+                # it yields a single chunk from blocking run() if streaming isn't available.
+                # We only need to check if the voice agent wired the streaming callbacks.
                 from ..llm.provider_holder import ProviderHolder
                 _inner = self._pipeline.provider.provider if isinstance(self._pipeline.provider, ProviderHolder) else self._pipeline.provider
                 can_stream = _inner.get_properties().supports_streaming
-                has_tools = self._pipeline._tool_executor is not None
 
                 tts_config = self._persona.get("tts_voice_config", {})
 
-                if can_stream and not has_tools:
-                    # --- NANO-111: Streaming path ---
-                    audio_response = self._synthesize_streaming(transcription, tts_config)
+                logger.debug(f"[NANO-111] can_stream={can_stream}, streaming_cb={self._on_response_ready_streaming is not None}")
+                if can_stream and self._on_response_ready_streaming is not None:
+                    # --- NANO-111 Phase 2: Streaming path ---
+                    # Playback starts inline during _synthesize_streaming via
+                    # play_streaming/append_audio/finalize_streaming callbacks.
+                    result = self._synthesize_streaming(transcription, tts_config)
 
-                    if audio_response is None:
+                    if result is None:
                         return
 
-                    # Signal response is ready
                     self._total_turns += 1
-                    if self._on_response_ready is not None:
-                        self._on_response_ready(audio_response)
                 else:
                     # --- Blocking path (existing behavior) ---
 
@@ -350,26 +357,32 @@ class OrchestratorCallbacks:
         tts_config: dict,
     ) -> Optional[np.ndarray]:
         """
-        Stream LLM response, synthesize TTS per-sentence in parallel (NANO-111).
+        Stream LLM response, synthesize TTS per-sentence in parallel,
+        start playback on first chunk and append subsequent chunks (NANO-111 Phase 2).
 
         Uses pipeline.run_stream() to get sentence-level chunks, fires TTS
-        synthesis for each sentence in a separate thread, then concatenates
-        audio in sentence order.
+        synthesis for each sentence in a separate thread, delivers audio to
+        the playback device in sentence order as chunks complete.
+
+        Per-sentence emotion classification drives avatar expression transitions.
 
         Args:
             transcription: User's transcribed speech text.
             tts_config: TTS voice configuration from persona.
 
         Returns:
-            Concatenated audio array (float32) ready for playback,
-            or None if response was empty.
+            None — playback is started inline via play_streaming/append_audio.
+            Returns the full audio array for callers that need it (voice agent
+            duration calculation still uses the concatenated result).
         """
         from ..llm.pipeline import StreamingPipelineChunk
+        from ..core.events import LLMChunkEvent
 
-        chunks: list[StreamingPipelineChunk] = []
         audio_results: dict[int, np.ndarray] = {}  # index → audio
+        audio_ready = threading.Event()  # signaled when any new audio arrives
         tts_threads: list[threading.Thread] = []
         lock = threading.Lock()
+        total_chunks_dispatched = 0  # how many TTS threads were fired
 
         def synthesize_chunk(tts_text: str, index: int):
             """Synthesize one sentence in a thread."""
@@ -382,8 +395,12 @@ class OrchestratorCallbacks:
                 audio = np.frombuffer(result.data, dtype=np.float32)
                 with lock:
                     audio_results[index] = audio
+                audio_ready.set()
             except Exception as e:
                 logger.warning(f"[NANO-111] TTS failed for chunk {index}: {e}")
+                with lock:
+                    audio_results[index] = np.array([], dtype=np.float32)
+                audio_ready.set()
 
         # Capture pending state trigger and last assistant message
         state_trigger = self._pending_state_trigger
@@ -397,6 +414,14 @@ class OrchestratorCallbacks:
 
         full_display_text = []
         full_tts_text = []
+        playback_started = False
+        next_to_deliver = 0  # next sentence index to deliver to playback
+
+        # NANO-111: Token-level callback for real-time dashboard display
+        def _on_token(token_text: str, is_final: bool):
+            if self._event_bus is not None:
+                from ..core.events import LLMTokenEvent
+                self._event_bus.emit(LLMTokenEvent(token=token_text, is_final=is_final))
 
         for chunk in self._pipeline.run_stream(
             transcription,
@@ -406,18 +431,31 @@ class OrchestratorCallbacks:
             input_modality=InputModality.VOICE,
             last_assistant_message=last_msg,
             addressing_others_prompt=addressing_prompt,
+            on_token=_on_token,
         ):
-            chunks.append(chunk)
             full_display_text.append(chunk.display_text)
             full_tts_text.append(chunk.tts_text)
 
-            # Emit LLM chunk event for real-time dashboard text (NANO-111)
+            # Emit LLM chunk event for real-time dashboard text
             if self._event_bus is not None:
-                from ..core.events import LLMChunkEvent
                 self._event_bus.emit(LLMChunkEvent(
                     text=chunk.display_text,
                     is_final=chunk.is_final,
                 ))
+                # NANO-111: Yield control so the asyncio event loop can flush
+                # the Socket.IO emit to the client between sentences.
+                # Without this, all emits queue up and flush at once after
+                # the streaming loop completes.
+                time.sleep(0.01)
+
+            # Per-sentence emotion classification for avatar (NANO-111 Phase 2)
+            if self._event_bus is not None and chunk.display_text.strip():
+                emotion, confidence = self._classify_emotion(chunk.display_text)
+                if emotion:
+                    self._event_bus.emit(AvatarMoodEvent(
+                        mood=emotion,
+                        confidence=confidence,
+                    ))
 
             # Fire TTS in parallel thread if there's text to speak
             if chunk.tts_text.strip():
@@ -428,20 +466,56 @@ class OrchestratorCallbacks:
                 )
                 t.start()
                 tts_threads.append(t)
+                total_chunks_dispatched += 1
 
-        # Wait for all TTS threads to complete
+            # Try to deliver any ready audio chunks in order
+            while True:
+                with lock:
+                    if next_to_deliver not in audio_results:
+                        break
+                    audio_chunk = audio_results[next_to_deliver]
+
+                if len(audio_chunk) > 0:
+                    if not playback_started:
+                        # Start playback with first chunk — audio begins now
+                        self._on_response_ready_streaming(audio_chunk)
+                        playback_started = True
+                    else:
+                        self._append_playback_audio(audio_chunk)
+
+                next_to_deliver += 1
+
+        # LLM stream complete — wait for remaining TTS threads
         for t in tts_threads:
             t.join()
+
+        # Deliver any remaining audio chunks that completed after the LLM stream ended
+        while next_to_deliver < total_chunks_dispatched:
+            with lock:
+                if next_to_deliver in audio_results:
+                    audio_chunk = audio_results[next_to_deliver]
+                else:
+                    break
+
+            if len(audio_chunk) > 0:
+                if not playback_started:
+                    self._on_response_ready_streaming(audio_chunk)
+                    playback_started = True
+                else:
+                    self._append_playback_audio(audio_chunk)
+
+            next_to_deliver += 1
+
+        # Signal no more audio coming
+        self._finalize_playback_streaming()
 
         # Assemble full response for events and history
         response = " ".join(full_display_text)
         tts_text_combined = " ".join(full_tts_text)
         self._last_response = response
 
-        # Classify emotion on full response (NANO-094)
+        # Emit response event with full text (final summary after all chunks)
         emotion, emotion_confidence = self._classify_emotion(response or "")
-
-        # Emit response event with full text
         if self._event_bus is not None:
             self._event_bus.emit(
                 ResponseReadyEvent(
@@ -459,15 +533,9 @@ class OrchestratorCallbacks:
         if not response or response.strip() == "":
             return None
 
-        # Concatenate audio in sentence order
-        ordered_audio = []
-        for i in sorted(audio_results.keys()):
-            ordered_audio.append(audio_results[i])
-
-        if not ordered_audio:
-            return None
-
-        return np.concatenate(ordered_audio)
+        # Return concatenated audio for duration calculation
+        ordered = [audio_results[i] for i in sorted(audio_results.keys()) if len(audio_results.get(i, [])) > 0]
+        return np.concatenate(ordered) if ordered else None
 
     def on_barge_in(self) -> None:
         """
@@ -573,19 +641,75 @@ class OrchestratorCallbacks:
                 # Generate response via LLM pipeline
                 # NANO-073d: Text input uses TEXT modality (was hardcoded VOICE)
                 # NANO-075: Thread stimulus_source for JSONL metadata persistence
+                # NANO-111: Use run_stream() for incremental dashboard display
                 modality = InputModality.STIMULUS if stimulus_source else InputModality.TEXT
-                result = self._pipeline.run(
-                    transcription,
-                    self._persona,
-                    generation_params=self._generation_params,
-                    state_trigger=state_trigger,
-                    input_modality=modality,
-                    last_assistant_message=None,
-                    stimulus_source=stimulus_source,
-                    stimulus_metadata=stimulus_metadata,
-                )
-                response = result.content
-                tts_response = result.tts_text or response  # NANO-109
+
+                from ..llm.provider_holder import ProviderHolder
+                from ..core.events import LLMChunkEvent, LLMTokenEvent
+                _inner = self._pipeline.provider.provider if isinstance(self._pipeline.provider, ProviderHolder) else self._pipeline.provider
+                can_stream_text = _inner.get_properties().supports_streaming
+
+                if can_stream_text:
+                    # NANO-111: Token-level callback for real-time display
+                    def _on_token_text(token_text: str, is_final: bool):
+                        if self._event_bus is not None:
+                            self._event_bus.emit(LLMTokenEvent(token=token_text, is_final=is_final))
+
+                    full_display = []
+                    full_tts = []
+                    for chunk in self._pipeline.run_stream(
+                        transcription,
+                        self._persona,
+                        generation_params=self._generation_params,
+                        state_trigger=state_trigger,
+                        input_modality=modality,
+                        last_assistant_message=None,
+                        stimulus_source=stimulus_source,
+                        stimulus_metadata=stimulus_metadata,
+                        on_token=_on_token_text,
+                    ):
+                        full_display.append(chunk.display_text)
+                        full_tts.append(chunk.tts_text)
+                        if self._event_bus is not None:
+                            self._event_bus.emit(LLMChunkEvent(
+                                text=chunk.display_text,
+                                is_final=chunk.is_final,
+                            ))
+                            time.sleep(0.01)  # Yield for Socket.IO flush
+
+                    response = " ".join(full_display)
+                    tts_response = " ".join(full_tts)
+                    # Build a minimal result-like object for downstream code
+                    result = type("StreamResult", (), {
+                        "content": response,
+                        "tts_text": tts_response,
+                        "activated_codex_entries": [],
+                        "retrieved_memories": [],
+                        "reasoning": None,
+                        "usage": type("Usage", (), {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0,
+                        })(),
+                        "messages": [],
+                        "input_modality": modality.value,
+                        "state_trigger": state_trigger,
+                        "block_contents": None,
+                    })()
+                else:
+                    result = self._pipeline.run(
+                        transcription,
+                        self._persona,
+                        generation_params=self._generation_params,
+                        state_trigger=state_trigger,
+                        input_modality=modality,
+                        last_assistant_message=None,
+                        stimulus_source=stimulus_source,
+                        stimulus_metadata=stimulus_metadata,
+                    )
+                    response = result.content
+                    tts_response = result.tts_text or response  # NANO-109
+
                 self._last_response = response
 
                 # Classify emotion for avatar + chat display (NANO-094)

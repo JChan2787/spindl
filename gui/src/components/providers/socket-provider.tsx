@@ -196,11 +196,32 @@ export function SocketProvider({ children }: SocketProviderProps) {
       }
     });
 
+    // NANO-111: Token-level LLM text for real-time chat display (like ChatGPT)
+    socket.on("llm_token", (event) => {
+      if (!currentAssistantMsgId) {
+        // First token — create the chat bubble
+        currentAssistantMsgId = addAssistantMessage({
+          text: event.token,
+          isFinal: false,
+        });
+      } else {
+        // Subsequent tokens — append to existing bubble
+        const msg = useChatStore.getState().messages.find((m) => m.id === currentAssistantMsgId);
+        if (msg) {
+          updateAssistantMessage(currentAssistantMsgId, {
+            text: msg.text + event.token,
+          });
+        }
+      }
+    });
+
     // NANO-037: codex entries, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus source
+    // NANO-111: When llm_chunk already created the message, finalize with metadata only
     socket.on("response", (event) => {
       setResponse(event.text, event.is_final, event.activated_codex_entries, event.reasoning, event.retrieved_memories, event.stimulus_source);
       // NANO-073a: Create or update assistant message in chat history
       if (!currentAssistantMsgId) {
+        // No llm_chunk arrived (blocking path) — create the message with full text
         currentAssistantMsgId = addAssistantMessage({
           text: event.text,
           isFinal: event.is_final,
@@ -212,8 +233,9 @@ export function SocketProvider({ children }: SocketProviderProps) {
           emotionConfidence: event.emotion_confidence,
         });
       } else {
+        // NANO-111: llm_chunk already built the text incrementally.
+        // Only finalize metadata — do NOT overwrite text.
         updateAssistantMessage(currentAssistantMsgId, {
-          text: event.text,
           isFinal: event.is_final,
           reasoning: event.reasoning,
           activatedCodexEntries: event.activated_codex_entries,
@@ -786,6 +808,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
       socket.off("state_changed");
       socket.off("transcription");
       socket.off("response");
+      socket.off("llm_chunk");
+      socket.off("llm_token");
       socket.off("token_usage");
       socket.off("health_status");
       socket.off("config_loaded");

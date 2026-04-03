@@ -440,6 +440,7 @@ class LLMPipeline:
         stimulus_source: Optional[str] = None,
         stimulus_metadata: Optional[dict] = None,
         addressing_others_prompt: Optional[str] = None,
+        on_token: Optional[callable] = None,
     ) -> Iterator[StreamingPipelineChunk]:
         """
         Execute pipeline with streaming LLM and sentence-level chunking (NANO-111).
@@ -463,9 +464,8 @@ class LLMPipeline:
         from .provider_holder import ProviderHolder
         _inner = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider
         can_stream = _inner.get_properties().supports_streaming
-        has_tools = self._tool_executor is not None
 
-        if not can_stream or has_tools:
+        if not can_stream:
             # Fallback: run blocking pipeline, yield single chunk
             result = self.run(
                 user_input, persona, generation_params, state_trigger,
@@ -535,6 +535,10 @@ class LLMPipeline:
             messages=context.messages,
             **params,
         ):
+            # NANO-111: Fire token callback for real-time dashboard display
+            if on_token and chunk.content:
+                on_token(chunk.content, chunk.is_final)
+
             for sentence in segmenter.feed(chunk):
                 display_text = sentence.text
 

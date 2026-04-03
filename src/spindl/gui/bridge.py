@@ -30,6 +30,7 @@ from spindl.core.events import (
     AvatarMoodEvent,
     AvatarToolMoodEvent,
     LLMChunkEvent,
+    LLMTokenEvent,
 )
 
 if TYPE_CHECKING:
@@ -88,6 +89,7 @@ class EventBridge:
         self._subscribe(EventType.AVATAR_MOOD, self._on_avatar_mood)
         self._subscribe(EventType.AVATAR_TOOL_MOOD, self._on_avatar_tool_mood)
         self._subscribe(EventType.LLM_CHUNK, self._on_llm_chunk)
+        self._subscribe(EventType.LLM_TOKEN, self._on_llm_token)
 
         logger.info(f"EventBridge started with {len(self._subscription_ids)} subscriptions")
 
@@ -324,4 +326,12 @@ class EventBridge:
             return
         self._emit_async(
             self._gui_server.emit_llm_chunk(text=event.text, is_final=event.is_final)
+        )
+
+    def _on_llm_token(self, event: LLMTokenEvent) -> None:
+        """Handle token-level LLM text for real-time dashboard display (NANO-111)."""
+        if not self._should_emit():
+            return
+        self._emit_async(
+            self._gui_server.emit_llm_token(token=event.token, is_final=event.is_final)
         )
