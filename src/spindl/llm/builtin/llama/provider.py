@@ -6,6 +6,7 @@ enabling swappable LLM backends via configuration.
 
 Features:
 - OpenAI-compatible chat completions API
+- SSE streaming with cancel-on-disconnect (NANO-111)
 - Native tool/function calling support (llama.cpp >= b2000)
 - Token counting via /tokenize endpoint
 """
@@ -13,11 +14,11 @@ Features:
 import json
 import logging
 import time
-from typing import Optional
+from typing import Iterator, Optional
 
 import requests
 
-from ...base import LLMProperties, LLMProvider, LLMResponse, ToolCall
+from ...base import LLMProperties, LLMProvider, LLMResponse, StreamChunk, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class LlamaProvider(LLMProvider):
 
     Properties:
         - Model: Depends on what's loaded in llama.cpp
-        - Streaming: Not yet implemented (yields single complete result)
+        - Streaming: SSE via /v1/chat/completions with stream=true (NANO-111)
 
     Config schema (llm.providers.llama):
         url: str          - Server URL (default: "http://127.0.0.1:5557")
@@ -159,7 +160,7 @@ class LlamaProvider(LLMProvider):
 
         return LLMProperties(
             model_name=self._model_name,
-            supports_streaming=False,  # TODO: Add streaming support
+            supports_streaming=True,  # NANO-111: SSE streaming
             context_length=self._context_length,
             supports_tools=True,  # llama.cpp supports OpenAI-compatible tool calling
             supports_tool_role=supports_tool_role,
@@ -316,6 +317,211 @@ class LlamaProvider(LLMProvider):
             raise RuntimeError(
                 f"Unexpected response format: {data}"
             ) from e
+
+    def generate_stream(
+        self,
+        messages: list[dict],
+        temperature: float = 0.7,
+        max_tokens: int = 256,
+        tools: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> Iterator[StreamChunk]:
+        """
+        Generate response with SSE streaming (NANO-111).
+
+        Yields StreamChunk objects as tokens arrive from llama.cpp.
+        Closing the response (e.g., on barge-in) cancels server-side
+        generation — llama.cpp honors client disconnect since PR #11418.
+
+        Args:
+            messages: OpenAI-style message list
+            temperature: Sampling temperature (0.0-2.0)
+            max_tokens: Maximum response length
+            tools: Optional list of tool definitions (OpenAI format)
+            **kwargs: Additional options (top_p, stop, tool_choice)
+
+        Yields:
+            StreamChunk objects (is_final=False until last chunk)
+        """
+        if not self._initialized:
+            raise RuntimeError("LlamaProvider not initialized. Call initialize() first.")
+
+        endpoint = f"{self._base_url}/v1/chat/completions"
+
+        # Use defaults if not specified
+        if temperature == 0.7:
+            temperature = self._default_temperature
+        if max_tokens == 256:
+            max_tokens = self._default_max_tokens
+
+        payload = {
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "top_p": kwargs.get("top_p", self._default_top_p),
+            "repeat_penalty": kwargs.get("repeat_penalty", self._default_repeat_penalty),
+            "repeat_last_n": kwargs.get("repeat_last_n", self._default_repeat_last_n),
+            "frequency_penalty": kwargs.get("frequency_penalty", self._default_frequency_penalty),
+            "presence_penalty": kwargs.get("presence_penalty", self._default_presence_penalty),
+            "stream": True,
+        }
+
+        # Tool calling support
+        if tools:
+            payload["tools"] = tools
+            tool_choice = kwargs.pop("tool_choice", "auto")
+            payload["tool_choice"] = tool_choice
+
+        stop = kwargs.get("stop")
+        if stop:
+            payload["stop"] = stop
+
+        # NANO-087: pin chat to slot 0 when sharing server with vision (slot 1)
+        if self._unified_vision:
+            payload["id_slot"] = 0
+
+        try:
+            response = requests.post(
+                endpoint,
+                json=payload,
+                timeout=self._timeout,
+                stream=True,
+            )
+            response.raise_for_status()
+        except requests.exceptions.Timeout as e:
+            raise TimeoutError(f"Request timed out after {self._timeout}s") from e
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError(
+                f"Failed to connect to LLM server at {self._base_url}: {e}"
+            ) from e
+        except requests.exceptions.HTTPError as e:
+            raise RuntimeError(
+                f"Server returned error: {e.response.status_code} - {e.response.text}"
+            ) from e
+
+        # Parse SSE stream — closing `response` cancels server-side generation
+        yield from self._parse_sse_stream(response)
+
+    def _parse_sse_stream(self, response: requests.Response) -> Iterator[StreamChunk]:
+        """
+        Parse Server-Sent Events stream from llama.cpp.
+
+        SSE format (OpenAI-compatible):
+            data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}
+            data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{...}}
+            data: [DONE]
+
+        Args:
+            response: Streaming requests.Response object
+
+        Yields:
+            StreamChunk objects parsed from SSE events
+        """
+        accumulated_tool_calls: dict[int, dict] = {}
+
+        for line in response.iter_lines():
+            if not line:
+                continue
+
+            line_str = line.decode("utf-8")
+
+            # Skip SSE comments (keep-alive)
+            if line_str.startswith(":"):
+                continue
+
+            if not line_str.startswith("data: "):
+                continue
+
+            json_str = line_str[6:]  # Strip "data: " prefix
+
+            # End of stream
+            if json_str == "[DONE]":
+                break
+
+            try:
+                chunk_data = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse SSE chunk: {e}")
+                continue
+
+            choices = chunk_data.get("choices", [])
+            usage = chunk_data.get("usage")
+
+            if not choices:
+                # Usage-only chunk at stream end
+                if usage:
+                    final_tool_calls = self._build_tool_calls(accumulated_tool_calls)
+                    yield StreamChunk(
+                        content="",
+                        is_final=True,
+                        input_tokens=usage.get("prompt_tokens"),
+                        output_tokens=usage.get("completion_tokens"),
+                        reasoning_tokens=usage.get("completion_tokens_details", {}).get("reasoning_tokens"),
+                        tool_calls=final_tool_calls,
+                    )
+                continue
+
+            delta = choices[0].get("delta", {})
+            finish_reason = choices[0].get("finish_reason")
+
+            content = delta.get("content", "")
+            reasoning = delta.get("reasoning_content")  # llama.cpp --reasoning-format deepseek
+
+            # Accumulate tool calls across chunks
+            for tc in delta.get("tool_calls", []):
+                idx = tc.get("index", 0)
+                if idx not in accumulated_tool_calls:
+                    accumulated_tool_calls[idx] = {"id": "", "name": "", "arguments": ""}
+                if tc.get("id"):
+                    accumulated_tool_calls[idx]["id"] = tc["id"]
+                if "function" in tc:
+                    func = tc["function"]
+                    if func.get("name"):
+                        accumulated_tool_calls[idx]["name"] = func["name"]
+                    if func.get("arguments"):
+                        accumulated_tool_calls[idx]["arguments"] += func["arguments"]
+
+            is_final = finish_reason is not None
+
+            tool_calls = []
+            if is_final and accumulated_tool_calls:
+                tool_calls = self._build_tool_calls(accumulated_tool_calls)
+
+            chunk = StreamChunk(
+                content=content or "",
+                reasoning=reasoning,
+                is_final=is_final,
+                finish_reason=finish_reason,
+                tool_calls=tool_calls,
+            )
+
+            # Attach usage if present (typically final chunk)
+            if usage:
+                chunk = StreamChunk(
+                    content=content or "",
+                    reasoning=reasoning,
+                    is_final=True,
+                    input_tokens=usage.get("prompt_tokens"),
+                    output_tokens=usage.get("completion_tokens"),
+                    reasoning_tokens=usage.get("completion_tokens_details", {}).get("reasoning_tokens"),
+                    finish_reason=finish_reason,
+                    tool_calls=tool_calls,
+                )
+
+            if content or reasoning or delta.get("tool_calls") or is_final:
+                yield chunk
+
+    @staticmethod
+    def _build_tool_calls(accumulated: dict[int, dict]) -> list[ToolCall]:
+        """Build ToolCall list from accumulated streaming tool call fragments."""
+        tool_calls = []
+        for _idx, tc in sorted(accumulated.items()):
+            try:
+                args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=args))
+        return tool_calls
 
     def count_tokens(self, text: str) -> int:
         """

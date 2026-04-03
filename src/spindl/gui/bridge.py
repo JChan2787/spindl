@@ -29,6 +29,7 @@ from spindl.core.events import (
     StimulusFiredEvent,
     AvatarMoodEvent,
     AvatarToolMoodEvent,
+    LLMChunkEvent,
 )
 
 if TYPE_CHECKING:
@@ -86,6 +87,7 @@ class EventBridge:
         self._subscribe(EventType.MIC_LEVEL, self._on_mic_level)
         self._subscribe(EventType.AVATAR_MOOD, self._on_avatar_mood)
         self._subscribe(EventType.AVATAR_TOOL_MOOD, self._on_avatar_tool_mood)
+        self._subscribe(EventType.LLM_CHUNK, self._on_llm_chunk)
 
         logger.info(f"EventBridge started with {len(self._subscription_ids)} subscriptions")
 
@@ -314,4 +316,12 @@ class EventBridge:
             return
         self._emit_async(
             self._gui_server.emit_avatar_tool_mood(tool_mood=event.tool_mood)
+        )
+
+    def _on_llm_chunk(self, event: LLMChunkEvent) -> None:
+        """Handle streaming LLM sentence chunk (NANO-111)."""
+        if not self._should_emit():
+            return
+        self._emit_async(
+            self._gui_server.emit_llm_chunk(text=event.text, is_final=event.is_final)
         )

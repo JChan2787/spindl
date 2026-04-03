@@ -53,6 +53,9 @@ class EventType(Enum):
     AVATAR_MOOD = auto()       # Emotion classifier produced mood for avatar
     AVATAR_TOOL_MOOD = auto()  # Tool invocation mapped to avatar visual category
 
+    # Streaming events (NANO-111)
+    LLM_CHUNK = auto()  # Sentence-level chunk from streaming LLM response
+
     # Error events
     PIPELINE_ERROR = auto()  # Processing error occurred
 
@@ -371,3 +374,19 @@ class AvatarToolMoodEvent(Event):
 
     event_type: EventType = field(default=EventType.AVATAR_TOOL_MOOD, init=False)
     tool_mood: str = ""
+
+
+@dataclass
+class LLMChunkEvent(Event):
+    """
+    Sentence-level chunk from streaming LLM response (NANO-111).
+
+    Emitted as each sentence is extracted from the LLM token stream.
+    The dashboard uses these to display response text incrementally.
+    """
+
+    event_type: EventType = field(default=EventType.LLM_CHUNK, init=False)
+    text: str = ""
+    """Sentence text for display."""
+    is_final: bool = False
+    """True if this is the last sentence in the response."""

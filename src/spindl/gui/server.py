@@ -4865,6 +4865,10 @@ class GUIServer:
         """Emit avatar tool mood event from tool invocation (NANO-093)."""
         await self.sio.emit("avatar_tool_mood", {"tool_mood": tool_mood})
 
+    async def emit_llm_chunk(self, text: str, is_final: bool) -> None:
+        """Emit streaming LLM sentence chunk for real-time dashboard text (NANO-111)."""
+        await self.sio.emit("llm_chunk", {"text": text, "is_final": is_final})
+
     async def emit_avatar_load_model(
         self,
         vrm_path: str,

@@ -195,105 +195,123 @@ class OrchestratorCallbacks:
                 state_trigger = self._pending_state_trigger
                 self._pending_state_trigger = None
 
-                # 4. Capture last assistant message for barge-in context
-                # When interrupted, this tells the model what it was saying
-                last_msg = self._last_response if state_trigger == "barge_in" else None
+                # NANO-111: Check if streaming is available
+                from ..llm.provider_holder import ProviderHolder
+                _inner = self._pipeline.provider.provider if isinstance(self._pipeline.provider, ProviderHolder) else self._pipeline.provider
+                can_stream = _inner.get_properties().supports_streaming
+                has_tools = self._pipeline._tool_executor is not None
 
-                # NANO-110: Consume one-shot addressing-others prompt
-                addressing_prompt = None
-                if self._consume_addressing_others_prompt:
-                    addressing_prompt = self._consume_addressing_others_prompt()
-
-                # 5. Generate response via LLM pipeline (returns PipelineResult)
-                result = self._pipeline.run(
-                    transcription,
-                    self._persona,
-                    generation_params=self._generation_params,
-                    state_trigger=state_trigger,
-                    input_modality=InputModality.VOICE,
-                    last_assistant_message=last_msg,
-                    addressing_others_prompt=addressing_prompt,
-                )
-                response = result.content
-                tts_response = result.tts_text or response  # NANO-109
-                self._last_response = response
-
-                # Classify emotion for avatar + chat display (NANO-094)
-                emotion, emotion_confidence = self._classify_emotion(response or "")
-
-                # Emit response event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-094: emotion, NANO-109: tts_text)
-                if self._event_bus is not None:
-                    self._event_bus.emit(
-                        ResponseReadyEvent(
-                            text=response or "",
-                            user_input=transcription,
-                            activated_codex_entries=result.activated_codex_entries,
-                            retrieved_memories=result.retrieved_memories,
-                            reasoning=result.reasoning,
-                            emotion=emotion,
-                            emotion_confidence=emotion_confidence,
-                            tts_text=result.tts_text,
-                        )
-                    )
-
-                # Track token usage (NANO-017)
-                self._last_prompt_tokens = result.usage.prompt_tokens
-                self._last_completion_tokens = result.usage.completion_tokens
-
-                # Emit token usage event
-                if self._event_bus is not None:
-                    self._event_bus.emit(
-                        TokenUsageEvent(
-                            prompt_tokens=result.usage.prompt_tokens,
-                            completion_tokens=result.usage.completion_tokens,
-                            total_tokens=result.usage.total_tokens,
-                            context_limit=self._get_context_limit(),
-                        )
-                    )
-
-                # Emit prompt snapshot for GUI inspection (NANO-025 Phase 3)
-                if self._event_bus is not None:
-                    # Build token breakdown from messages
-                    token_breakdown = self._build_token_breakdown(
-                        result.messages,
-                        result.usage.prompt_tokens,
-                        result.usage.completion_tokens,
-                        block_contents=result.block_contents,
-                    )
-                    self._event_bus.emit(
-                        PromptSnapshotEvent(
-                            messages=result.messages,
-                            token_breakdown=token_breakdown,
-                            input_modality=result.input_modality,
-                            state_trigger=result.state_trigger,
-                        )
-                    )
-
-                    # NANO-076: Persist snapshot to sidecar JSONL
-                    self._persist_snapshot(
-                        result.messages, token_breakdown,
-                        result.input_modality, result.state_trigger,
-                        result.block_contents,
-                    )
-
-                # Check for empty response
-                if not response or response.strip() == "":
-                    return
-
-                # 4. Synthesize speech via provider (NANO-015, NANO-054a, NANO-109: use TTS-cleaned text)
                 tts_config = self._persona.get("tts_voice_config", {})
-                audio_result = self._tts_provider.synthesize(
-                    tts_response,
-                    voice=tts_config.get("voice"),
-                    **{k: v for k, v in tts_config.items() if k != "voice"},
-                )
-                # Convert bytes back to numpy array for playback
-                audio_response = np.frombuffer(audio_result.data, dtype=np.float32)
 
-                # 5. Signal response is ready
-                self._total_turns += 1
-                if self._on_response_ready is not None:
-                    self._on_response_ready(audio_response)
+                if can_stream and not has_tools:
+                    # --- NANO-111: Streaming path ---
+                    audio_response = self._synthesize_streaming(transcription, tts_config)
+
+                    if audio_response is None:
+                        return
+
+                    # Signal response is ready
+                    self._total_turns += 1
+                    if self._on_response_ready is not None:
+                        self._on_response_ready(audio_response)
+                else:
+                    # --- Blocking path (existing behavior) ---
+
+                    # 4. Capture last assistant message for barge-in context
+                    last_msg = self._last_response if state_trigger == "barge_in" else None
+
+                    # NANO-110: Consume one-shot addressing-others prompt
+                    addressing_prompt = None
+                    if self._consume_addressing_others_prompt:
+                        addressing_prompt = self._consume_addressing_others_prompt()
+
+                    # 5. Generate response via LLM pipeline (returns PipelineResult)
+                    result = self._pipeline.run(
+                        transcription,
+                        self._persona,
+                        generation_params=self._generation_params,
+                        state_trigger=state_trigger,
+                        input_modality=InputModality.VOICE,
+                        last_assistant_message=last_msg,
+                        addressing_others_prompt=addressing_prompt,
+                    )
+                    response = result.content
+                    tts_response = result.tts_text or response  # NANO-109
+                    self._last_response = response
+
+                    # Classify emotion for avatar + chat display (NANO-094)
+                    emotion, emotion_confidence = self._classify_emotion(response or "")
+
+                    # Emit response event
+                    if self._event_bus is not None:
+                        self._event_bus.emit(
+                            ResponseReadyEvent(
+                                text=response or "",
+                                user_input=transcription,
+                                activated_codex_entries=result.activated_codex_entries,
+                                retrieved_memories=result.retrieved_memories,
+                                reasoning=result.reasoning,
+                                emotion=emotion,
+                                emotion_confidence=emotion_confidence,
+                                tts_text=result.tts_text,
+                            )
+                        )
+
+                    # Track token usage (NANO-017)
+                    self._last_prompt_tokens = result.usage.prompt_tokens
+                    self._last_completion_tokens = result.usage.completion_tokens
+
+                    # Emit token usage event
+                    if self._event_bus is not None:
+                        self._event_bus.emit(
+                            TokenUsageEvent(
+                                prompt_tokens=result.usage.prompt_tokens,
+                                completion_tokens=result.usage.completion_tokens,
+                                total_tokens=result.usage.total_tokens,
+                                context_limit=self._get_context_limit(),
+                            )
+                        )
+
+                    # Emit prompt snapshot for GUI inspection (NANO-025 Phase 3)
+                    if self._event_bus is not None:
+                        token_breakdown = self._build_token_breakdown(
+                            result.messages,
+                            result.usage.prompt_tokens,
+                            result.usage.completion_tokens,
+                            block_contents=result.block_contents,
+                        )
+                        self._event_bus.emit(
+                            PromptSnapshotEvent(
+                                messages=result.messages,
+                                token_breakdown=token_breakdown,
+                                input_modality=result.input_modality,
+                                state_trigger=result.state_trigger,
+                            )
+                        )
+
+                        # NANO-076: Persist snapshot to sidecar JSONL
+                        self._persist_snapshot(
+                            result.messages, token_breakdown,
+                            result.input_modality, result.state_trigger,
+                            result.block_contents,
+                        )
+
+                    # Check for empty response
+                    if not response or response.strip() == "":
+                        return
+
+                    # Synthesize speech via provider (NANO-015, NANO-054a, NANO-109)
+                    audio_result = self._tts_provider.synthesize(
+                        tts_response,
+                        voice=tts_config.get("voice"),
+                        **{k: v for k, v in tts_config.items() if k != "voice"},
+                    )
+                    audio_response = np.frombuffer(audio_result.data, dtype=np.float32)
+
+                    # Signal response is ready
+                    self._total_turns += 1
+                    if self._on_response_ready is not None:
+                        self._on_response_ready(audio_response)
 
             except Exception as e:
                 self._total_errors += 1
@@ -325,6 +343,131 @@ class OrchestratorCallbacks:
             return "llm"
         else:
             return "tts"
+
+    def _synthesize_streaming(
+        self,
+        transcription: str,
+        tts_config: dict,
+    ) -> Optional[np.ndarray]:
+        """
+        Stream LLM response, synthesize TTS per-sentence in parallel (NANO-111).
+
+        Uses pipeline.run_stream() to get sentence-level chunks, fires TTS
+        synthesis for each sentence in a separate thread, then concatenates
+        audio in sentence order.
+
+        Args:
+            transcription: User's transcribed speech text.
+            tts_config: TTS voice configuration from persona.
+
+        Returns:
+            Concatenated audio array (float32) ready for playback,
+            or None if response was empty.
+        """
+        from ..llm.pipeline import StreamingPipelineChunk
+
+        chunks: list[StreamingPipelineChunk] = []
+        audio_results: dict[int, np.ndarray] = {}  # index → audio
+        tts_threads: list[threading.Thread] = []
+        lock = threading.Lock()
+
+        def synthesize_chunk(tts_text: str, index: int):
+            """Synthesize one sentence in a thread."""
+            try:
+                result = self._tts_provider.synthesize(
+                    tts_text,
+                    voice=tts_config.get("voice"),
+                    **{k: v for k, v in tts_config.items() if k != "voice"},
+                )
+                audio = np.frombuffer(result.data, dtype=np.float32)
+                with lock:
+                    audio_results[index] = audio
+            except Exception as e:
+                logger.warning(f"[NANO-111] TTS failed for chunk {index}: {e}")
+
+        # Capture pending state trigger and last assistant message
+        state_trigger = self._pending_state_trigger
+        self._pending_state_trigger = None
+        last_msg = self._last_response if state_trigger == "barge_in" else None
+
+        # NANO-110: Consume one-shot addressing-others prompt
+        addressing_prompt = None
+        if self._consume_addressing_others_prompt:
+            addressing_prompt = self._consume_addressing_others_prompt()
+
+        full_display_text = []
+        full_tts_text = []
+
+        for chunk in self._pipeline.run_stream(
+            transcription,
+            self._persona,
+            generation_params=self._generation_params,
+            state_trigger=state_trigger,
+            input_modality=InputModality.VOICE,
+            last_assistant_message=last_msg,
+            addressing_others_prompt=addressing_prompt,
+        ):
+            chunks.append(chunk)
+            full_display_text.append(chunk.display_text)
+            full_tts_text.append(chunk.tts_text)
+
+            # Emit LLM chunk event for real-time dashboard text (NANO-111)
+            if self._event_bus is not None:
+                from ..core.events import LLMChunkEvent
+                self._event_bus.emit(LLMChunkEvent(
+                    text=chunk.display_text,
+                    is_final=chunk.is_final,
+                ))
+
+            # Fire TTS in parallel thread if there's text to speak
+            if chunk.tts_text.strip():
+                t = threading.Thread(
+                    target=synthesize_chunk,
+                    args=(chunk.tts_text, chunk.index),
+                    daemon=True,
+                )
+                t.start()
+                tts_threads.append(t)
+
+        # Wait for all TTS threads to complete
+        for t in tts_threads:
+            t.join()
+
+        # Assemble full response for events and history
+        response = " ".join(full_display_text)
+        tts_text_combined = " ".join(full_tts_text)
+        self._last_response = response
+
+        # Classify emotion on full response (NANO-094)
+        emotion, emotion_confidence = self._classify_emotion(response or "")
+
+        # Emit response event with full text
+        if self._event_bus is not None:
+            self._event_bus.emit(
+                ResponseReadyEvent(
+                    text=response or "",
+                    user_input=transcription,
+                    activated_codex_entries=[],
+                    retrieved_memories=[],
+                    reasoning=None,
+                    emotion=emotion,
+                    emotion_confidence=emotion_confidence,
+                    tts_text=tts_text_combined,
+                )
+            )
+
+        if not response or response.strip() == "":
+            return None
+
+        # Concatenate audio in sentence order
+        ordered_audio = []
+        for i in sorted(audio_results.keys()):
+            ordered_audio.append(audio_results[i])
+
+        if not ordered_audio:
+            return None
+
+        return np.concatenate(ordered_audio)
 
     def on_barge_in(self) -> None:
         """
