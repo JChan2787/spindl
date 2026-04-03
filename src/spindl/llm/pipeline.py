@@ -521,6 +521,10 @@ class LLMPipeline:
         # 3. Resolve generation parameters
         params = self._resolve_generation_params(persona, generation_params)
 
+        # NANO-111: Stash context for callers that need metadata after streaming
+        self._last_stream_context = context
+        self._last_stream_block_contents = context.metadata.get("block_contents")
+
         # 4. Stream LLM tokens, segment into sentences
         segmenter = SentenceSegmenter()
 

@@ -6,8 +6,10 @@ complete sentences as they form. Designed for the streaming TTS pipeline:
 each yielded sentence is independently cleaned and sent to TTS.
 
 Design decisions:
-- Simple regex boundary detection, no external dependency (no pysbd)
-- Handles common abbreviations (Mr., Dr., etc.), ellipsis, URLs
+- First chunk splits on comma for fastest time-to-first-audio
+  (borrowed from Open-LLM-VTuber's faster_first_response pattern)
+- Subsequent chunks split on sentence-ending punctuation (.!?)
+- Handles common abbreviations (Mr., Dr., etc.), ellipsis
 - Excludes <think>...</think> reasoning blocks from sentence output
 - Flushes remaining buffer on final chunk
 """
@@ -43,11 +45,17 @@ _ABBREVIATIONS = frozenset({
     "e.g", "i.e", "a.m", "p.m",
 })
 
+# Commas and clause-level delimiters (for first-chunk fast split)
+_COMMAS = {",", ";", "，", "、", "；"}
+
+# Sentence-ending punctuation
+_END_PUNCTUATION = re.compile(r'[.!?。！？]')
+
 # Pattern: sentence-ending punctuation followed by whitespace or end of string
 # Negative lookbehind for single uppercase letter (initials like "J. Chan")
 _SENTENCE_BOUNDARY = re.compile(
     r'(?<![A-Z])'           # not preceded by single uppercase (initials)
-    r'([.!?])'              # sentence-ending punctuation (captured)
+    r'([.!?。！？])'        # sentence-ending punctuation (captured)
     r'(?:\s|$)'             # followed by whitespace or end
 )
 
@@ -55,6 +63,9 @@ _SENTENCE_BOUNDARY = re.compile(
 class SentenceSegmenter:
     """
     Accumulates streaming LLM tokens and yields complete sentences.
+
+    First sentence splits on commas for fastest time-to-first-audio.
+    Subsequent sentences split on sentence-ending punctuation.
 
     Usage:
         segmenter = SentenceSegmenter()
@@ -64,10 +75,12 @@ class SentenceSegmenter:
                 ...
     """
 
-    def __init__(self):
+    def __init__(self, faster_first_response: bool = True):
         self._buffer: str = ""
         self._sentence_index: int = 0
         self._in_think_block: bool = False
+        self._is_first_sentence: bool = True
+        self._faster_first_response: bool = faster_first_response
 
     def feed(self, chunk: StreamChunk) -> Iterator[SentenceChunk]:
         """
@@ -105,56 +118,87 @@ class SentenceSegmenter:
 
     def _extract_sentences(self) -> Iterator[SentenceChunk]:
         """Extract complete sentences from the current buffer."""
+
+        # First sentence: split on comma for fastest time-to-first-audio
+        if self._is_first_sentence and self._faster_first_response:
+            result = self._try_comma_split()
+            if result is not None:
+                self._is_first_sentence = False
+                yield result
+                # Continue to check for more sentences in remaining buffer
+
+        # Standard sentence boundary detection
         while True:
             match = _SENTENCE_BOUNDARY.search(self._buffer)
             if not match:
                 return
 
-            # Check if this is actually an abbreviation
             boundary_pos = match.start(1)
+
+            # Check if this is actually an abbreviation
             if match.group(1) == ".":
-                # Get the word before the period
                 before = self._buffer[:boundary_pos].rstrip()
                 last_word = before.split()[-1].lower().rstrip(".") if before.split() else ""
                 if last_word in _ABBREVIATIONS:
-                    # Not a real boundary — but we can't just skip it because
-                    # there might be a real boundary later. Move past this match.
-                    # We need at least one more character after to keep looking.
+                    # Not a real boundary — look for the next one
                     check_pos = match.end()
                     if check_pos >= len(self._buffer):
-                        return  # Need more tokens
-                    # Try again from after this false boundary
+                        return
                     remaining = self._buffer[check_pos:]
                     next_match = _SENTENCE_BOUNDARY.search(remaining)
                     if not next_match:
-                        return  # No more boundaries in buffer
-                    # Recalculate position in full buffer
+                        return
                     boundary_pos = check_pos + next_match.start(1)
                     match = next_match
 
                 # Check for ellipsis (...)
-                if self._buffer[boundary_pos:boundary_pos + 3] == "...":
-                    # Skip past the ellipsis, not a sentence boundary
+                if boundary_pos + 3 <= len(self._buffer) and self._buffer[boundary_pos:boundary_pos + 3] == "...":
                     after_ellipsis = boundary_pos + 3
                     if after_ellipsis >= len(self._buffer):
                         return
-                    self._buffer = self._buffer[:boundary_pos] + self._buffer[boundary_pos:]
-                    # Let next iteration handle it
-                    return
+                    # Skip past ellipsis and continue looking
+                    remaining = self._buffer[after_ellipsis:]
+                    next_match = _SENTENCE_BOUNDARY.search(remaining)
+                    if not next_match:
+                        return
+                    boundary_pos = after_ellipsis + next_match.start(1)
+                    match = next_match
 
             # We have a real sentence boundary
-            # Include the punctuation, split after whitespace
             split_pos = match.end()
             sentence = self._buffer[:split_pos].strip()
             self._buffer = self._buffer[split_pos:]
 
             if sentence:
+                self._is_first_sentence = False
                 yield SentenceChunk(
                     text=sentence,
                     index=self._sentence_index,
                     is_final=False,
                 )
                 self._sentence_index += 1
+
+    def _try_comma_split(self) -> SentenceChunk | None:
+        """
+        Try to split the buffer at the first comma (for faster first response).
+
+        Returns:
+            SentenceChunk if a comma was found, None otherwise.
+        """
+        for i, char in enumerate(self._buffer):
+            if char in _COMMAS:
+                # Split at the comma (include the comma in the chunk)
+                sentence = self._buffer[:i + 1].strip()
+                self._buffer = self._buffer[i + 1:].lstrip()
+                if sentence:
+                    chunk = SentenceChunk(
+                        text=sentence,
+                        index=self._sentence_index,
+                        is_final=False,
+                    )
+                    self._sentence_index += 1
+                    return chunk
+        return None
 
     def _filter_think_blocks(self, text: str) -> str:
         """
@@ -167,24 +211,18 @@ class SentenceSegmenter:
         i = 0
         while i < len(text):
             if self._in_think_block:
-                # Look for closing tag
                 close_idx = text.find("</think>", i)
                 if close_idx == -1:
-                    # Still inside think block, consume everything
                     break
                 else:
-                    # Found closing tag, skip past it
                     i = close_idx + len("</think>")
                     self._in_think_block = False
             else:
-                # Look for opening tag
                 open_idx = text.find("<think>", i)
                 if open_idx == -1:
-                    # No think block, keep everything
                     result.append(text[i:])
                     break
                 else:
-                    # Keep text before think block
                     result.append(text[i:open_idx])
                     i = open_idx + len("<think>")
                     self._in_think_block = True
@@ -196,3 +234,4 @@ class SentenceSegmenter:
         self._buffer = ""
         self._sentence_index = 0
         self._in_think_block = False
+        self._is_first_sentence = True
