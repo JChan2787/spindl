@@ -333,6 +333,16 @@ conda run -n spindl python -m pytest tests_e2e/ -v
 
 Requires running services. E2E config fixtures at `tests_e2e/fixtures/config/` (5 named configs covering local/cloud LLM × VLM combos + unified mode: `spindl_e2e_local_unified`, `spindl_e2e_local_local`, `spindl_e2e_local_cloud`, `spindl_e2e_cloud_local`, `spindl_e2e_cloud_cloud`).
 
+## Lessons Learned
+
+### Cross-Thread Socket.IO Event Ordering (NANO-111, Session 606)
+
+Async events from different threads do NOT have guaranteed ordering across a Socket.IO bridge. When multiple backend threads emit events via `EventBus → bridge → run_coroutine_threadsafe → Socket.IO`, the frontend receives them in whatever order the asyncio event loop schedules them — not the order they were emitted.
+
+**The pattern:** When two event types serve different purposes (e.g., `llm_chunk` for real-time incremental display, `response` for authoritative metadata finalization), design them so neither depends on arriving first. The `response` event is the source of truth for bubble creation and metadata. The `llm_chunk` event is the source of truth for sequential sentence-by-sentence display during TTS playback. If `response` arrives before any `llm_chunk`, it creates the bubble with all data. If `llm_chunk` events arrive first, they build incrementally, and `response` finalizes without overwriting the incremental state. Either ordering produces the correct result.
+
+**Anti-pattern:** Relying on event A to set state that event B reads. If A and B cross thread boundaries through async scheduling, B may arrive first.
+
 ## Windows-Specific Gotchas
 
 - **Bash paths:** Always use forward slashes (`c:/Users/...`) in shell commands. A trailing `\` before a closing `"` is interpreted as an escaped quote.

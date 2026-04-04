@@ -467,9 +467,12 @@ class LLMPipeline:
         _inner = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider
         can_stream = _inner.get_properties().supports_streaming
 
-        if not can_stream:
+        if not can_stream or self._tool_executor is not None:
             # Fallback: run blocking pipeline, yield single chunk.
-            # Also handles tool execution transparently via run().
+            # Tool execution requires _run_with_tools() loop which is
+            # incompatible with streaming. The tool executor is wired
+            # whenever tools are configured — even if the LLM doesn't
+            # call any on this turn, we can't know in advance.
             result = self.run(
                 user_input, persona, generation_params, state_trigger,
                 input_modality, last_assistant_message, stimulus_source,
@@ -524,6 +527,23 @@ class LLMPipeline:
 
         # 3. Resolve generation parameters
         params = self._resolve_generation_params(persona, generation_params)
+
+        # DEBUG: Dump full prompt to log (same as run())
+        from .provider_holder import ProviderHolder
+        _inner2 = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider
+        provider_type = type(_inner2).__name__
+        is_cloud = _inner2.__class__.is_cloud_provider()
+        provider_label = f"{provider_type} ({'cloud' if is_cloud else 'local'})"
+        print(f"[Prompt] --- BEGIN FULL PROMPT [{provider_label}] ---", flush=True)
+        for msg in context.messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if len(content) > 2000:
+                display = content[:1000] + "\n...[truncated]...\n" + content[-500:]
+            else:
+                display = content
+            print(f"[Prompt] [{role}]:\n{display}", flush=True)
+        print("[Prompt] --- END FULL PROMPT ---", flush=True)
 
         # 4. Stream LLM tokens, segment into sentences
         segmenter = SentenceSegmenter()
