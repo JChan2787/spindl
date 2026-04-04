@@ -167,35 +167,67 @@ export async function POST(request: Request) {
         : {}) as Record<string, unknown>;
       const existingLlama = (existingLlmProviders.llama || {}) as Record<string, unknown>;
 
+      // Build llama config — spread existingLlama first, then explicitly
+      // set every managed key. Keys cleared in the GUI (empty string) MUST
+      // delete the zombie from existingLlama, not silently preserve it.
+      const llmLlama: Record<string, unknown> = {
+        ...existingLlama,
+        executable_path: body.llmLocal.executablePath,
+        model_path: body.llmLocal.modelPath,
+        host: body.llmLocal.host,
+        port: body.llmLocal.port,
+        context_size: body.llmLocal.contextSize,
+        gpu_layers: body.llmLocal.gpuLayers,
+        timeout: body.llmLocal.timeout,
+        temperature: body.llmLocal.temperature,
+        max_tokens: body.llmLocal.maxTokens,
+        top_p: body.llmLocal.topP,
+      };
+
+      // GPU selection — tensor_split takes precedence. Delete the other to prevent zombies.
+      if (body.llmLocal.tensorSplit) {
+        llmLlama.tensor_split = body.llmLocal.tensorSplit.split(",").map((v: string) => parseFloat(v.trim())).filter((v: number) => !isNaN(v));
+        delete llmLlama.device;
+      } else if (body.llmLocal.device) {
+        llmLlama.device = body.llmLocal.device;
+        delete llmLlama.tensor_split;
+      } else {
+        delete llmLlama.tensor_split;
+        delete llmLlama.device;
+      }
+
+      // Extra args — empty string = user cleared it, delete the zombie
+      if (body.llmLocal.extraArgs) {
+        llmLlama.extra_args = safeExtraArgs(parseExtraArgs(body.llmLocal.extraArgs));
+      } else {
+        delete llmLlama.extra_args;
+      }
+
+      // NANO-042: Reasoning model config — empty = cleared
+      if (body.llmLocal.reasoningFormat) {
+        llmLlama.reasoning_format = body.llmLocal.reasoningFormat;
+      } else {
+        delete llmLlama.reasoning_format;
+      }
+      if (body.llmLocal.reasoningBudget !== undefined && body.llmLocal.reasoningBudget !== -1) {
+        llmLlama.reasoning_budget = body.llmLocal.reasoningBudget;
+      } else {
+        delete llmLlama.reasoning_budget;
+      }
+
+      // NANO-084: mmproj for unified vision mode — empty = cleared, MUST delete zombie
+      if (body.llmLocal.mmprojPath) {
+        llmLlama.mmproj_path = body.llmLocal.mmprojPath;
+      } else {
+        delete llmLlama.mmproj_path;
+      }
+
       existingConfig.llm = {
         provider: "llama",
         plugin_paths: ["./plugins/llm"],
         providers: {
           ...existingLlmProviders,
-          llama: {
-            ...existingLlama,
-            executable_path: body.llmLocal.executablePath,
-            model_path: body.llmLocal.modelPath,
-            host: body.llmLocal.host,
-            port: body.llmLocal.port,
-            context_size: body.llmLocal.contextSize,
-            gpu_layers: body.llmLocal.gpuLayers,
-            ...(body.llmLocal.tensorSplit
-              ? { tensor_split: body.llmLocal.tensorSplit.split(",").map((v: string) => parseFloat(v.trim())).filter((v: number) => !isNaN(v)) }
-              : body.llmLocal.device ? { device: body.llmLocal.device } : {}),
-            ...(body.llmLocal.extraArgs
-              ? { extra_args: safeExtraArgs(parseExtraArgs(body.llmLocal.extraArgs)) }
-              : {}),
-            timeout: body.llmLocal.timeout,
-            temperature: body.llmLocal.temperature,
-            max_tokens: body.llmLocal.maxTokens,
-            top_p: body.llmLocal.topP,
-            // NANO-042: Reasoning model config
-            ...(body.llmLocal.reasoningFormat ? { reasoning_format: body.llmLocal.reasoningFormat } : {}),
-            ...(body.llmLocal.reasoningBudget !== undefined ? { reasoning_budget: body.llmLocal.reasoningBudget } : {}),
-            // NANO-084: mmproj for unified vision mode
-            ...(body.llmLocal.mmprojPath ? { mmproj_path: body.llmLocal.mmprojPath } : {}),
-          },
+          llama: llmLlama,
         },
       };
     } else {
@@ -236,6 +268,17 @@ export async function POST(request: Request) {
       } else {
         existingConfig.vlm = { provider: "none" };
       }
+
+      // When VLM is disabled, strip mmproj_path from LLM llama config.
+      // Unified VLM is off — a stale mmproj_path here causes llama-server
+      // to load an mmproj for the wrong architecture (Session 606 bug).
+      const llmSection = existingConfig.llm as Record<string, unknown> | undefined;
+      if (llmSection && typeof llmSection === "object") {
+        const llmProviders = llmSection.providers as Record<string, Record<string, unknown>> | undefined;
+        if (llmProviders?.llama) {
+          delete llmProviders.llama.mmproj_path;
+        }
+      }
     } else if (body.useLLMForVision) {
       // Unified: VLM uses LLM endpoint — provider must be "llm" (NANO-030 routing value)
       existingConfig.vlm = {
@@ -262,6 +305,47 @@ export async function POST(request: Request) {
           : {}) as Record<string, unknown>;
         const existingVlmLlama = (existingVlmProviders.llama || {}) as Record<string, unknown>;
 
+        // Build VLM llama config — same zombie-killing pattern as LLM.
+        const vlmLlama: Record<string, unknown> = {
+          ...existingVlmLlama,
+          model_type: body.vlmLocal.modelType,
+          executable_path: body.vlmLocal.executablePath,
+          model_path: body.vlmLocal.modelPath,
+          host: body.vlmLocal.host,
+          port: body.vlmLocal.port,
+          context_size: body.vlmLocal.contextSize,
+          gpu_layers: body.vlmLocal.gpuLayers,
+          timeout: body.vlmLocal.timeout,
+          max_tokens: body.vlmLocal.maxTokens,
+          prompt: "Describe what you see in this image concisely.",
+        };
+
+        // mmproj — empty = cleared, MUST delete zombie
+        if (body.vlmLocal.mmprojPath) {
+          vlmLlama.mmproj_path = body.vlmLocal.mmprojPath;
+        } else {
+          delete vlmLlama.mmproj_path;
+        }
+
+        // GPU selection — tensor_split takes precedence
+        if (body.vlmLocal.tensorSplit) {
+          vlmLlama.tensor_split = body.vlmLocal.tensorSplit.split(",").map((v: string) => parseFloat(v.trim())).filter((v: number) => !isNaN(v));
+          delete vlmLlama.device;
+        } else if (body.vlmLocal.device) {
+          vlmLlama.device = body.vlmLocal.device;
+          delete vlmLlama.tensor_split;
+        } else {
+          delete vlmLlama.tensor_split;
+          delete vlmLlama.device;
+        }
+
+        // Extra args — empty = cleared
+        if (body.vlmLocal.extraArgs) {
+          vlmLlama.extra_args = safeExtraArgs(parseExtraArgs(body.vlmLocal.extraArgs));
+        } else {
+          delete vlmLlama.extra_args;
+        }
+
         existingConfig.vlm = {
           provider: "llama",
           plugin_paths: ["./plugins/vlm"],
@@ -273,27 +357,7 @@ export async function POST(request: Request) {
           },
           providers: {
             ...existingVlmProviders,
-            llama: {
-              ...existingVlmLlama,
-              model_type: body.vlmLocal.modelType,
-              executable_path: body.vlmLocal.executablePath,
-              model_path: body.vlmLocal.modelPath,
-              ...(body.vlmLocal.mmprojPath ? { mmproj_path: body.vlmLocal.mmprojPath } : {}),
-              host: body.vlmLocal.host,
-              port: body.vlmLocal.port,
-              context_size: body.vlmLocal.contextSize,
-              gpu_layers: body.vlmLocal.gpuLayers,
-              ...(body.vlmLocal.device && !body.vlmLocal.tensorSplit ? { device: body.vlmLocal.device } : {}),
-              ...(body.vlmLocal.tensorSplit
-                ? { tensor_split: body.vlmLocal.tensorSplit.split(",").map((v: string) => parseFloat(v.trim())).filter((v: number) => !isNaN(v)) }
-                : {}),
-              ...(body.vlmLocal.extraArgs
-                ? { extra_args: safeExtraArgs(parseExtraArgs(body.vlmLocal.extraArgs)) }
-                : {}),
-              timeout: body.vlmLocal.timeout,
-              max_tokens: body.vlmLocal.maxTokens,
-              prompt: "Describe what you see in this image concisely.",
-            },
+            llama: vlmLlama,
           },
         };
       } else {

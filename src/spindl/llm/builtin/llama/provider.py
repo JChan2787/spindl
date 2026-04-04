@@ -745,6 +745,19 @@ class LlamaProvider(LLMProvider):
             elif reasoning_budget < -1:
                 errors.append(f"reasoning_budget must be -1 (unlimited) or >= 0, got {reasoning_budget}")
 
+        # mmproj_path validation — file must exist if specified (Session 606 bug)
+        mmproj_path = config.get("mmproj_path")
+        if mmproj_path:
+            if not isinstance(mmproj_path, str):
+                errors.append(f"mmproj_path must be a string, got {type(mmproj_path).__name__}")
+            else:
+                import os
+                if not os.path.isfile(mmproj_path):
+                    errors.append(
+                        f"mmproj_path does not exist: {mmproj_path} — "
+                        "stale path from a previous model? Clear it if VLM is disabled"
+                    )
+
         return errors
 
     @classmethod
