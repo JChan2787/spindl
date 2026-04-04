@@ -210,7 +210,7 @@ class OrchestratorCallbacks:
 
                 tts_config = self._persona.get("tts_voice_config", {})
 
-                print(f"[NANO-111] can_stream={can_stream}, streaming_cb={self._on_response_ready_streaming is not None}")
+                logger.debug(f"[NANO-111] can_stream={can_stream}, streaming_cb={self._on_response_ready_streaming is not None}")
                 # 4. Capture last assistant message for barge-in context
                 last_msg = self._last_response if state_trigger == "barge_in" else None
 
@@ -313,7 +313,7 @@ class OrchestratorCallbacks:
                     # completed response. Split into sentences, fire TTS threads,
                     # delivery thread feeds playback in order.
                     if self._on_response_ready_streaming is not None:
-                        audio_response = self._parallel_tts_delivery(tts_response, tts_config)
+                        audio_response, _ = self._parallel_tts_delivery(tts_response, tts_config)
                         if audio_response is not None:
                             self._total_turns += 1
                     else:
@@ -354,7 +354,8 @@ class OrchestratorCallbacks:
         self,
         tts_text: str,
         tts_config: dict,
-    ) -> Optional[np.ndarray]:
+        display_text: Optional[str] = None,
+    ) -> tuple[Optional[np.ndarray], Optional[list]]:
         """
         Split completed response into sentences, synthesize TTS in parallel,
         deliver audio to streaming playback in order (NANO-111).
@@ -365,19 +366,36 @@ class OrchestratorCallbacks:
         Args:
             tts_text: TTS-cleaned response text.
             tts_config: TTS voice config from persona.
+            display_text: Original display text for sentence splitting + emotion.
+                         Falls back to tts_text if not provided.
 
         Returns:
-            Concatenated audio array, or None if empty.
+            Tuple of (audio array or None, chunks list or None).
+            Chunks: [{text, emotion, emotion_confidence}, ...] for sub-bubble display.
         """
         import re
 
-        # Split into sentences using simple boundary detection
-        # (same boundaries as the sentence segmenter)
+        # Split TTS text into sentences
         sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
         sentences = [s.strip() for s in sentences if s.strip()]
 
+        # Split display text into sentences for sub-bubble display
+        raw = display_text or tts_text
+        display_sentences = re.split(r'(?<=[.!?。！？])\s+', raw.strip())
+        display_sentences = [s.strip() for s in display_sentences if s.strip()]
+
         if not sentences:
-            return None
+            return None, None
+
+        # Classify emotion per display sentence
+        sentence_chunks = []
+        for ds in display_sentences:
+            emo, conf = self._classify_emotion(ds) if ds.strip() else (None, None)
+            sentence_chunks.append({
+                "text": ds,
+                "emotion": emo,
+                "emotion_confidence": conf,
+            })
 
         # If only one sentence, just synthesize directly — no need for threading
         if len(sentences) == 1:
@@ -389,7 +407,7 @@ class OrchestratorCallbacks:
             audio = np.frombuffer(audio_result.data, dtype=np.float32)
             self._on_response_ready_streaming(audio)
             self._finalize_playback_streaming()
-            return audio
+            return audio, sentence_chunks
 
         audio_results: dict[int, np.ndarray] = {}
         lock = threading.Lock()
@@ -412,6 +430,21 @@ class OrchestratorCallbacks:
                     with lock:
                         audio_results[index] = np.array([], dtype=np.float32)
 
+        # Build closure factory for chunk start callbacks (same as _synthesize_streaming)
+        def _make_chunk_start_cb(idx: int):
+            """Emit sentence text + emotion when playback reaches this chunk."""
+            def cb():
+                if idx < len(sentence_chunks) and self._event_bus is not None:
+                    from ..core.events import LLMChunkEvent
+                    sc = sentence_chunks[idx]
+                    self._event_bus.emit(LLMChunkEvent(
+                        text=sc["text"],
+                        is_final=(idx >= len(sentence_chunks) - 1),
+                        emotion=sc.get("emotion"),
+                        emotion_confidence=sc.get("emotion_confidence"),
+                    ))
+            return cb
+
         # Delivery thread: feeds playback in order as chunks complete
         playback_started = False
         total = len(sentences)
@@ -425,12 +458,17 @@ class OrchestratorCallbacks:
                 if ready:
                     with lock:
                         chunk = audio_results[next_idx]
+                    start_cb = _make_chunk_start_cb(next_idx)
                     if len(chunk) > 0:
                         if not playback_started:
+                            start_cb()
                             self._on_response_ready_streaming(chunk)
                             playback_started = True
                         else:
-                            self._append_playback_audio(chunk)
+                            self._append_playback_audio(
+                                chunk,
+                                on_chunk_start=start_cb,
+                            )
                     next_idx += 1
                 else:
                     time.sleep(0.02)
@@ -450,9 +488,10 @@ class OrchestratorCallbacks:
             t.join()
         delivery_thread.join()
 
-        # Return concatenated audio
+        # Return concatenated audio + chunks
         ordered = [audio_results[i] for i in range(total) if len(audio_results.get(i, [])) > 0]
-        return np.concatenate(ordered) if ordered else None
+        audio = np.concatenate(ordered) if ordered else None
+        return audio, sentence_chunks
 
     def _determine_error_stage(self, error: Exception) -> str:
         """Determine which stage the error occurred in based on state."""
@@ -673,8 +712,6 @@ class OrchestratorCallbacks:
                             "emotion_confidence": emo_conf,
                         })
 
-            print(f"[NANO-111] response_chunks={response_chunks}")
-
             # Emit response event with full metadata + chunks
             if self._event_bus is not None:
                 self._event_bus.emit(
@@ -869,21 +906,8 @@ class OrchestratorCallbacks:
                 # Classify emotion for avatar + chat display (NANO-094)
                 emotion, emotion_confidence = self._classify_emotion(response or "")
 
-                # Emit response event (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text)
-                if self._event_bus is not None:
-                    self._event_bus.emit(
-                        ResponseReadyEvent(
-                            text=response or "",
-                            user_input=transcription,
-                            activated_codex_entries=result.activated_codex_entries,
-                            retrieved_memories=result.retrieved_memories,
-                            reasoning=result.reasoning,
-                            stimulus_source=stimulus_source,
-                            emotion=emotion,
-                            emotion_confidence=emotion_confidence,
-                            tts_text=result.tts_text,
-                        )
-                    )
+                # NANO-111: Chunks will be populated by _parallel_tts_delivery if TTS runs
+                _text_input_chunks = None
 
                 # Track token usage
                 self._last_prompt_tokens = result.usage.prompt_tokens
@@ -948,7 +972,9 @@ class OrchestratorCallbacks:
 
                     # NANO-111: Parallel TTS delivery for text input path
                     if self._on_response_ready_streaming is not None:
-                        audio_response = self._parallel_tts_delivery(tts_response, tts_config)
+                        audio_response, _text_input_chunks = self._parallel_tts_delivery(
+                            tts_response, tts_config, display_text=response,
+                        )
                         if audio_response is not None:
                             self._total_turns += 1
                     else:
@@ -969,6 +995,28 @@ class OrchestratorCallbacks:
                     # Text-only mode: still count the turn, return to idle
                     self._total_turns += 1
                     self._emit_state_change(current_state, "idle", "response_complete")
+
+                # NANO-111 Session 606: Emit response event AFTER TTS.
+                # When streaming callbacks are wired, llm_chunk events already
+                # built sub-bubbles incrementally — don't pass chunks here
+                # (would re-render all at once). Pass chunks only for fallback
+                # path where no llm_chunk events fired.
+                fallback_chunks = _text_input_chunks if self._on_response_ready_streaming is None else None
+                if self._event_bus is not None:
+                    self._event_bus.emit(
+                        ResponseReadyEvent(
+                            text=response or "",
+                            user_input=transcription,
+                            activated_codex_entries=result.activated_codex_entries,
+                            retrieved_memories=result.retrieved_memories,
+                            reasoning=result.reasoning,
+                            stimulus_source=stimulus_source,
+                            emotion=emotion,
+                            emotion_confidence=emotion_confidence,
+                            tts_text=result.tts_text,
+                            chunks=fallback_chunks,
+                        )
+                    )
 
             except Exception as e:
                 self._total_errors += 1
