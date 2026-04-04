@@ -236,7 +236,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
     });
 
     // NANO-037: codex entries, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus source
-    // NANO-111: When llm_chunk already created the message, finalize with metadata only
+    // NANO-111: response is the authoritative final event — always carries full metadata.
+    // It either creates the bubble (blocking path) or finalizes it (streaming path).
     socket.on("response", (event) => {
       setResponse(event.text, event.is_final, event.activated_codex_entries, event.reasoning, event.retrieved_memories, event.stimulus_source);
       // NANO-073a: Create or update assistant message in chat history
@@ -254,8 +255,11 @@ export function SocketProvider({ children }: SocketProviderProps) {
         });
       } else {
         // NANO-111: llm_chunk already built the text incrementally.
-        // Only finalize metadata — do NOT overwrite text.
+        // Finalize with full metadata AND set the authoritative text.
+        // This ensures emotion, codex, memories land even if chunk
+        // events arrived out of order.
         updateAssistantMessage(currentAssistantMsgId, {
+          text: event.text,
           isFinal: event.is_final,
           reasoning: event.reasoning,
           activatedCodexEntries: event.activated_codex_entries,
