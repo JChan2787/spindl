@@ -235,6 +235,41 @@ class ConversationHistoryManager:
         self._next_turn_id += 2
         self._pending_user_input = None
 
+    def amend_last_assistant_content(self, truncated_content: str) -> None:
+        """
+        Amend the last assistant turn's content to reflect what was actually
+        delivered before barge-in (NANO-111 Phase 2.5).
+
+        Updates both in-memory history and the JSONL file on disk.
+        Called when barge-in truncates the response to only delivered sentences.
+
+        Args:
+            truncated_content: The text that was actually spoken/delivered.
+        """
+        if not self._history:
+            return
+
+        # Find the last assistant turn in memory
+        for i in range(len(self._history) - 1, -1, -1):
+            if self._history[i].get("role") == "assistant":
+                original = self._history[i].get("content", "")
+                self._history[i]["content"] = truncated_content
+                # Preserve the full generation as display_content for inspection
+                if "display_content" not in self._history[i]:
+                    self._history[i]["display_content"] = original
+                break
+        else:
+            return  # No assistant turn found
+
+        # Amend the JSONL file on disk
+        if self._session_file and self._session_file.exists():
+            from ...history.jsonl_store import patch_last_turn
+            patch_last_turn(self._session_file, {
+                "content": truncated_content,
+                "display_content": original,
+                "barge_in_truncated": True,
+            })
+
     @property
     def session_file(self) -> Path | None:
         """Get the current session file path."""

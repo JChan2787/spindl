@@ -479,6 +479,9 @@ class VoiceAgentOrchestrator:
         self._callbacks._append_playback_audio = self._append_playback_audio
         self._callbacks._finalize_playback_streaming = self._finalize_playback_streaming
 
+        # NANO-111 Phase 2.5: Wire history manager for barge-in truncation
+        self._callbacks._history_manager = self._history_manager
+
         # NANO-076: Wire session file getter for snapshot sidecar persistence
         self._callbacks.set_session_file_getter(lambda: self.session_file)
 

@@ -126,6 +126,14 @@ class OrchestratorCallbacks:
         self._last_response: Optional[str] = None
         self._processing_start_time: Optional[float] = None
 
+        # NANO-111 Phase 2.5: Delivery tracking for barge-in history truncation.
+        # Populated by delivery threads in _parallel_tts_delivery / _synthesize_streaming.
+        # on_barge_in() reads this to truncate _last_response and amend history.
+        self._delivered_sentences: list[str] = []
+        self._delivery_lock = threading.Lock()
+        # Set post-construction by voice agent (same pattern as streaming callbacks)
+        self._history_manager = None
+
         # Voice state tracking (NANO-014 Session 5)
         # Captures significant triggers (barge_in, etc.) for prompt injection
         self._pending_state_trigger: Optional[str] = None
@@ -415,6 +423,9 @@ class OrchestratorCallbacks:
                 **{k: v for k, v in tts_config.items() if k != "voice"},
             )
             audio = np.frombuffer(audio_result.data, dtype=np.float32)
+            # Track delivered sentence (Phase 2.5)
+            with self._delivery_lock:
+                self._delivered_sentences = [display_sentences[0] if display_sentences else sentences[0]]
             self._on_response_ready_streaming(audio)
             self._finalize_playback_streaming()
             return audio, sentence_chunks
@@ -444,6 +455,11 @@ class OrchestratorCallbacks:
         def _make_chunk_start_cb(idx: int):
             """Emit sentence text + emotion when playback reaches this chunk."""
             def cb():
+                # Phase 2.5: Track delivery at playback time, not queue time.
+                # This fires when the audio device actually starts playing this chunk.
+                if idx < len(display_sentences):
+                    with self._delivery_lock:
+                        self._delivered_sentences.append(display_sentences[idx])
                 if idx < len(sentence_chunks) and self._event_bus is not None:
                     from ..core.events import LLMChunkEvent
                     sc = sentence_chunks[idx]
@@ -458,6 +474,10 @@ class OrchestratorCallbacks:
         # Delivery thread: feeds playback in order as chunks complete
         playback_started = False
         total = len(sentences)
+
+        # NANO-111 Phase 2.5: Reset delivery tracking for this response
+        with self._delivery_lock:
+            self._delivered_sentences = []
 
         def delivery_loop():
             nonlocal playback_started
@@ -582,6 +602,10 @@ class OrchestratorCallbacks:
         ):
             """Create a closure that emits text + emotion when playback reaches this chunk."""
             def cb():
+                # Phase 2.5: Track delivery at playback time, not queue time.
+                if display_text:
+                    with self._delivery_lock:
+                        self._delivered_sentences.append(display_text)
                 if display_text and self._event_bus is not None:
                     from ..core.events import LLMChunkEvent
                     self._event_bus.emit(LLMChunkEvent(
@@ -591,6 +615,10 @@ class OrchestratorCallbacks:
                         emotion_confidence=emotion_confidence,
                     ))
             return cb
+
+        # NANO-111 Phase 2.5: Reset delivery tracking for this response
+        with self._delivery_lock:
+            self._delivered_sentences = []
 
         def delivery_loop():
             nonlocal playback_started
@@ -798,9 +826,38 @@ class OrchestratorCallbacks:
 
         NANO-014 Session 5: Stores "barge_in" trigger for next pipeline call,
         enabling VoiceStateProvider to inject "User interrupted you" context.
+
+        NANO-111 Phase 2.5: Truncates _last_response and amends history to
+        reflect only the sentences that were actually delivered before barge-in.
         """
         # Store trigger for the upcoming pipeline.run() call
         self._pending_state_trigger = "barge_in"
+
+        # Phase 2.5: Truncate to delivered sentences
+        with self._delivery_lock:
+            delivered = list(self._delivered_sentences)
+
+        if delivered and self._last_response:
+            truncated = " ".join(delivered)
+            # Only truncate if we actually delivered less than the full response
+            if len(truncated) < len(self._last_response):
+                logger.info(
+                    "[Phase 2.5] Barge-in truncation: %d/%d chars delivered (%d sentences)",
+                    len(truncated), len(self._last_response), len(delivered),
+                )
+                self._last_response = truncated
+
+                # Amend the history entry to reflect what was actually spoken
+                if self._history_manager is not None:
+                    self._history_manager.amend_last_assistant_content(truncated)
+
+                # Emit truncation event for frontend bubble update
+                if self._event_bus is not None:
+                    from ..core.events import BargeInTruncatedEvent
+                    self._event_bus.emit(BargeInTruncatedEvent(
+                        truncated_text=truncated,
+                        delivered_sentences=len(delivered),
+                    ))
 
         if self._on_barge_in_triggered is not None:
             self._on_barge_in_triggered()

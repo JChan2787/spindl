@@ -1382,6 +1382,8 @@ export interface ServerToClientEvents {
   llm_chunk: (event: { text: string; is_final: boolean; emotion?: string; emotion_confidence?: number }) => void;
   // NANO-111: Token-level LLM text for real-time display
   llm_token: (event: { token: string; is_final: boolean }) => void;
+  // NANO-111 Phase 2.5: Barge-in truncated response
+  barge_in_truncated: (event: { truncated_text: string; delivered_sentences: number }) => void;
 }
 
 export interface ClientToServerEvents {

@@ -56,6 +56,7 @@ class EventType(Enum):
     # Streaming events (NANO-111)
     LLM_CHUNK = auto()  # Sentence-level chunk from streaming LLM response
     LLM_TOKEN = auto()  # Token-level text from streaming LLM (for dashboard display)
+    BARGE_IN_TRUNCATED = auto()  # Response truncated to delivered sentences (Phase 2.5)
 
     # Error events
     PIPELINE_ERROR = auto()  # Processing error occurred
@@ -415,3 +416,19 @@ class LLMTokenEvent(Event):
     """Token text (typically 1-3 words per chunk)."""
     is_final: bool = False
     """True on the last token in the response."""
+
+
+@dataclass
+class BargeInTruncatedEvent(Event):
+    """
+    Emitted when barge-in truncates the response to delivered sentences (NANO-111 Phase 2.5).
+
+    The frontend uses this to update the last assistant bubble to show only
+    what was actually spoken, and the history is amended to match.
+    """
+
+    event_type: EventType = field(default=EventType.BARGE_IN_TRUNCATED, init=False)
+    truncated_text: str = ""
+    """The response text truncated to only delivered sentences."""
+    delivered_sentences: int = 0
+    """Number of sentences that were actually delivered before barge-in."""

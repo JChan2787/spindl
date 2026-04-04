@@ -290,6 +290,22 @@ export function SocketProvider({ children }: SocketProviderProps) {
       }
     });
 
+    // NANO-111 Phase 2.5: Barge-in truncated response.
+    // Updates the last assistant bubble to show only what was actually spoken.
+    socket.on("barge_in_truncated", (event: { truncated_text: string; delivered_sentences: number }) => {
+      if (currentAssistantMsgId) {
+        const msg = useChatStore.getState().messages.find((m) => m.id === currentAssistantMsgId);
+        if (msg) {
+          // Truncate chunks to only delivered sentences
+          const truncatedChunks = msg.chunks?.slice(0, event.delivered_sentences);
+          updateAssistantMessage(currentAssistantMsgId, {
+            text: event.truncated_text,
+            chunks: truncatedChunks,
+          });
+        }
+      }
+    });
+
     // NANO-073a + NANO-075: Chat history hydration with metadata survival
     socket.on("chat_history", (event: { turns: ChatHistoryTurn[] }) => {
       if (event.turns && event.turns.length > 0) {
@@ -848,6 +864,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
       socket.off("response");
       socket.off("llm_chunk");
       socket.off("llm_token");
+      socket.off("barge_in_truncated");
       socket.off("token_usage");
       socket.off("health_status");
       socket.off("config_loaded");

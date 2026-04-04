@@ -4950,6 +4950,13 @@ class GUIServer:
         """Emit token-level LLM text for real-time dashboard display (NANO-111)."""
         await self.sio.emit("llm_token", {"token": token, "is_final": is_final})
 
+    async def emit_barge_in_truncated(self, truncated_text: str, delivered_sentences: int) -> None:
+        """Emit barge-in truncation event for frontend bubble update (NANO-111 Phase 2.5)."""
+        await self.sio.emit("barge_in_truncated", {
+            "truncated_text": truncated_text,
+            "delivered_sentences": delivered_sentences,
+        })
+
     async def emit_avatar_load_model(
         self,
         vrm_path: str,
