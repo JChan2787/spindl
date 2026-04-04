@@ -331,7 +331,11 @@ class OrchestratorCallbacks:
                                 tts_text=result.tts_text,
                             )
                         )
-                        if self._on_response_ready is not None:
+                        # Only fire _on_response_ready for the fallback (non-streaming) path.
+                        # When _parallel_tts_delivery handled playback, audio is already
+                        # playing via play_streaming — calling play() here would kill the
+                        # stream and replay from scratch (Session 607: first-chunk stutter).
+                        if self._on_response_ready_streaming is None and self._on_response_ready is not None:
                             self._on_response_ready(audio_response)
 
             except Exception as e:
