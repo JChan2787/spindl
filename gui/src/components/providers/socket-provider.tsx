@@ -215,34 +215,49 @@ export function SocketProvider({ children }: SocketProviderProps) {
       }
     });
 
-    // NANO-111 Session 606: Sentence-level text synced with TTS delivery.
-    // Text appears right before each sentence's audio plays — [text][tts][text][tts].
+    // NANO-111 Session 606: Sequential sentence rendering synced with TTS.
+    // Each llm_chunk fires when playback reaches that sentence — [text][tts][text][tts].
+    // Builds the bubble incrementally. Response event finalizes metadata after.
     socket.on("llm_chunk", (event) => {
+      const chunk = {
+        text: event.text,
+        emotion: event.emotion,
+        emotionConfidence: event.emotion_confidence,
+      };
       if (!currentAssistantMsgId) {
-        // First sentence — create the chat bubble
+        // First sentence — create the parent bubble
         currentAssistantMsgId = addAssistantMessage({
           text: event.text,
           isFinal: false,
+          chunks: [chunk],
         });
       } else {
-        // Subsequent sentences — append to existing bubble
+        // Subsequent sentences — append chunk to existing bubble
         const msg = useChatStore.getState().messages.find((m) => m.id === currentAssistantMsgId);
         if (msg) {
           updateAssistantMessage(currentAssistantMsgId, {
-            text: msg.text + " " + event.text,
+            text: (msg.text ? msg.text + " " : "") + event.text,
+            chunks: [...(msg.chunks || []), chunk],
           });
         }
       }
     });
 
     // NANO-037: codex entries, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus source
-    // NANO-111: response is the authoritative final event — always carries full metadata.
-    // It either creates the bubble (blocking path) or finalizes it (streaming path).
+    // NANO-111 Session 606: response finalizes the bubble with metadata.
+    // llm_chunk builds chunks incrementally during playback.
+    // response sets authoritative text + metadata but preserves existing chunks.
     socket.on("response", (event) => {
       setResponse(event.text, event.is_final, event.activated_codex_entries, event.reasoning, event.retrieved_memories, event.stimulus_source);
-      // NANO-073a: Create or update assistant message in chat history
+
       if (!currentAssistantMsgId) {
-        // No llm_chunk arrived (blocking path) — create the message with full text
+        // No llm_chunk arrived (blocking path / text input / stimulus).
+        // Build chunks from response event if available, otherwise plain text.
+        const chunks = event.chunks?.map((c: { text: string; emotion?: string; emotion_confidence?: number }) => ({
+          text: c.text,
+          emotion: c.emotion,
+          emotionConfidence: c.emotion_confidence,
+        }));
         currentAssistantMsgId = addAssistantMessage({
           text: event.text,
           isFinal: event.is_final,
@@ -252,12 +267,11 @@ export function SocketProvider({ children }: SocketProviderProps) {
           stimulusSource: event.stimulus_source,
           emotion: event.emotion,
           emotionConfidence: event.emotion_confidence,
+          chunks,
         });
       } else {
-        // NANO-111: llm_chunk already built the text incrementally.
-        // Finalize with full metadata AND set the authoritative text.
-        // This ensures emotion, codex, memories land even if chunk
-        // events arrived out of order.
+        // llm_chunk already built chunks incrementally during playback.
+        // Finalize with metadata — do NOT overwrite chunks (would re-render all at once).
         updateAssistantMessage(currentAssistantMsgId, {
           text: event.text,
           isFinal: event.is_final,

@@ -129,6 +129,9 @@ class ResponseReadyEvent(Event):
     """Confidence score (0-100) of the emotion classification (NANO-094)."""
     tts_text: Optional[str] = None
     """TTS-safe version of the response with formatting stripped (NANO-109)."""
+    chunks: Optional[list] = None
+    """Per-sentence breakdown with emotion for sub-bubble display (NANO-111 Session 606).
+    Each dict: {text, emotion, emotion_confidence}. None for blocking path."""
 
 
 @dataclass
@@ -391,6 +394,10 @@ class LLMChunkEvent(Event):
     """Sentence text for display."""
     is_final: bool = False
     """True if this is the last sentence in the response."""
+    emotion: Optional[str] = None
+    """Per-sentence emotion classification (Session 606)."""
+    emotion_confidence: Optional[float] = None
+    """Confidence score for per-sentence emotion (Session 606)."""
 
 
 @dataclass

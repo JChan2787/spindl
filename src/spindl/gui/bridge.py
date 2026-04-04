@@ -168,6 +168,7 @@ class EventBridge:
                 emotion=event.emotion,
                 emotion_confidence=event.emotion_confidence,
                 tts_text=event.tts_text,
+                chunks=event.chunks,
             )
         )
 
@@ -325,7 +326,12 @@ class EventBridge:
         if not self._should_emit():
             return
         self._emit_async(
-            self._gui_server.emit_llm_chunk(text=event.text, is_final=event.is_final)
+            self._gui_server.emit_llm_chunk(
+                text=event.text,
+                is_final=event.is_final,
+                emotion=event.emotion,
+                emotion_confidence=event.emotion_confidence,
+            )
         )
 
     def _on_llm_token(self, event: LLMTokenEvent) -> None:

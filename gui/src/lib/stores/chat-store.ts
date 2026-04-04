@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import type { ActivatedCodexEntry, RetrievedMemory } from "@/types/events";
 
+export interface SentenceChunk {
+  text: string;
+  emotion?: string;
+  emotionConfidence?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -15,6 +21,8 @@ export interface ChatMessage {
   // Emotion classifier metadata (NANO-094) — display-only, never sent to LLM
   emotion?: string;
   emotionConfidence?: number;
+  // Per-sentence sub-bubbles (NANO-111 Session 606) — streaming responses only
+  chunks?: SentenceChunk[];
 }
 
 interface ChatStoreState {
@@ -70,6 +78,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
           stimulusSource: msg.stimulusSource,
           emotion: msg.emotion,
           emotionConfidence: msg.emotionConfidence,
+          chunks: msg.chunks,
         },
       ],
     }));

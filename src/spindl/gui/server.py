@@ -4806,8 +4806,9 @@ class GUIServer:
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
         tts_text: Optional[str] = None,
+        chunks: Optional[list] = None,
     ) -> None:
-        """Emit response event to all clients (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text)."""
+        """Emit response event to all clients (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text, NANO-111: chunks)."""
         data = {"text": text, "is_final": is_final}
         if activated_codex_entries:
             data["activated_codex_entries"] = activated_codex_entries
@@ -4822,6 +4823,8 @@ class GUIServer:
             data["emotion_confidence"] = emotion_confidence
         if tts_text is not None:
             data["tts_text"] = tts_text
+        if chunks is not None:
+            data["chunks"] = chunks
         await self.sio.emit("response", data)
 
     async def emit_stimulus_fired(
@@ -4865,9 +4868,19 @@ class GUIServer:
         """Emit avatar tool mood event from tool invocation (NANO-093)."""
         await self.sio.emit("avatar_tool_mood", {"tool_mood": tool_mood})
 
-    async def emit_llm_chunk(self, text: str, is_final: bool) -> None:
+    async def emit_llm_chunk(
+        self,
+        text: str,
+        is_final: bool,
+        emotion: str | None = None,
+        emotion_confidence: float | None = None,
+    ) -> None:
         """Emit streaming LLM sentence chunk for real-time dashboard text (NANO-111)."""
-        await self.sio.emit("llm_chunk", {"text": text, "is_final": is_final})
+        data: dict = {"text": text, "is_final": is_final}
+        if emotion is not None:
+            data["emotion"] = emotion
+            data["emotion_confidence"] = emotion_confidence
+        await self.sio.emit("llm_chunk", data)
 
     async def emit_llm_token(self, token: str, is_final: bool) -> None:
         """Emit token-level LLM text for real-time dashboard display (NANO-111)."""
