@@ -178,15 +178,15 @@ class TestPersistValidation:
 
     def test_llm_config_validates_required_fields(self) -> None:
         """Missing executable_path and model_path produces errors."""
-        from spindl.gui.server import GUIServer
+        from spindl.gui.server_providers import validate_local_llm_config
 
-        errors = GUIServer._validate_local_llm_config({})
+        errors = validate_local_llm_config({})
         assert any("executable_path" in e or "model_path" in e or "url" in e for e in errors)
 
     def test_llm_config_accepts_local(self) -> None:
-        from spindl.gui.server import GUIServer
+        from spindl.gui.server_providers import validate_local_llm_config
 
-        errors = GUIServer._validate_local_llm_config({
+        errors = validate_local_llm_config({
             "executable_path": "/path/to/llama-server",
             "model_path": "/path/to/model.gguf",
             "port": 5557,
@@ -194,17 +194,17 @@ class TestPersistValidation:
         assert errors == []
 
     def test_llm_config_accepts_url(self) -> None:
-        from spindl.gui.server import GUIServer
+        from spindl.gui.server_providers import validate_local_llm_config
 
-        errors = GUIServer._validate_local_llm_config({
+        errors = validate_local_llm_config({
             "url": "http://127.0.0.1:5557",
         })
         assert errors == []
 
     def test_llm_config_rejects_bad_port(self) -> None:
-        from spindl.gui.server import GUIServer
+        from spindl.gui.server_providers import validate_local_llm_config
 
-        errors = GUIServer._validate_local_llm_config({
+        errors = validate_local_llm_config({
             "executable_path": "/path/to/llama-server",
             "model_path": "/path/to/model.gguf",
             "port": 99999,
@@ -212,15 +212,15 @@ class TestPersistValidation:
         assert any("port" in e for e in errors)
 
     def test_vlm_config_validates_required_fields(self) -> None:
-        from spindl.gui.server import GUIServer
+        from spindl.gui.server_providers import validate_local_vlm_config
 
-        errors = GUIServer._validate_local_vlm_config({})
+        errors = validate_local_vlm_config({})
         assert len(errors) == 3  # executable_path, model_path, model_type
 
     def test_vlm_config_accepts_valid(self) -> None:
-        from spindl.gui.server import GUIServer
+        from spindl.gui.server_providers import validate_local_vlm_config
 
-        errors = GUIServer._validate_local_vlm_config({
+        errors = validate_local_vlm_config({
             "executable_path": "/path/to/llama-server",
             "model_path": "/path/to/model.gguf",
             "model_type": "gemma3",

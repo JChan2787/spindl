@@ -126,14 +126,14 @@ For headless mode, avatar setup, subtitles, tests, and more — see the [Usage G
 
 ```
 spindl/
-├── src/spindl/               # Backend (Python, ~34,400 lines, 135 files)
+├── src/spindl/               # Backend (Python, ~37,400 lines, 143 files)
 │   ├── audio/                #   Mic capture, speaker playback, Silero VAD
 │   ├── avatar/               #   Emotion classifier (DistilBERT/ONNX), tool mood mapping
 │   ├── characters/           #   SillyTavern V2 card models, import/export
 │   ├── codex/                #   Lorebook activation & management
 │   ├── config/               #   YAML config loading, env var resolution
 │   ├── core/                 #   State machine, event bus, context manager
-│   ├── gui/                  #   Socket.IO server, response models (Pydantic)
+│   ├── gui/                  #   Socket.IO server (domain-split: 8 handler modules), response models
 │   ├── history/              #   JSONL conversation persistence, prompt snapshots
 │   ├── launcher/             #   Service process management & health checks
 │   ├── llm/                  #   Prompt building, LLM providers, plugin pipeline

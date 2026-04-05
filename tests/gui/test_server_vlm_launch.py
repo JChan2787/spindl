@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from spindl.gui.server import GUIServer
+from spindl.gui.server_providers import persist_local_vlm_config
 from spindl.launcher.config import VisionProviderConfig
 
 
@@ -174,7 +175,7 @@ class TestPersistLocalVLMConfig:
         server = _make_server(with_orchestrator=True)
         config = {"host": "127.0.0.1", "port": 5558, "model_path": "/new/model.gguf",
                   "executable_path": "/path/to/llama-server", "model_type": "gemma3"}
-        result = server._persist_local_vlm_config(config)
+        result = persist_local_vlm_config(server,config)
         assert result is True
         assert server._orchestrator._config.vlm_config.providers["llama"] == config
         server._orchestrator._config.save_to_yaml.assert_called_once()
@@ -205,7 +206,7 @@ class TestPersistLocalVLMConfig:
 
         new_cfg = {"host": "127.0.0.1", "port": 5558, "model_path": "/new/vlm.gguf",
                    "executable_path": "/path/to/llama-server", "model_type": "gemma3"}
-        result = server._persist_local_vlm_config(new_cfg)
+        result = persist_local_vlm_config(server,new_cfg)
         assert result is True
 
         # Verify YAML was updated
@@ -226,7 +227,7 @@ class TestPersistLocalVLMConfig:
         """Returns False when no config path."""
         server = _make_server(with_orchestrator=False)
         server._config_path = None
-        result = server._persist_local_vlm_config({"port": 5558})
+        result = persist_local_vlm_config(server,{"port": 5558})
         assert result is False
 
 
