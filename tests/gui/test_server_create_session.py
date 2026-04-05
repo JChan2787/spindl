@@ -11,7 +11,7 @@ Tests cover:
 import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -65,13 +65,14 @@ def _make_server(with_orchestrator=False):
 
     server.sio.event = capture_event
 
-    # Mock _emit_sessions to avoid filesystem access
-    server._emit_sessions = AsyncMock()
-
     # Register handlers (this populates server._handlers)
     server._register_handlers()
 
     return server
+
+
+# Module-level mock for emit_sessions (used by session handlers)
+_emit_sessions_mock = None
 
 
 # ============================================================================
@@ -79,11 +80,12 @@ def _make_server(with_orchestrator=False):
 # ============================================================================
 
 
+@patch("spindl.gui.server_sessions.emit_sessions", new_callable=AsyncMock)
 class TestCreateSession:
     """Tests for the create_session socket handler."""
 
     @pytest.mark.asyncio
-    async def test_creates_session_successfully(self) -> None:
+    async def test_creates_session_successfully(self, mock_emit_sessions) -> None:
         """create_session succeeds when orchestrator is present."""
         server = _make_server(with_orchestrator=True)
         handler = server._handlers["create_session"]
@@ -101,10 +103,10 @@ class TestCreateSession:
             to="test-sid",
         )
         # Should refresh session list for all clients
-        server._emit_sessions.assert_called_once()
+        mock_emit_sessions.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_rejects_without_orchestrator(self) -> None:
+    async def test_rejects_without_orchestrator(self, mock_emit_sessions) -> None:
         """create_session emits error when services not running."""
         server = _make_server(with_orchestrator=False)
         handler = server._handlers["create_session"]
@@ -118,7 +120,7 @@ class TestCreateSession:
         )
 
     @pytest.mark.asyncio
-    async def test_handles_create_failure(self) -> None:
+    async def test_handles_create_failure(self, mock_emit_sessions) -> None:
         """create_session emits error when orchestrator returns False."""
         server = _make_server(with_orchestrator=True)
         server._orchestrator.create_new_session.return_value = False
@@ -132,21 +134,21 @@ class TestCreateSession:
             to="test-sid",
         )
         # Should NOT refresh session list on failure
-        server._emit_sessions.assert_not_called()
+        mock_emit_sessions.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_session_list_refreshes_after_create(self) -> None:
-        """_emit_sessions is called without sid (broadcast) after successful create."""
+    async def test_session_list_refreshes_after_create(self, mock_emit_sessions) -> None:
+        """emit_sessions is called without sid (broadcast) after successful create."""
         server = _make_server(with_orchestrator=True)
         handler = server._handlers["create_session"]
 
         await handler("test-sid", {})
 
-        # _emit_sessions called with no arguments = broadcast to all
-        server._emit_sessions.assert_called_once_with()
+        # emit_sessions called with server arg = broadcast to all
+        mock_emit_sessions.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handler_registered(self) -> None:
+    async def test_handler_registered(self, mock_emit_sessions) -> None:
         """create_session handler is registered via sio.event."""
         server = _make_server(with_orchestrator=False)
         assert "create_session" in server._handlers

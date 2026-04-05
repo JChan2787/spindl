@@ -68,7 +68,6 @@ def _make_server(with_orchestrator=False, session_file=None):
         return fn
 
     server.sio.event = capture_event
-    server._emit_sessions = AsyncMock()
     server._register_handlers()
 
     return server
