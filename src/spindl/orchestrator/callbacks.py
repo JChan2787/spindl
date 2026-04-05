@@ -54,8 +54,8 @@ class OrchestratorCallbacks:
 
     def __init__(
         self,
-        stt_client: STTProvider,
-        tts_provider: TTSProvider,
+        stt_client: Optional[STTProvider],
+        tts_provider: Optional[TTSProvider],
         llm_pipeline: LLMPipeline,
         persona: dict,
         on_response_ready: Optional[Callable[[np.ndarray], None]] = None,
@@ -103,6 +103,8 @@ class OrchestratorCallbacks:
         self._on_response_ready_streaming: Optional[Callable[[np.ndarray], None]] = None
         self._append_playback_audio: Optional[Callable[[np.ndarray], None]] = None
         self._finalize_playback_streaming: Optional[Callable[[], None]] = None
+        # NANO-112: Called when voice path completes without TTS (no playback to trigger state transition)
+        self._on_tts_skipped: Optional[Callable[[], None]] = None
         self._event_bus = event_bus
         self._context_manager = context_manager
 
@@ -170,6 +172,13 @@ class OrchestratorCallbacks:
             self._processing_start_time = time.time()
 
             try:
+                # NANO-112: Guard against disabled STT
+                if self._stt is None:
+                    logger.debug("STT disabled — ignoring speech input")
+                    if self._on_empty_transcription is not None:
+                        self._on_empty_transcription()
+                    return
+
                 # NANO-110: Suppress voice pipeline while addressing others
                 if self._is_addressing_others and self._is_addressing_others():
                     logger.info("[NANO-110] Voice input suppressed — addressing others")
@@ -230,7 +239,7 @@ class OrchestratorCallbacks:
                 if self._consume_addressing_others_prompt:
                     addressing_prompt = self._consume_addressing_others_prompt()
 
-                if use_streaming and self._on_response_ready_streaming is not None:
+                if use_streaming and self._on_response_ready_streaming is not None and self._tts_provider is not None:
                     # NANO-111: Streaming voice path with parallel TTS.
                     # run_stream() yields sentence chunks for parallel TTS,
                     # then runs deferred post-processors on the accumulated
@@ -305,24 +314,37 @@ class OrchestratorCallbacks:
                     if not response or response.strip() == "":
                         return
 
-                    # NANO-111: Parallel TTS with streaming playback on the
-                    # completed response. Split into sentences, fire TTS threads,
-                    # delivery thread feeds playback in order.
-                    if self._on_response_ready_streaming is not None:
-                        audio_response, _ = self._parallel_tts_delivery(
-                            tts_response, tts_config, display_text=response,
-                        )
-                        if audio_response is not None:
+                    _voice_tts_off_chunks = None
+                    # NANO-112: Skip TTS synthesis when provider is disabled
+                    if self._tts_provider is not None:
+                        # NANO-111: Parallel TTS with streaming playback on the
+                        # completed response. Split into sentences, fire TTS threads,
+                        # delivery thread feeds playback in order.
+                        if self._on_response_ready_streaming is not None:
+                            audio_response, _ = self._parallel_tts_delivery(
+                                tts_response, tts_config, display_text=response,
+                            )
+                            if audio_response is not None:
+                                self._total_turns += 1
+                        else:
+                            # Fallback: single blocking TTS call (no streaming callbacks)
+                            audio_result = self._tts_provider.synthesize(
+                                tts_response,
+                                voice=tts_config.get("voice"),
+                                **{k: v for k, v in tts_config.items() if k != "voice"},
+                            )
+                            audio_response = np.frombuffer(audio_result.data, dtype=np.float32)
                             self._total_turns += 1
                     else:
-                        # Fallback: single blocking TTS call (no streaming callbacks)
-                        audio_result = self._tts_provider.synthesize(
-                            tts_response,
-                            voice=tts_config.get("voice"),
-                            **{k: v for k, v in tts_config.items() if k != "voice"},
-                        )
-                        audio_response = np.frombuffer(audio_result.data, dtype=np.float32)
+                        # TTS disabled — text-only response with sub-bubble chunking
                         self._total_turns += 1
+                        # NANO-112: Segment for sub-bubble rendering via response event
+                        _voice_tts_off_chunks = self._emit_text_only_chunks(response)
+                        # NANO-112: No playback → manually transition back to listening.
+                        # Normally _on_playback_complete fires finish_system_speaking(),
+                        # but with no TTS there's no playback to complete.
+                        if self._on_tts_skipped is not None:
+                            self._on_tts_skipped()
 
                     # Emit response event AFTER TTS so llm_chunk events
                     # from _parallel_tts_delivery land first.
@@ -337,13 +359,14 @@ class OrchestratorCallbacks:
                                 emotion=emotion,
                                 emotion_confidence=emotion_confidence,
                                 tts_text=result.tts_text,
+                                chunks=_voice_tts_off_chunks if self._tts_provider is None else None,
                             )
                         )
                         # Only fire _on_response_ready for the fallback (non-streaming) path.
                         # When _parallel_tts_delivery handled playback, audio is already
                         # playing via play_streaming — calling play() here would kill the
                         # stream and replay from scratch (Session 607: first-chunk stutter).
-                        if self._on_response_ready_streaming is None and self._on_response_ready is not None:
+                        if self._tts_provider is not None and self._on_response_ready_streaming is None and self._on_response_ready is not None:
                             self._on_response_ready(audio_response)
 
             except Exception as e:
@@ -520,6 +543,36 @@ class OrchestratorCallbacks:
         ordered = [audio_results[i] for i in range(total) if len(audio_results.get(i, [])) > 0]
         audio = np.concatenate(ordered) if ordered else None
         return audio, sentence_chunks
+
+    def _emit_text_only_chunks(self, response: str) -> Optional[list]:
+        """
+        NANO-112: Segment response into sentence chunks without TTS.
+
+        When TTS is disabled, sub-bubble rendering still needs sentence-level
+        chunks. Returns them for the response event's fallback_chunks path
+        (socket-provider builds sub-bubbles from chunks in the response event).
+
+        Does NOT emit LLMChunkEvents — those are tied to the streaming playback
+        lifecycle (currentAssistantMsgId). Emitting them without that lifecycle
+        causes duplicate parent bubbles.
+
+        Returns:
+            Chunks list for fallback_chunks in response event, or None.
+        """
+        import re
+        from ..llm.sentence_segmenter import merge_punctuation_fragments
+
+        if not response or not response.strip():
+            return None
+
+        sentences = re.split(r'(?<=[.!?。！？])\s+', response.strip())
+        sentences = [s.strip() for s in sentences if s.strip()]
+        sentences = merge_punctuation_fragments(sentences)
+
+        if not sentences:
+            return None
+
+        return [{"text": s} for s in sentences]
 
     def _determine_error_stage(self, error: Exception) -> str:
         """Determine which stage the error occurred in based on state."""
@@ -1008,7 +1061,8 @@ class OrchestratorCallbacks:
                     return
 
                 # Synthesize speech via provider (unless skip_tts requested)
-                if not skip_tts:
+                # NANO-112: Also skip TTS when provider is disabled
+                if not skip_tts and self._tts_provider is not None:
                     # NANO-031: Emit state change to system_speaking
                     self._emit_state_change(current_state, "system_speaking", "tts_start")
                     current_state = "system_speaking"
@@ -1039,6 +1093,8 @@ class OrchestratorCallbacks:
                     self._emit_state_change(current_state, "idle", "tts_complete")
                 else:
                     # Text-only mode: still count the turn, return to idle
+                    # NANO-112: Segment and emit LLMChunkEvents for sub-bubble UI
+                    _text_input_chunks = self._emit_text_only_chunks(response)
                     self._total_turns += 1
                     self._emit_state_change(current_state, "idle", "response_complete")
 
@@ -1047,7 +1103,12 @@ class OrchestratorCallbacks:
                 # built sub-bubbles incrementally — don't pass chunks here
                 # (would re-render all at once). Pass chunks only for fallback
                 # path where no llm_chunk events fired.
-                fallback_chunks = _text_input_chunks if self._on_response_ready_streaming is None else None
+                # NANO-112: When TTS is disabled, chunks come from _emit_text_only_chunks
+                # and must be passed as fallback (no llm_chunk events fired).
+                # When TTS is enabled, _parallel_tts_delivery fires llm_chunk events
+                # so fallback_chunks should be None to avoid double-render.
+                tts_off = self._tts_provider is None
+                fallback_chunks = _text_input_chunks if (self._on_response_ready_streaming is None or tts_off) else None
                 print(f"[NANO-111] text_input_chunks={_text_input_chunks}", flush=True)
                 if self._event_bus is not None:
                     self._event_bus.emit(

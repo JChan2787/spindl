@@ -36,6 +36,7 @@ class STTConfig(BaseModel):
     STT provider configuration (NANO-061a).
 
     Encapsulates the provider-based STT configuration:
+    - Whether the service is enabled
     - Which provider to use
     - Plugin paths for external providers
     - Provider-specific configuration
@@ -43,6 +44,7 @@ class STTConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    enabled: bool = True
     provider: str = "parakeet"
     plugin_paths: list[str] = Field(default_factory=list)
     provider_config: dict[str, Any] = Field(default_factory=dict)
@@ -89,6 +91,7 @@ class TTSConfig(BaseModel):
     TTS provider configuration (NANO-015).
 
     Encapsulates the provider-based TTS configuration:
+    - Whether the service is enabled
     - Which provider to use
     - Plugin paths for external providers
     - Provider-specific configuration
@@ -96,6 +99,7 @@ class TTSConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    enabled: bool = True
     provider: str = "kokoro"
     plugin_paths: list[str] = Field(default_factory=list)
     provider_config: dict[str, Any] = Field(default_factory=dict)
@@ -785,6 +789,15 @@ class OrchestratorConfig(BaseModel):
         # TTS settings (NANO-015: provider-based)
         if "tts" in data:
             config.tts_config = TTSConfig.from_dict(data["tts"])
+
+        # NANO-112: Propagate enabled flags from launcher services
+        launcher_services = data.get("launcher", {}).get("services", {})
+        if "stt" in launcher_services:
+            stt_enabled = launcher_services["stt"].get("enabled", True)
+            config.stt_config.enabled = stt_enabled
+        if "tts" in launcher_services:
+            tts_enabled = launcher_services["tts"].get("enabled", True)
+            config.tts_config.enabled = tts_enabled
 
         # LLM settings (NANO-018/019: provider-based, clean break)
         if "llm" in data:

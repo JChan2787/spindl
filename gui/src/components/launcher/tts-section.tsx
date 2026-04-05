@@ -1,9 +1,10 @@
 "use client";
 
-import { Volume2, Cloud, HardDrive } from "lucide-react";
+import { Volume2, VolumeOff, Cloud, HardDrive } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -200,17 +201,36 @@ function CloudTTSPlaceholder() {
 }
 
 export function TTSSection() {
-  const { ttsProviderType, setTTSProviderType } = useLauncherStore();
+  const { ttsEnabled, setTTSEnabled, ttsProviderType, setTTSProviderType } = useLauncherStore();
 
   return (
-    <Card>
+    <Card className={!ttsEnabled ? "opacity-60" : ""}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base font-medium">
-          <Volume2 className="h-5 w-5" />
-          TTS Configuration
+        <CardTitle className="flex items-center justify-between text-base font-medium">
+          <div className="flex items-center gap-2">
+            {ttsEnabled ? (
+              <Volume2 className="h-5 w-5" />
+            ) : (
+              <VolumeOff className="h-5 w-5" />
+            )}
+            TTS Configuration
+          </div>
+          <div className="flex items-center gap-2">
+            <Label
+              htmlFor="tts-enabled"
+              className="text-sm font-normal text-muted-foreground"
+            >
+              {ttsEnabled ? "Enabled" : "Disabled"}
+            </Label>
+            <Switch
+              id="tts-enabled"
+              checked={ttsEnabled}
+              onCheckedChange={setTTSEnabled}
+            />
+          </div>
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      {ttsEnabled && <CardContent>
         <Tabs
           value={ttsProviderType}
           onValueChange={(v) => setTTSProviderType(v as "local" | "cloud")}
@@ -234,7 +254,7 @@ export function TTSSection() {
             <CloudTTSPlaceholder />
           </TabsContent>
         </Tabs>
-      </CardContent>
+      </CardContent>}
     </Card>
   );
 }

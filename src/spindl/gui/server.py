@@ -599,7 +599,9 @@ class GUIServer:
             )
 
         # NANO-110: Auto-spawn stream deck if enabled in config at startup
-        if orchestrator._config.avatar_config.stream_deck_enabled and self._event_loop:
+        # NANO-112: Skip when STT is disabled (Stream Deck controls voice input suppression)
+        stt_enabled = orchestrator._config.stt_config.enabled
+        if orchestrator._config.avatar_config.stream_deck_enabled and self._event_loop and stt_enabled:
             asyncio.run_coroutine_threadsafe(
                 self._stream_deck_spawn(), self._event_loop
             )

@@ -81,8 +81,8 @@ export interface TokenUsageEvent {
 }
 
 export interface HealthStatusEvent {
-  stt: boolean;
-  tts: boolean;
+  stt: boolean | "disabled";
+  tts: boolean | "disabled";
   llm: boolean;
   vlm: boolean;
   embedding?: boolean;

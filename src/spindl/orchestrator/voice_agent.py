@@ -97,6 +97,8 @@ class VoiceAgentOrchestrator:
         # Service clients (initialized in _setup)
         self._stt: Optional[STTProvider] = None  # NANO-061a: provider-based
         self._tts_provider: Optional[TTSProvider] = None  # NANO-015: provider-based
+        self._stt_enabled: bool = config.stt_config.enabled  # NANO-112
+        self._tts_enabled: bool = config.tts_config.enabled  # NANO-112
         self._llm_provider: Optional[LLMProvider] = None  # NANO-018/019: provider-based
         self._pipeline: Optional[LLMPipeline] = None
 
@@ -163,44 +165,52 @@ class VoiceAgentOrchestrator:
         self._persona = loader.load_as_dict(self._config.character_id)
 
         # STT: provider-based architecture (NANO-061a)
+        # NANO-112: Skip initialization when disabled
         stt_config = self._config.stt_config
-        stt_registry = STTProviderRegistry(plugin_paths=stt_config.plugin_paths)
+        if stt_config.enabled:
+            stt_registry = STTProviderRegistry(plugin_paths=stt_config.plugin_paths)
 
-        try:
-            stt_provider_class = stt_registry.get_provider_class(stt_config.provider)
-        except STTProviderNotFoundError as e:
-            raise RuntimeError(f"STT initialization failed: {e}")
+            try:
+                stt_provider_class = stt_registry.get_provider_class(stt_config.provider)
+            except STTProviderNotFoundError as e:
+                raise RuntimeError(f"STT initialization failed: {e}")
 
-        # Validate provider config
-        config_errors = stt_provider_class.validate_config(stt_config.provider_config)
-        if config_errors:
-            raise RuntimeError(
-                f"STT provider config invalid: {'; '.join(config_errors)}"
-            )
+            # Validate provider config
+            config_errors = stt_provider_class.validate_config(stt_config.provider_config)
+            if config_errors:
+                raise RuntimeError(
+                    f"STT provider config invalid: {'; '.join(config_errors)}"
+                )
 
-        # Instantiate and initialize provider
-        self._stt = stt_provider_class()
-        self._stt.initialize(stt_config.provider_config)
+            # Instantiate and initialize provider
+            self._stt = stt_provider_class()
+            self._stt.initialize(stt_config.provider_config)
+        else:
+            logger.info("STT disabled by configuration — skipping provider initialization")
 
         # TTS: provider-based architecture (NANO-015)
+        # NANO-112: Skip initialization when disabled
         tts_config = self._config.tts_config
-        tts_registry = TTSProviderRegistry(plugin_paths=tts_config.plugin_paths)
+        if tts_config.enabled:
+            tts_registry = TTSProviderRegistry(plugin_paths=tts_config.plugin_paths)
 
-        try:
-            tts_provider_class = tts_registry.get_provider_class(tts_config.provider)
-        except ProviderNotFoundError as e:
-            raise RuntimeError(f"TTS initialization failed: {e}")
+            try:
+                tts_provider_class = tts_registry.get_provider_class(tts_config.provider)
+            except ProviderNotFoundError as e:
+                raise RuntimeError(f"TTS initialization failed: {e}")
 
-        # Validate provider config
-        config_errors = tts_provider_class.validate_config(tts_config.provider_config)
-        if config_errors:
-            raise RuntimeError(
-                f"TTS provider config invalid: {'; '.join(config_errors)}"
-            )
+            # Validate provider config
+            config_errors = tts_provider_class.validate_config(tts_config.provider_config)
+            if config_errors:
+                raise RuntimeError(
+                    f"TTS provider config invalid: {'; '.join(config_errors)}"
+                )
 
-        # Instantiate and initialize provider
-        self._tts_provider = tts_provider_class()
-        self._tts_provider.initialize(tts_config.provider_config)
+            # Instantiate and initialize provider
+            self._tts_provider = tts_provider_class()
+            self._tts_provider.initialize(tts_config.provider_config)
+        else:
+            logger.info("TTS disabled by configuration — skipping provider initialization")
 
         # LLM: provider-based architecture (NANO-018)
         llm_config = self._config.llm_config
@@ -438,11 +448,12 @@ class VoiceAgentOrchestrator:
 
         # Configure playback sample rate from TTS provider properties (NANO-015)
         # Provider declares its output format, playback adapts
-        tts_props = self._tts_provider.get_properties()
-        self._playback.configure(
-            sample_rate=tts_props.sample_rate,
-            channels=tts_props.channels,
-        )
+        if self._tts_provider is not None:
+            tts_props = self._tts_provider.get_properties()
+            self._playback.configure(
+                sample_rate=tts_props.sample_rate,
+                channels=tts_props.channels,
+            )
 
         # Create state machine with VAD
         self._state_machine = AudioStateMachine(
@@ -479,6 +490,17 @@ class VoiceAgentOrchestrator:
         self._callbacks._append_playback_audio = self._append_playback_audio
         self._callbacks._finalize_playback_streaming = self._finalize_playback_streaming
 
+        # NANO-112: Wire TTS-skipped callback for voice path state transition.
+        # Can't use _on_playback_complete — that calls finish_system_speaking()
+        # which only transitions SYSTEM_SPEAKING→LISTENING. With TTS off, state
+        # is still PROCESSING (never entered SYSTEM_SPEAKING). Need direct transition.
+        def _on_tts_skipped():
+            if self._state_machine:
+                self._state_machine._transition(
+                    AgentState.LISTENING, "tts_skipped"
+                )
+        self._callbacks._on_tts_skipped = _on_tts_skipped
+
         # NANO-111 Phase 2.5: Wire history manager for barge-in truncation
         self._callbacks._history_manager = self._history_manager
 
@@ -503,10 +525,11 @@ class VoiceAgentOrchestrator:
             )
 
         # Wire callbacks to state machine
+        # NANO-112: Don't wire speech_end when STT is disabled (no transcription possible)
         self._state_machine._callbacks = AgentCallbacks(
             on_state_change=on_state_change_with_event,
             on_user_speech_start=None,  # Not needed for orchestration
-            on_user_speech_end=self._callbacks.on_user_speech_end,
+            on_user_speech_end=self._callbacks.on_user_speech_end if self._stt else None,
             on_barge_in=self._callbacks.on_barge_in,
             on_processing_complete=None,  # Not needed
             on_system_speech_end=None,  # Handled via playback callbacks
@@ -973,11 +996,12 @@ class VoiceAgentOrchestrator:
         self._setup()
         self._running = True
 
-        # Start capture
-        self._capture.start()
-
-        # Activate state machine
-        self._state_machine.activate()
+        # Start capture (NANO-112: skip when STT is disabled — no mic needed)
+        if self._stt is not None:
+            self._capture.start()
+            self._state_machine.activate()
+        else:
+            logger.info("STT disabled — audio capture and state machine not started")
 
         # Eagerly bootstrap the history session so session_file is available
         # immediately (for reflection, GUI active-session badge, etc.)
@@ -1122,18 +1146,31 @@ class VoiceAgentOrchestrator:
         """Get the MemoryStore for memory CRUD operations (NANO-043 Phase 6)."""
         return self._memory_store
 
-    def health_check(self) -> dict[str, bool]:
+    def health_check(self) -> dict:
         """
         Check if all services are available.
 
         Returns:
             Dict mapping service name to availability status.
+            NANO-112: STT/TTS return "disabled" when intentionally off,
+            distinguishing from "down" (failed) or True (healthy).
         """
         self._setup()
 
+        # NANO-112: Distinguish disabled vs unhealthy
+        if not self._stt_enabled:
+            stt_status = "disabled"
+        else:
+            stt_status = self._stt.health_check() if self._stt else False
+
+        if not self._tts_enabled:
+            tts_status = "disabled"
+        else:
+            tts_status = self._tts_provider.health_check() if self._tts_provider else False
+
         return {
-            "stt": self._stt.health_check() if self._stt else False,
-            "tts": self._tts_provider.health_check() if self._tts_provider else False,
+            "stt": stt_status,
+            "tts": tts_status,
             "llm": self._check_llm_health(),
             "vlm": self._check_vlm_health(),
             "embedding": self._embedding_client.health_check() if self._embedding_client else False,

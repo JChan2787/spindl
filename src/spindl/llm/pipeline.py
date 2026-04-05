@@ -920,6 +920,8 @@ class LLMPipeline:
 
         if context.messages and context.messages[0].get("role") == "system":
             system_prompt = context.messages[0]["content"]
+            has_placeholder = "[TWITCH_CONTEXT]" in system_prompt
+            print(f"[NANO-112 DEBUG] _inject_twitch_content: content_len={len(twitch_content)}, placeholder_present={has_placeholder}", flush=True)
 
             # Replace placeholder with content (or empty string)
             system_prompt = system_prompt.replace("[TWITCH_CONTEXT]", twitch_content)
