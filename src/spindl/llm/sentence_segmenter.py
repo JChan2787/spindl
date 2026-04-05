@@ -60,6 +60,26 @@ _SENTENCE_BOUNDARY = re.compile(
 )
 
 
+def merge_punctuation_fragments(sentences: list[str]) -> list[str]:
+    """
+    Merge punctuation-only fragments into the preceding sentence.
+
+    Sentence splitting on ``[.!?]`` can produce orphan fragments like ``"!"``
+    from input such as ``"seriously?! You want"``. TTS vocalises these as
+    awkward gasps. This helper folds them back.
+    """
+    if not sentences:
+        return sentences
+    merged: list[str] = [sentences[0]]
+    for s in sentences[1:]:
+        # A fragment with no word characters is punctuation-only
+        if not re.search(r'\w', s):
+            merged[-1] = merged[-1] + " " + s
+        else:
+            merged.append(s)
+    return merged
+
+
 class SentenceSegmenter:
     """
     Accumulates streaming LLM tokens and yields complete sentences.
@@ -81,6 +101,29 @@ class SentenceSegmenter:
         self._in_think_block: bool = False
         self._is_first_sentence: bool = True
         self._faster_first_response: bool = faster_first_response
+        # Hold the last extracted sentence for one token cycle so trailing
+        # punctuation from the next token can be absorbed (e.g. "?" then "!").
+        self._held_sentence: str | None = None
+
+    def _release_held(self, is_final: bool = False) -> Iterator[SentenceChunk]:
+        """Yield the held sentence, absorbing any leading punctuation from the buffer first."""
+        if self._held_sentence is None:
+            return
+
+        # Absorb leading punctuation from the buffer into the held sentence
+        # (e.g. buffer starts with "! " after held = "angry test?")
+        absorbed = re.match(r'^([^\w\s]*)', self._buffer)
+        if absorbed and absorbed.group(1):
+            self._held_sentence += absorbed.group(1)
+            self._buffer = self._buffer[absorbed.end(1):].lstrip()
+
+        yield SentenceChunk(
+            text=self._held_sentence,
+            index=self._sentence_index,
+            is_final=is_final,
+        )
+        self._sentence_index += 1
+        self._held_sentence = None
 
     def feed(self, chunk: StreamChunk) -> Iterator[SentenceChunk]:
         """
@@ -101,11 +144,24 @@ class SentenceSegmenter:
         if text:
             self._buffer += text
 
+        # Release any held sentence now that new text has arrived in the buffer.
+        # The buffer may start with punctuation (e.g. "!") that should be absorbed.
+        yield from self._release_held()
+
         # On final chunk, flush whatever remains
         if chunk.is_final:
-            if self._buffer.strip():
+            # Extract any remaining sentences from the buffer
+            yield from self._extract_sentences()
+
+            # Release the held sentence (absorbs leading punctuation from buffer)
+            yield from self._release_held()
+
+            remaining = self._buffer.strip()
+            # Don't yield punctuation-only remainders (e.g. trailing "!" from "?!")
+            # — they produce TTS gasps and add nothing to display.
+            if remaining and re.search(r'\w', remaining):
                 yield SentenceChunk(
-                    text=self._buffer.strip(),
+                    text=remaining,
                     index=self._sentence_index,
                     is_final=True,
                 )
@@ -166,17 +222,25 @@ class SentenceSegmenter:
 
             # We have a real sentence boundary
             split_pos = match.end()
-            sentence = self._buffer[:split_pos].strip()
-            self._buffer = self._buffer[split_pos:]
 
-            if sentence:
-                self._is_first_sentence = False
-                yield SentenceChunk(
-                    text=sentence,
-                    index=self._sentence_index,
-                    is_final=False,
-                )
-                self._sentence_index += 1
+            # Absorb any adjacent sentence-ending punctuation already in the buffer
+            # (e.g. "?!" when both arrived in the same token).
+            while split_pos < len(self._buffer) and _END_PUNCTUATION.match(self._buffer[split_pos]):
+                split_pos += 1
+
+            sentence = self._buffer[:split_pos].strip()
+            self._buffer = self._buffer[split_pos:].lstrip()
+
+            if not sentence:
+                continue
+
+            # Release any previously held sentence before holding this one
+            yield from self._release_held()
+
+            self._is_first_sentence = False
+            # Hold this sentence — don't yield yet. The next feed() call
+            # will release it after absorbing any leading punctuation.
+            self._held_sentence = sentence
 
     def _try_comma_split(self) -> SentenceChunk | None:
         """
@@ -235,3 +299,4 @@ class SentenceSegmenter:
         self._sentence_index = 0
         self._in_think_block = False
         self._is_first_sentence = True
+        self._held_sentence = None

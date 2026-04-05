@@ -61,36 +61,30 @@ export function ChatMessageBubble({ message, characterName }: ChatMessageBubbleP
         {!isUser && message.chunks && message.chunks.length > 0 ? (
           <div className="flex flex-col gap-1">
             {message.chunks.map((chunk, i) => (
-              <SentenceBubble
-                key={i}
-                chunk={chunk}
-                showEmotion={showEmotion}
-              />
+              <SentenceBubble key={i} chunk={chunk} />
             ))}
             {!message.isFinal && (
               <span className="inline-block ml-1 opacity-50 animate-pulse">▊</span>
             )}
           </div>
         ) : (
-          <>
-            <p className={cn(
-              "text-sm whitespace-pre-wrap break-words",
-              !message.isFinal && !isUser && "animate-pulse"
-            )}>
-              {message.text}
-              {!message.isFinal && !isUser && (
-                <span className="inline-block ml-1 opacity-50">▊</span>
-              )}
-            </p>
-
-            {/* Single emotion tag for non-chunked messages */}
-            {!isUser && showEmotion && message.emotion && (
-              <span className="text-xs text-muted-foreground mt-0.5 block">
-                {message.emotion}
-                {message.emotionConfidence != null && ` \u2014 ${Math.round(message.emotionConfidence * 100)}%`}
-              </span>
+          <p className={cn(
+            "text-sm whitespace-pre-wrap break-words",
+            !message.isFinal && !isUser && "animate-pulse"
+          )}>
+            {message.text}
+            {!message.isFinal && !isUser && (
+              <span className="inline-block ml-1 opacity-50">▊</span>
             )}
-          </>
+          </p>
+        )}
+
+        {/* Single emotion label for entire response — bottom-right */}
+        {!isUser && showEmotion && message.emotion && (
+          <span className="text-xs text-muted-foreground mt-1 block text-right">
+            {message.emotion}
+            {message.emotionConfidence != null && ` \u2014 ${Math.round(message.emotionConfidence * 100)}%`}
+          </span>
         )}
 
         {/* Timestamp */}
@@ -104,18 +98,12 @@ export function ChatMessageBubble({ message, characterName }: ChatMessageBubbleP
   );
 }
 
-function SentenceBubble({ chunk, showEmotion }: { chunk: SentenceChunk; showEmotion: boolean }) {
+function SentenceBubble({ chunk }: { chunk: SentenceChunk }) {
   return (
     <div className="rounded border border-border/30 bg-background/20 px-2 py-1.5">
       <p className="text-sm whitespace-pre-wrap break-words">
         {chunk.text}
       </p>
-      {showEmotion && chunk.emotion && (
-        <span className="text-xs text-muted-foreground mt-0.5 block">
-          {chunk.emotion}
-          {chunk.emotionConfidence != null && ` \u2014 ${Math.round(chunk.emotionConfidence * 100)}%`}
-        </span>
-      )}
     </div>
   );
 }

@@ -218,6 +218,9 @@ export function SocketProvider({ children }: SocketProviderProps) {
     // NANO-111 Session 606: Sequential sentence rendering synced with TTS.
     // Each llm_chunk fires when playback reaches that sentence — [text][tts][text][tts].
     // Builds the bubble incrementally. Response event finalizes metadata after.
+    // NOTE: response event fires BEFORE llm_chunk playback completes, so
+    // currentAssistantMsgId must NOT be cleared by response — the last
+    // llm_chunk (is_final=true) clears it instead.
     socket.on("llm_chunk", (event) => {
       const chunk = {
         text: event.text,
@@ -241,6 +244,10 @@ export function SocketProvider({ children }: SocketProviderProps) {
           });
         }
       }
+      // Last chunk delivered — safe to clear tracked ID
+      if (event.is_final) {
+        currentAssistantMsgId = null;
+      }
     });
 
     // NANO-037: codex entries, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus source
@@ -251,14 +258,15 @@ export function SocketProvider({ children }: SocketProviderProps) {
       setResponse(event.text, event.is_final, event.activated_codex_entries, event.reasoning, event.retrieved_memories, event.stimulus_source);
 
       if (!currentAssistantMsgId) {
-        // No llm_chunk arrived (blocking path / text input / stimulus).
+        // No streaming occurred (blocking path / text input / stimulus).
         // Build chunks from response event if available, otherwise plain text.
+        // No llm_chunk events will follow — safe to clear ID after creation.
         const chunks = event.chunks?.map((c: { text: string; emotion?: string; emotion_confidence?: number }) => ({
           text: c.text,
           emotion: c.emotion,
           emotionConfidence: c.emotion_confidence,
         }));
-        currentAssistantMsgId = addAssistantMessage({
+        addAssistantMessage({
           text: event.text,
           isFinal: event.is_final,
           reasoning: event.reasoning,
@@ -269,9 +277,11 @@ export function SocketProvider({ children }: SocketProviderProps) {
           emotionConfidence: event.emotion_confidence,
           chunks,
         });
+        // Don't set currentAssistantMsgId — no llm_chunk events follow this path
       } else {
-        // llm_chunk already built chunks incrementally during playback.
-        // Finalize with metadata — do NOT overwrite chunks (would re-render all at once).
+        // Streaming path: llm_token/llm_chunk already built the bubble.
+        // Finalize with metadata — do NOT overwrite chunks or clear ID.
+        // The last llm_chunk (is_final=true) clears currentAssistantMsgId.
         updateAssistantMessage(currentAssistantMsgId, {
           text: event.text,
           isFinal: event.is_final,
@@ -283,9 +293,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
           emotionConfidence: event.emotion_confidence,
         });
       }
-      // Clear the tracked ID and stimulus flag when response is final
       if (event.is_final) {
-        currentAssistantMsgId = null;
         setStimulusActive(false);
       }
     });
@@ -303,6 +311,9 @@ export function SocketProvider({ children }: SocketProviderProps) {
             chunks: truncatedChunks,
           });
         }
+        // Barge-in kills playback — remaining llm_chunk events won't fire,
+        // so clear the tracked ID here.
+        currentAssistantMsgId = null;
       }
     });
 

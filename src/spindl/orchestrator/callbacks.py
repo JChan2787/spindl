@@ -392,27 +392,27 @@ class OrchestratorCallbacks:
             Chunks: [{text, emotion, emotion_confidence}, ...] for sub-bubble display.
         """
         import re
+        from ..llm.sentence_segmenter import merge_punctuation_fragments
 
         # Split TTS text into sentences
         sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
         sentences = [s.strip() for s in sentences if s.strip()]
+        sentences = merge_punctuation_fragments(sentences)
 
         # Split display text into sentences for sub-bubble display
         raw = display_text or tts_text
         display_sentences = re.split(r'(?<=[.!?。！？])\s+', raw.strip())
         display_sentences = [s.strip() for s in display_sentences if s.strip()]
+        display_sentences = merge_punctuation_fragments(display_sentences)
 
         if not sentences:
             return None, None
 
-        # Classify emotion per display sentence
+        # Build sentence chunks for sub-bubble display (text only, no per-sentence emotion)
         sentence_chunks = []
         for ds in display_sentences:
-            emo, conf = self._classify_emotion(ds) if ds.strip() else (None, None)
             sentence_chunks.append({
                 "text": ds,
-                "emotion": emo,
-                "emotion_confidence": conf,
             })
 
         # If only one sentence, just synthesize directly — no need for threading
@@ -453,7 +453,7 @@ class OrchestratorCallbacks:
 
         # Build closure factory for chunk start callbacks (same as _synthesize_streaming)
         def _make_chunk_start_cb(idx: int):
-            """Emit sentence text + emotion when playback reaches this chunk."""
+            """Emit sentence text when playback reaches this chunk."""
             def cb():
                 # Phase 2.5: Track delivery at playback time, not queue time.
                 # This fires when the audio device actually starts playing this chunk.
@@ -466,8 +466,6 @@ class OrchestratorCallbacks:
                     self._event_bus.emit(LLMChunkEvent(
                         text=sc["text"],
                         is_final=(idx >= len(sentence_chunks) - 1),
-                        emotion=sc.get("emotion"),
-                        emotion_confidence=sc.get("emotion_confidence"),
                     ))
             return cb
 
@@ -566,7 +564,7 @@ class OrchestratorCallbacks:
 
         audio_results: dict[int, np.ndarray] = {}  # index → audio
         sentence_texts: dict[int, str] = {}  # index → display text for delivery-synced rendering
-        sentence_emotions: dict[int, tuple] = {}  # index → (emotion, confidence) for sub-bubble display
+        # sentence_emotions removed — emotion is classified once on full response
         tts_threads: list[threading.Thread] = []
         lock = threading.Lock()
         tts_semaphore = threading.Semaphore(3)  # NANO-111: cap concurrent Kokoro calls
@@ -597,10 +595,8 @@ class OrchestratorCallbacks:
         def _make_chunk_start_cb(
             display_text: str,
             is_final: bool,
-            emotion: Optional[str] = None,
-            emotion_confidence: Optional[float] = None,
         ):
-            """Create a closure that emits text + emotion when playback reaches this chunk."""
+            """Create a closure that emits sentence text when playback reaches this chunk."""
             def cb():
                 # Phase 2.5: Track delivery at playback time, not queue time.
                 if display_text:
@@ -611,8 +607,6 @@ class OrchestratorCallbacks:
                     self._event_bus.emit(LLMChunkEvent(
                         text=display_text,
                         is_final=is_final,
-                        emotion=emotion,
-                        emotion_confidence=emotion_confidence,
                     ))
             return cb
 
@@ -634,14 +628,12 @@ class OrchestratorCallbacks:
                     with lock:
                         audio_chunk = audio_results[next_to_deliver]
                         display_text = sentence_texts.get(next_to_deliver, "")
-                        emo, emo_conf = sentence_emotions.get(next_to_deliver, (None, None))
 
-                    # NANO-111 Session 606: Text + emotion render when playback
+                    # NANO-111 Session 606: Text renders when playback
                     # reaches this chunk — [text][tts][text][tts] via playback callbacks.
                     is_final_chunk = done and next_to_deliver >= total - 1
                     start_cb = _make_chunk_start_cb(
                         display_text, is_final_chunk,
-                        emotion=emo, emotion_confidence=emo_conf,
                     )
 
                     if len(audio_chunk) > 0:
@@ -691,22 +683,11 @@ class OrchestratorCallbacks:
             full_display_text.append(chunk.display_text)
             full_tts_text.append(chunk.tts_text)
 
-            # Per-sentence emotion classification for avatar + sub-bubble display
-            chunk_emotion, chunk_confidence = None, None
-            if chunk.display_text.strip():
-                chunk_emotion, chunk_confidence = self._classify_emotion(chunk.display_text)
-                if chunk_emotion and self._event_bus is not None:
-                    self._event_bus.emit(AvatarMoodEvent(
-                        mood=chunk_emotion,
-                        confidence=chunk_confidence,
-                    ))
-
             # Fire TTS in parallel thread if there's text to speak
             if chunk.tts_text.strip():
-                # Store display text + emotion for delivery-synced rendering
+                # Store display text for delivery-synced rendering
                 with lock:
                     sentence_texts[chunk.index] = chunk.display_text
-                    sentence_emotions[chunk.index] = (chunk_emotion, chunk_confidence)
                 t = threading.Thread(
                     target=synthesize_chunk,
                     args=(chunk.tts_text, chunk.index),
@@ -737,17 +718,14 @@ class OrchestratorCallbacks:
             # Classify emotion on full response for final event
             emotion, emotion_confidence = self._classify_emotion(response or "")
 
-            # Build per-sentence chunks list for sub-bubble display
+            # Build per-sentence chunks list for sub-bubble display (text only)
             response_chunks = None
             with lock:
                 if sentence_texts:
                     response_chunks = []
                     for idx in sorted(sentence_texts.keys()):
-                        emo, emo_conf = sentence_emotions.get(idx, (None, None))
                         response_chunks.append({
                             "text": sentence_texts[idx],
-                            "emotion": emo,
-                            "emotion_confidence": emo_conf,
                         })
 
             # Emit response event with full metadata + chunks
@@ -1432,12 +1410,12 @@ class OrchestratorCallbacks:
         """Set the emotion classifier for response mood detection (NANO-094)."""
         self._emotion_classifier = classifier
 
-    def _classify_emotion(self, response_text: str):
-        """Classify response text and emit avatar mood event. Returns (emotion, confidence)."""
+    def _classify_emotion(self, response_text: str, *, emit_avatar_mood: bool = True):
+        """Classify response text and optionally emit avatar mood event. Returns (emotion, confidence)."""
         if not self._emotion_classifier:
             return None, None
         emotion, confidence = self._emotion_classifier.classify(response_text)
-        if emotion and self._event_bus is not None:
+        if emit_avatar_mood and emotion and self._event_bus is not None:
             self._event_bus.emit(AvatarMoodEvent(mood=emotion, confidence=confidence or 0.0))
         # Persist emotion to JSONL so it survives hydration on reload
         if emotion is not None and self._session_file_getter:

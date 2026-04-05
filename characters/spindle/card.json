@@ -65,7 +65,7 @@
               "clip": "Happy"
             },
             "curious": {
-              "threshold": 0.36,
+              "threshold": 0.39,
               "clip": "Thinking"
             }
           }
