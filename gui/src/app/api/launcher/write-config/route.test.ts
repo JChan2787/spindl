@@ -137,9 +137,11 @@ function makeBody(overrides: Record<string, unknown> = {}) {
     vlmProviderType: "local",
     vlmLocal: BASE_VLM_LOCAL,
     vlmCloud: BASE_VLM_CLOUD,
+    sttEnabled: true,
     sttProvider: "parakeet",
     sttParakeet: BASE_STT_PARAKEET,
     sttWhisper: BASE_STT_WHISPER,
+    ttsEnabled: true,
     ttsProviderType: "local",
     ttsLocal: BASE_TTS_LOCAL,
     ...overrides,
@@ -464,15 +466,34 @@ describe("write-config POST handler — service entry validation", () => {
     }
   });
 
-  it("cloud TTS does NOT write a launcher.services.tts entry", async () => {
+  it("cloud TTS preserves enabled flag in launcher.services.tts (NANO-112)", async () => {
     const body = makeBody({
       ttsProviderType: "cloud",
+      ttsEnabled: true,
     });
     const res = await POST(makeRequest(body));
     expect((await res.json()).success).toBe(true);
 
     const parsed = parseWrittenYaml();
-    assertNoService(parsed, "tts");
+    const services = (parsed.launcher as Record<string, unknown>)?.services as Record<string, unknown>;
+    const tts = services?.tts as Record<string, unknown>;
+    expect(tts).toBeDefined();
+    expect(tts.enabled).toBe(true);
+  });
+
+  it("cloud TTS disabled writes enabled: false (NANO-112)", async () => {
+    const body = makeBody({
+      ttsProviderType: "cloud",
+      ttsEnabled: false,
+    });
+    const res = await POST(makeRequest(body));
+    expect((await res.json()).success).toBe(true);
+
+    const parsed = parseWrittenYaml();
+    const services = (parsed.launcher as Record<string, unknown>)?.services as Record<string, unknown>;
+    const tts = services?.tts as Record<string, unknown>;
+    expect(tts).toBeDefined();
+    expect(tts.enabled).toBe(false);
   });
 });
 
