@@ -312,6 +312,7 @@ class OrchestratorCallbacks:
                     if not response or response.strip() == "":
                         return
 
+                    _voice_tts_off_chunks = None
                     # NANO-112: Skip TTS synthesis when provider is disabled
                     if self._tts_provider is not None:
                         # NANO-111: Parallel TTS with streaming playback on the
@@ -335,8 +336,8 @@ class OrchestratorCallbacks:
                     else:
                         # TTS disabled — text-only response with sub-bubble chunking
                         self._total_turns += 1
-                        # NANO-112: Still segment and emit LLMChunkEvents for UI
-                        self._emit_text_only_chunks(response)
+                        # NANO-112: Segment for sub-bubble rendering via response event
+                        _voice_tts_off_chunks = self._emit_text_only_chunks(response)
 
                     # Emit response event AFTER TTS so llm_chunk events
                     # from _parallel_tts_delivery land first.
@@ -351,6 +352,7 @@ class OrchestratorCallbacks:
                                 emotion=emotion,
                                 emotion_confidence=emotion_confidence,
                                 tts_text=result.tts_text,
+                                chunks=_voice_tts_off_chunks if self._tts_provider is None else None,
                             )
                         )
                         # Only fire _on_response_ready for the fallback (non-streaming) path.
@@ -537,18 +539,21 @@ class OrchestratorCallbacks:
 
     def _emit_text_only_chunks(self, response: str) -> Optional[list]:
         """
-        NANO-112: Segment response and emit LLMChunkEvents without TTS.
+        NANO-112: Segment response into sentence chunks without TTS.
 
-        When TTS is disabled, sub-bubble rendering and subtitles still need
-        sentence-level events. This replicates the segmentation from
-        _parallel_tts_delivery without audio synthesis.
+        When TTS is disabled, sub-bubble rendering still needs sentence-level
+        chunks. Returns them for the response event's fallback_chunks path
+        (socket-provider builds sub-bubbles from chunks in the response event).
+
+        Does NOT emit LLMChunkEvents — those are tied to the streaming playback
+        lifecycle (currentAssistantMsgId). Emitting them without that lifecycle
+        causes duplicate parent bubbles.
 
         Returns:
             Chunks list for fallback_chunks in response event, or None.
         """
         import re
         from ..llm.sentence_segmenter import merge_punctuation_fragments
-        from ..core.events import LLMChunkEvent
 
         if not response or not response.strip():
             return None
@@ -560,16 +565,7 @@ class OrchestratorCallbacks:
         if not sentences:
             return None
 
-        chunks = [{"text": s} for s in sentences]
-
-        if self._event_bus is not None:
-            for i, chunk in enumerate(chunks):
-                self._event_bus.emit(LLMChunkEvent(
-                    text=chunk["text"],
-                    is_final=(i >= len(chunks) - 1),
-                ))
-
-        return chunks
+        return [{"text": s} for s in sentences]
 
     def _determine_error_stage(self, error: Exception) -> str:
         """Determine which stage the error occurred in based on state."""
@@ -1100,7 +1096,12 @@ class OrchestratorCallbacks:
                 # built sub-bubbles incrementally — don't pass chunks here
                 # (would re-render all at once). Pass chunks only for fallback
                 # path where no llm_chunk events fired.
-                fallback_chunks = _text_input_chunks if self._on_response_ready_streaming is None else None
+                # NANO-112: When TTS is disabled, chunks come from _emit_text_only_chunks
+                # and must be passed as fallback (no llm_chunk events fired).
+                # When TTS is enabled, _parallel_tts_delivery fires llm_chunk events
+                # so fallback_chunks should be None to avoid double-render.
+                tts_off = self._tts_provider is None
+                fallback_chunks = _text_input_chunks if (self._on_response_ready_streaming is None or tts_off) else None
                 print(f"[NANO-111] text_input_chunks={_text_input_chunks}", flush=True)
                 if self._event_bus is not None:
                     self._event_bus.emit(
