@@ -333,8 +333,10 @@ class OrchestratorCallbacks:
                             audio_response = np.frombuffer(audio_result.data, dtype=np.float32)
                             self._total_turns += 1
                     else:
-                        # TTS disabled — text-only response
+                        # TTS disabled — text-only response with sub-bubble chunking
                         self._total_turns += 1
+                        # NANO-112: Still segment and emit LLMChunkEvents for UI
+                        self._emit_text_only_chunks(response)
 
                     # Emit response event AFTER TTS so llm_chunk events
                     # from _parallel_tts_delivery land first.
@@ -532,6 +534,42 @@ class OrchestratorCallbacks:
         ordered = [audio_results[i] for i in range(total) if len(audio_results.get(i, [])) > 0]
         audio = np.concatenate(ordered) if ordered else None
         return audio, sentence_chunks
+
+    def _emit_text_only_chunks(self, response: str) -> Optional[list]:
+        """
+        NANO-112: Segment response and emit LLMChunkEvents without TTS.
+
+        When TTS is disabled, sub-bubble rendering and subtitles still need
+        sentence-level events. This replicates the segmentation from
+        _parallel_tts_delivery without audio synthesis.
+
+        Returns:
+            Chunks list for fallback_chunks in response event, or None.
+        """
+        import re
+        from ..llm.sentence_segmenter import merge_punctuation_fragments
+        from ..core.events import LLMChunkEvent
+
+        if not response or not response.strip():
+            return None
+
+        sentences = re.split(r'(?<=[.!?。！？])\s+', response.strip())
+        sentences = [s.strip() for s in sentences if s.strip()]
+        sentences = merge_punctuation_fragments(sentences)
+
+        if not sentences:
+            return None
+
+        chunks = [{"text": s} for s in sentences]
+
+        if self._event_bus is not None:
+            for i, chunk in enumerate(chunks):
+                self._event_bus.emit(LLMChunkEvent(
+                    text=chunk["text"],
+                    is_final=(i >= len(chunks) - 1),
+                ))
+
+        return chunks
 
     def _determine_error_stage(self, error: Exception) -> str:
         """Determine which stage the error occurred in based on state."""
@@ -1052,6 +1090,8 @@ class OrchestratorCallbacks:
                     self._emit_state_change(current_state, "idle", "tts_complete")
                 else:
                     # Text-only mode: still count the turn, return to idle
+                    # NANO-112: Segment and emit LLMChunkEvents for sub-bubble UI
+                    _text_input_chunks = self._emit_text_only_chunks(response)
                     self._total_turns += 1
                     self._emit_state_change(current_state, "idle", "response_complete")
 
