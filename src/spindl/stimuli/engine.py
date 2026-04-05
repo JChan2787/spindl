@@ -438,6 +438,8 @@ class StimuliEngine:
         )
 
         # Fire through existing text input path
+        twitch_content = stimulus.metadata.get("twitch_content", "")
+        print(f"[Stimuli] metadata keys={list(stimulus.metadata.keys())}, twitch_content_len={len(twitch_content)}", flush=True)
         try:
             self._callbacks.process_text_input(
                 stimulus.user_input,

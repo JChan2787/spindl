@@ -221,6 +221,7 @@ class TwitchModule(StimulusModule):
 
         formatted = "\n".join(f"{m.username}: {m.text}" for m in messages)
         twitch_content = self._prompt_template.format(messages=formatted)
+        print(f"[Twitch] Buffer drained: {len(messages)} messages, content: {formatted!r}", flush=True)
 
         return StimulusData(
             source=StimulusSource.TWITCH,
