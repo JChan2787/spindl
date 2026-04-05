@@ -66,7 +66,7 @@ Runs on every push and every PR targeting `main`.
 ## Project Layout
 
 ```
-src/spindl/             Python backend (~37,200 lines, 136 files)
+src/spindl/             Python backend (~37,400 lines, 143 files)
 gui/src/                Next.js frontend (~33,600 lines, 157 files)
 tests/                  Backend unit tests (119 test modules, ~29,800 lines)
 tests_e2e/              E2E tests (Playwright, 8 modules, 5-config matrix)
@@ -103,7 +103,7 @@ characters/             User character data (gitignored)
 | `stimuli/` | Autonomous behavior engine (idle timer, Twitch chat, addressing-others) | `StimulusModule` (ABC), `StimuliEngine`, `PatienceModule`, `TwitchModule` |
 | `vts/` | VTubeStudio WebSocket driver | `VTSDriver` |
 | `launcher/` | Service process management | `ServiceRunner`, `HealthChecker`, `LogAggregator` |
-| `gui/` | Socket.IO server, response models | Socket handlers in `server.py`, `response_models.py` (Pydantic) |
+| `gui/` | Socket.IO server, response models | `server.py` (core: connect, lifecycle, emit API), `server_memory.py`, `server_sessions.py`, `server_config.py`, `server_providers.py`, `server_stimuli.py`, `server_vts.py`, `server_avatar.py` (domain handlers — NANO-113), `response_models.py` (Pydantic) |
 | `history/` | JSONL conversation persistence, prompt snapshots | `JSONLStore`, `SnapshotStore` |
 | `config/` | YAML config loading | `config_loader.py`, `get_config_path()` |
 | `utils/` | Shared utilities (paths, ring buffer) | `paths.py`, `ring_buffer.py` |
@@ -125,6 +125,8 @@ characters/             User character data (gitignored)
 **Config-driven.** All settings flow from `config/spindl.yaml`. Environment variable substitution (`${ENV_VAR}`) is supported — secrets go in `.env`, not YAML. Config loading uses `python-dotenv` + a custom `resolve_env_vars()` function.
 
 **Runtime-swappable providers.** LLM and VLM providers use a `ProviderHolder` indirection layer (`llm/provider_holder.py`). Five consumers (pipeline, tools, etc.) hold a reference to the holder, not the provider directly — swapping the inner provider updates all consumers automatically. Swaps are state-machine gated (rejected during PROCESSING). Config persistence uses section-level YAML surgery, never full-file `yaml.dump()` (which introduces PyYAML continuation lines on strings >80 chars). Socket handlers: `set_llm_provider`, `set_vlm_provider`, `set_tools_config` — all emit `_emit_health()` after their config update event.
+
+**GUI handler modules (NANO-113).** Socket.IO handlers are split by domain into `gui/server_*.py` modules. Each module exports a `register_*_handlers(server)` function that receives the `GUIServer` instance and registers closures on `server.sio`. To add a new handler: find the right domain module, add a `@sio.event` closure inside the registration function, reference `server.` (not `self.`). Helper functions that only serve one domain live as standalone functions in that module. The core `server.py` retains lifecycle handlers (connect, disconnect, launch, shutdown) and all `emit_*` public API methods consumed by `bridge.py`.
 
 **Thread safety.** Audio capture, playback, VAD, stimuli engine, and VTS driver all run in daemon threads. Use `SimpleQueue` for inter-thread command dispatch (see `vts/driver.py`). Use `threading.Lock` for shared state (see `core/state_machine.py`).
 
