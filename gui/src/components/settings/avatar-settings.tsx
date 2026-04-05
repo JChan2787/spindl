@@ -5,11 +5,13 @@ import { User, Clock, Subtitles, Pin, Gamepad2, Loader2, Download } from "lucide
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
-import { useSettingsStore, useConnectionStore } from "@/lib/stores";
+import { useSettingsStore, useConnectionStore, useAgentStore } from "@/lib/stores";
 
 export function AvatarSettings() {
   const avatarConfig = useSettingsStore((s) => s.avatarConfig);
   const connected = useConnectionStore((s) => s.connected);
+  const health = useAgentStore((s) => s.health);
+  const sttDisabled = health?.stt === "disabled";
 
   // Check install status on mount
   useEffect(() => {
@@ -160,22 +162,25 @@ export function AvatarSettings() {
         </button>
       </div>
 
-      {/* Stream Deck toggle (NANO-110) */}
-      <div className="flex items-center justify-between">
+      {/* Stream Deck toggle (NANO-110, NANO-112: disabled when STT is off) */}
+      <div className={`flex items-center justify-between ${sttDisabled ? "opacity-50" : ""}`}>
         <Label className="flex items-center gap-2 text-sm">
           <Gamepad2 className="h-3.5 w-3.5" />
           Show Stream Deck
+          {sttDisabled && (
+            <span className="text-xs text-muted-foreground">(STT disabled)</span>
+          )}
         </Label>
         <button
           onClick={handleStreamDeckToggle}
-          disabled={notInstalled}
+          disabled={notInstalled || sttDisabled}
           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            avatarConfig.stream_deck_enabled ? "bg-primary" : "bg-muted"
+            avatarConfig.stream_deck_enabled && !sttDisabled ? "bg-primary" : "bg-muted"
           }`}
         >
           <span
             className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-              avatarConfig.stream_deck_enabled ? "translate-x-4" : "translate-x-0.5"
+              avatarConfig.stream_deck_enabled && !sttDisabled ? "translate-x-4" : "translate-x-0.5"
             }`}
           />
         </button>
