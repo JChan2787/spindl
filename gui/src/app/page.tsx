@@ -189,11 +189,17 @@ export default function DashboardPage() {
             <div className="hidden md:flex items-center gap-1.5">
               {connected && health ? (
                 <>
-                  <Badge variant={health.stt ? "default" : "destructive"} className="text-xs">
-                    STT {health.stt ? "OK" : "DOWN"}
+                  <Badge
+                    variant={health.stt === "disabled" ? "secondary" : health.stt ? "default" : "destructive"}
+                    className="text-xs"
+                  >
+                    STT {health.stt === "disabled" ? "OFF" : health.stt ? "OK" : "DOWN"}
                   </Badge>
-                  <Badge variant={health.tts ? "default" : "destructive"} className="text-xs">
-                    TTS {health.tts ? "OK" : "DOWN"}
+                  <Badge
+                    variant={health.tts === "disabled" ? "secondary" : health.tts ? "default" : "destructive"}
+                    className="text-xs"
+                  >
+                    TTS {health.tts === "disabled" ? "OFF" : health.tts ? "OK" : "DOWN"}
                   </Badge>
                   <Badge variant={health.llm ? "default" : "destructive"} className="text-xs">
                     LLM {health.llm ? "OK" : "DOWN"}
@@ -208,7 +214,7 @@ export default function DashboardPage() {
                       EMB {health.embedding ? "OK" : "OFF"}
                     </Badge>
                   )}
-                  {health.mic !== undefined && (
+                  {health.mic !== undefined && health.stt !== "disabled" && (
                     <Badge
                       variant={health.mic === "ok" ? "default" : health.mic === "restarting" ? "outline" : "destructive"}
                       className="text-xs"
@@ -243,16 +249,16 @@ export default function DashboardPage() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Mic toggle */}
+            {/* Mic toggle (NANO-112: disabled when STT is off) */}
             <Button
               variant={isListeningPaused ? "default" : "ghost"}
               size="icon"
               className="size-9 rounded-full"
               onClick={handleToggleListening}
-              disabled={!connected}
-              title={isListeningPaused ? "Resume Listening" : "Pause Listening"}
+              disabled={!connected || health?.stt === "disabled"}
+              title={health?.stt === "disabled" ? "STT Disabled" : isListeningPaused ? "Resume Listening" : "Pause Listening"}
             >
-              {isListeningPaused ? (
+              {isListeningPaused || health?.stt === "disabled" ? (
                 <Mic className="size-4" />
               ) : (
                 <MicOff className="size-4" />

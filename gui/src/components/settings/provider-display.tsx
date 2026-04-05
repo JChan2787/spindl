@@ -11,18 +11,24 @@ interface ProviderCardProps {
   name: string | null;
   config?: Record<string, unknown> | null;
   isConfigured: boolean;
-  isHealthy?: boolean | null;
+  isHealthy?: boolean | string | null;
 }
 
 function ProviderCard({ title, icon, name, config, isConfigured, isHealthy }: ProviderCardProps) {
+  // NANO-112: Handle "disabled" status from health check
+  const isDisabled = isHealthy === "disabled";
   // When health data is available, use it. Otherwise fall back to config presence.
   const hasHealth = isHealthy !== null && isHealthy !== undefined;
-  const badgeVariant = hasHealth
-    ? isHealthy ? "default" : isConfigured ? "destructive" : "secondary"
-    : isConfigured ? "secondary" : "secondary";
-  const badgeLabel = hasHealth
-    ? isHealthy ? "Active" : isConfigured ? "Unreachable" : "Not Configured"
-    : isConfigured ? "Configured" : "Not Configured";
+  const badgeVariant = isDisabled
+    ? "secondary"
+    : hasHealth
+      ? (isHealthy === true) ? "default" : isConfigured ? "destructive" : "secondary"
+      : isConfigured ? "secondary" : "secondary";
+  const badgeLabel = isDisabled
+    ? "Disabled"
+    : hasHealth
+      ? (isHealthy === true) ? "Active" : isConfigured ? "Unreachable" : "Not Configured"
+      : isConfigured ? "Configured" : "Not Configured";
 
   return (
     <div className="p-3 rounded-md border border-border bg-muted/30">

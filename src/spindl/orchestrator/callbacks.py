@@ -54,8 +54,8 @@ class OrchestratorCallbacks:
 
     def __init__(
         self,
-        stt_client: STTProvider,
-        tts_provider: TTSProvider,
+        stt_client: Optional[STTProvider],
+        tts_provider: Optional[TTSProvider],
         llm_pipeline: LLMPipeline,
         persona: dict,
         on_response_ready: Optional[Callable[[np.ndarray], None]] = None,
@@ -170,6 +170,13 @@ class OrchestratorCallbacks:
             self._processing_start_time = time.time()
 
             try:
+                # NANO-112: Guard against disabled STT
+                if self._stt is None:
+                    logger.debug("STT disabled — ignoring speech input")
+                    if self._on_empty_transcription is not None:
+                        self._on_empty_transcription()
+                    return
+
                 # NANO-110: Suppress voice pipeline while addressing others
                 if self._is_addressing_others and self._is_addressing_others():
                     logger.info("[NANO-110] Voice input suppressed — addressing others")
@@ -230,7 +237,7 @@ class OrchestratorCallbacks:
                 if self._consume_addressing_others_prompt:
                     addressing_prompt = self._consume_addressing_others_prompt()
 
-                if use_streaming and self._on_response_ready_streaming is not None:
+                if use_streaming and self._on_response_ready_streaming is not None and self._tts_provider is not None:
                     # NANO-111: Streaming voice path with parallel TTS.
                     # run_stream() yields sentence chunks for parallel TTS,
                     # then runs deferred post-processors on the accumulated
@@ -305,23 +312,28 @@ class OrchestratorCallbacks:
                     if not response or response.strip() == "":
                         return
 
-                    # NANO-111: Parallel TTS with streaming playback on the
-                    # completed response. Split into sentences, fire TTS threads,
-                    # delivery thread feeds playback in order.
-                    if self._on_response_ready_streaming is not None:
-                        audio_response, _ = self._parallel_tts_delivery(
-                            tts_response, tts_config, display_text=response,
-                        )
-                        if audio_response is not None:
+                    # NANO-112: Skip TTS synthesis when provider is disabled
+                    if self._tts_provider is not None:
+                        # NANO-111: Parallel TTS with streaming playback on the
+                        # completed response. Split into sentences, fire TTS threads,
+                        # delivery thread feeds playback in order.
+                        if self._on_response_ready_streaming is not None:
+                            audio_response, _ = self._parallel_tts_delivery(
+                                tts_response, tts_config, display_text=response,
+                            )
+                            if audio_response is not None:
+                                self._total_turns += 1
+                        else:
+                            # Fallback: single blocking TTS call (no streaming callbacks)
+                            audio_result = self._tts_provider.synthesize(
+                                tts_response,
+                                voice=tts_config.get("voice"),
+                                **{k: v for k, v in tts_config.items() if k != "voice"},
+                            )
+                            audio_response = np.frombuffer(audio_result.data, dtype=np.float32)
                             self._total_turns += 1
                     else:
-                        # Fallback: single blocking TTS call (no streaming callbacks)
-                        audio_result = self._tts_provider.synthesize(
-                            tts_response,
-                            voice=tts_config.get("voice"),
-                            **{k: v for k, v in tts_config.items() if k != "voice"},
-                        )
-                        audio_response = np.frombuffer(audio_result.data, dtype=np.float32)
+                        # TTS disabled — text-only response
                         self._total_turns += 1
 
                     # Emit response event AFTER TTS so llm_chunk events
@@ -343,7 +355,7 @@ class OrchestratorCallbacks:
                         # When _parallel_tts_delivery handled playback, audio is already
                         # playing via play_streaming — calling play() here would kill the
                         # stream and replay from scratch (Session 607: first-chunk stutter).
-                        if self._on_response_ready_streaming is None and self._on_response_ready is not None:
+                        if self._tts_provider is not None and self._on_response_ready_streaming is None and self._on_response_ready is not None:
                             self._on_response_ready(audio_response)
 
             except Exception as e:
@@ -1008,7 +1020,8 @@ class OrchestratorCallbacks:
                     return
 
                 # Synthesize speech via provider (unless skip_tts requested)
-                if not skip_tts:
+                # NANO-112: Also skip TTS when provider is disabled
+                if not skip_tts and self._tts_provider is not None:
                     # NANO-031: Emit state change to system_speaking
                     self._emit_state_change(current_state, "system_speaking", "tts_start")
                     current_state = "system_speaking"

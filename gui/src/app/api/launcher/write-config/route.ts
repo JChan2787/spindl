@@ -521,17 +521,14 @@ export async function POST(request: Request) {
     }
 
     // STT service config — always regenerate command from GUI fields
-    const isTestMode = process.env.SPINDL_TEST_MODE === "1";
-    const existingSTTEnabled = (launcher.services.stt as { enabled?: boolean } | undefined)?.enabled;
-    const sttEnabled = isTestMode && existingSTTEnabled === false ? false : true;
-
+    // NANO-112: Respect user's enabled/disabled choice from GUI toggle
     const activeSTT = body.sttProvider === "parakeet" ? body.sttParakeet : body.sttWhisper;
     const sttCommand = body.sttProvider === "whisper"
       ? buildWhisperCommand(body.sttWhisper)
       : buildParakeetCommand(body.sttParakeet);
 
     launcher.services.stt = {
-      enabled: sttEnabled,
+      enabled: body.sttEnabled,
       platform: body.sttProvider === "parakeet" ? body.sttParakeet.platform : "native",
       ...(body.sttProvider === "parakeet" && body.sttParakeet.platform === "wsl" ? { wsl_distro: body.sttParakeet.wslDistro } : {}),
       command: sttCommand,
@@ -544,7 +541,18 @@ export async function POST(request: Request) {
     };
 
     // TTS service config
+    // NANO-112: Respect user's enabled/disabled choice from GUI toggle
     if (body.ttsProviderType === "local") {
+      launcher.services.tts = {
+        enabled: body.ttsEnabled,
+        platform: "native",
+        health_check: {
+          type: "provider",
+          timeout: 60,
+        },
+      };
+    } else if (body.ttsEnabled) {
+      // Cloud TTS (enabled) — no local server, but preserve the enabled flag
       launcher.services.tts = {
         enabled: true,
         platform: "native",
@@ -554,8 +562,15 @@ export async function POST(request: Request) {
         },
       };
     } else {
-      // Cloud TTS — no local server to launch. Omit entry entirely.
-      delete launcher.services.tts;
+      // Cloud TTS disabled — preserve disabled state
+      launcher.services.tts = {
+        enabled: false,
+        platform: "native",
+        health_check: {
+          type: "none",
+          timeout: 60,
+        },
+      };
     }
 
     // ========================================
@@ -762,8 +777,9 @@ export async function GET() {
     const ttsProvider = raw?.tts?.provider;
     const ttsConfig = raw?.tts?.providers?.[ttsProvider] || {};
 
-    // Parse launcher.services.stt for environment info
+    // Parse launcher.services for environment info
     const sttLauncher = raw?.launcher?.services?.stt || {};
+    const ttsLauncher = raw?.launcher?.services?.tts || {};
 
     // Parse embedding server config (NANO-043 Phase 5)
     const embeddingLauncher = raw?.launcher?.services?.embedding || {};
@@ -844,6 +860,8 @@ export async function GET() {
       },
 
       // STT - dual-provider hydration (always return BOTH configs)
+      // NANO-112: Read enabled flag from launcher services
+      sttEnabled: sttLauncher.enabled !== false,
       sttProvider: (raw?.stt?.provider || "parakeet") as "parakeet" | "whisper",
       sttParakeet: (() => {
         const sttSection = raw?.stt || {};
@@ -883,6 +901,8 @@ export async function GET() {
       })(),
 
       // TTS
+      // NANO-112: Read enabled flag from launcher services
+      ttsEnabled: ttsLauncher.enabled !== false,
       ttsProviderType: "local" as const, // Cloud not implemented yet
       ttsLocal: {
         provider: ttsProvider || "kokoro",

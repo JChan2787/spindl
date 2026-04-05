@@ -4,6 +4,7 @@ import { Mic } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -17,7 +18,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, MicOff } from "lucide-react";
 import { useState } from "react";
 import { useLauncherStore, type STTPlatform, type EnvironmentType, type STTProviderType } from "@/lib/stores";
 
@@ -276,6 +277,8 @@ function CommandPreview() {
 // ============================================
 
 export function STTSection() {
+  const sttEnabled = useLauncherStore((s) => s.sttEnabled);
+  const setSTTEnabled = useLauncherStore((s) => s.setSTTEnabled);
   const sttProvider = useLauncherStore((s) => s.sttProvider);
   const setSTTProvider = useLauncherStore((s) => s.setSTTProvider);
   // Active provider's network fields for the shared host/port/timeout row
@@ -288,14 +291,33 @@ export function STTSection() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   return (
-    <Card>
+    <Card className={!sttEnabled ? "opacity-60" : ""}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base font-medium">
-          <Mic className="h-5 w-5" />
-          STT Configuration
+        <CardTitle className="flex items-center justify-between text-base font-medium">
+          <div className="flex items-center gap-2">
+            {sttEnabled ? (
+              <Mic className="h-5 w-5" />
+            ) : (
+              <MicOff className="h-5 w-5" />
+            )}
+            STT Configuration
+          </div>
+          <div className="flex items-center gap-2">
+            <Label
+              htmlFor="stt-enabled"
+              className="text-sm font-normal text-muted-foreground"
+            >
+              {sttEnabled ? "Enabled" : "Disabled"}
+            </Label>
+            <Switch
+              id="stt-enabled"
+              checked={sttEnabled}
+              onCheckedChange={setSTTEnabled}
+            />
+          </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      {sttEnabled && <CardContent className="space-y-4">
         {/* Provider Selection */}
         <FieldRow label="STT Provider">
           <Select
@@ -361,7 +383,7 @@ export function STTSection() {
             </div>
           </CollapsibleContent>
         </Collapsible>
-      </CardContent>
+      </CardContent>}
     </Card>
   );
 }

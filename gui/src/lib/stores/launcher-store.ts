@@ -181,11 +181,13 @@ interface LauncherStoreState {
   vlmCloud: VLMCloudConfig;
 
   // STT Configuration
+  sttEnabled: boolean;
   sttProvider: STTProviderType;
   sttParakeet: STTParakeetConfig;
   sttWhisper: STTWhisperConfig;
 
   // TTS Configuration
+  ttsEnabled: boolean;
   ttsProviderType: LLMProviderType;
   ttsLocal: TTSLocalConfig;
 
@@ -217,12 +219,14 @@ interface LauncherStoreState {
   updateVLMCloud: (updates: Partial<VLMCloudConfig>) => void;
 
   // Actions - STT
+  setSTTEnabled: (enabled: boolean) => void;
   setSTTProvider: (provider: STTProviderType) => void;
   updateSTTParakeet: (updates: Partial<STTParakeetConfig>) => void;
   updateSTTWhisper: (updates: Partial<STTWhisperConfig>) => void;
   updateSTT: (updates: Partial<STTConfig>) => void;
 
   // Actions - TTS
+  setTTSEnabled: (enabled: boolean) => void;
   setTTSProviderType: (type: LLMProviderType) => void;
   updateTTSLocal: (updates: Partial<TTSLocalConfig>) => void;
 
@@ -267,9 +271,11 @@ export interface HydrateConfig {
   vlmProviderType: LLMProviderType;
   vlmLocal: Partial<VLMLocalConfig>;
   vlmCloud: Partial<VLMCloudConfig>;
+  sttEnabled: boolean;
   sttProvider: STTProviderType;
   sttParakeet: Partial<STTParakeetConfig>;
   sttWhisper: Partial<STTWhisperConfig>;
+  ttsEnabled: boolean;
   ttsProviderType: LLMProviderType;
   ttsLocal: Partial<TTSLocalConfig>;
   embedding?: Partial<EmbeddingConfig>;
@@ -416,11 +422,13 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
   vlmCloud: DEFAULT_VLM_CLOUD,
 
   // Initial state - STT
+  sttEnabled: true,
   sttProvider: "parakeet" as STTProviderType,
   sttParakeet: DEFAULT_STT_PARAKEET,
   sttWhisper: DEFAULT_STT_WHISPER,
 
   // Initial state - TTS
+  ttsEnabled: true,
   ttsProviderType: "local",
   ttsLocal: DEFAULT_TTS_LOCAL,
 
@@ -456,6 +464,7 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
     set((state) => ({ vlmCloud: { ...state.vlmCloud, ...updates } })),
 
   // STT Actions
+  setSTTEnabled: (sttEnabled) => set({ sttEnabled }),
   setSTTProvider: (sttProvider) => set({ sttProvider }),
   updateSTTParakeet: (updates) =>
     set((state) => ({ sttParakeet: { ...state.sttParakeet, ...updates } })),
@@ -499,6 +508,7 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
     }),
 
   // TTS Actions
+  setTTSEnabled: (ttsEnabled) => set({ ttsEnabled }),
   setTTSProviderType: (ttsProviderType) => set({ ttsProviderType }),
   updateTTSLocal: (updates) =>
     set((state) => ({ ttsLocal: { ...state.ttsLocal, ...updates } })),
@@ -537,9 +547,11 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
       vlmProviderType: config.vlmProviderType,
       vlmLocal: { ...state.vlmLocal, ...config.vlmLocal },
       vlmCloud: { ...state.vlmCloud, ...config.vlmCloud },
+      sttEnabled: config.sttEnabled,
       sttProvider: config.sttProvider,
       sttParakeet: { ...state.sttParakeet, ...config.sttParakeet },
       sttWhisper: { ...state.sttWhisper, ...config.sttWhisper },
+      ttsEnabled: config.ttsEnabled,
       ttsProviderType: config.ttsProviderType,
       ttsLocal: { ...state.ttsLocal, ...config.ttsLocal },
       embedding: { ...state.embedding, ...(config.embedding || {}) },
@@ -618,9 +630,11 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
       vlmProviderType: "local",
       vlmLocal: DEFAULT_VLM_LOCAL,
       vlmCloud: DEFAULT_VLM_CLOUD,
+      sttEnabled: true,
       sttProvider: "parakeet" as STTProviderType,
       sttParakeet: DEFAULT_STT_PARAKEET,
       sttWhisper: DEFAULT_STT_WHISPER,
+      ttsEnabled: true,
       ttsProviderType: "local",
       ttsLocal: DEFAULT_TTS_LOCAL,
       embedding: DEFAULT_EMBEDDING,
@@ -691,17 +705,19 @@ export const selectIsFormComplete = (state: LauncherStoreState): boolean => {
     }
   }
 
-  // Check STT — provider-conditional
-  if (state.sttProvider === "parakeet") {
-    if (!state.sttParakeet.serverScriptPath) return false;
-    if ((state.sttParakeet.envType === "conda" || state.sttParakeet.envType === "venv") && !state.sttParakeet.envNameOrPath) return false;
-    if (state.sttParakeet.envType === "other" && !state.sttParakeet.customActivation) return false;
-  } else {
-    if (!state.sttWhisper.modelPath) return false;
+  // Check STT — provider-conditional (NANO-112: skip when disabled)
+  if (state.sttEnabled) {
+    if (state.sttProvider === "parakeet") {
+      if (!state.sttParakeet.serverScriptPath) return false;
+      if ((state.sttParakeet.envType === "conda" || state.sttParakeet.envType === "venv") && !state.sttParakeet.envNameOrPath) return false;
+      if (state.sttParakeet.envType === "other" && !state.sttParakeet.customActivation) return false;
+    } else {
+      if (!state.sttWhisper.modelPath) return false;
+    }
   }
 
-  // Check TTS
-  if (state.ttsProviderType === "local") {
+  // Check TTS (NANO-112: skip when disabled)
+  if (state.ttsEnabled && state.ttsProviderType === "local") {
     if (state.ttsLocal.envType === "conda" || state.ttsLocal.envType === "venv") {
       if (!state.ttsLocal.envNameOrPath) {
         return false;
