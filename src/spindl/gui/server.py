@@ -305,6 +305,8 @@ class GUIServer:
         Checks required fields for a local llama launch config.
         Returns list of error strings (empty if valid).
         """
+        import os
+
         errors = []
         has_url = bool(config.get("url"))
         has_local = bool(config.get("executable_path") or config.get("model_path"))
@@ -318,7 +320,32 @@ class GUIServer:
         port = config.get("port")
         if port is not None and (not isinstance(port, int) or port < 1 or port > 65535):
             errors.append(f"port must be 1-65535, got {port}")
+
+        # mmproj_path: if set, file must exist (Session 606: stale path = silent launch failure)
+        mmproj_path = config.get("mmproj_path")
+        if mmproj_path and isinstance(mmproj_path, str) and not os.path.isfile(mmproj_path):
+            errors.append(
+                f"mmproj_path does not exist: {mmproj_path} — "
+                "stale path from a previous model? Clear it if VLM is disabled"
+            )
+
         return errors
+
+    @staticmethod
+    def _strip_empty_optional_fields(config: dict) -> None:
+        """Remove keys whose values are empty strings — prevents zombie fields in YAML.
+
+        Fields like mmproj_path, reasoning_format, extra_args can be "" when the
+        user clears them in the GUI. Leaving "" in YAML means the next .update()
+        merge won't delete them, and the backend may interpret their presence
+        as intentional config even though the value is blank.
+        """
+        zombie_keys = [
+            k for k, v in config.items()
+            if isinstance(v, str) and v == ""
+        ]
+        for k in zombie_keys:
+            del config[k]
 
     def _persist_local_llm_config(self, config: dict) -> bool:
         """
@@ -337,6 +364,9 @@ class GUIServer:
             print(f"[GUI] LLM config validation failed: {errors}", flush=True)
             return False
 
+        # Strip empty-string fields before merge — prevents zombie keys in YAML
+        self._strip_empty_optional_fields(config)
+
         if self._orchestrator:
             try:
                 # Update orchestrator config in-memory, then persist.
@@ -345,7 +375,12 @@ class GUIServer:
                 llm_cfg = self._orchestrator._config.llm_config
                 if "llama" not in llm_cfg.providers:
                     llm_cfg.providers["llama"] = {}
-                llm_cfg.providers["llama"].update(config)
+                existing = llm_cfg.providers["llama"]
+                # Delete keys that the incoming config explicitly cleared
+                for k in list(existing.keys()):
+                    if k in ("mmproj_path", "reasoning_format", "extra_args", "device", "tensor_split") and k not in config:
+                        del existing[k]
+                existing.update(config)
                 self._orchestrator._config.save_to_yaml(self._config_path)
                 print(
                     f"[GUI] Local LLM config persisted via orchestrator to "
@@ -380,7 +415,12 @@ class GUIServer:
             # dashboard-only keys (e.g. repeat_penalty from NANO-108)
             if "llama" not in data["llm"]["providers"]:
                 data["llm"]["providers"]["llama"] = {}
-            data["llm"]["providers"]["llama"].update(config)
+            existing_yaml = data["llm"]["providers"]["llama"]
+            # Delete zombie keys that were cleared (not in incoming config)
+            for k in list(existing_yaml.keys()):
+                if k in ("mmproj_path", "reasoning_format", "extra_args", "device", "tensor_split") and k not in config:
+                    del existing_yaml[k]
+            existing_yaml.update(config)
 
             with open(config_path, "w", encoding="utf-8") as f:
                 ry.dump(data, f)
@@ -408,6 +448,8 @@ class GUIServer:
         Checks required fields for a local llama VLM launch config.
         Returns list of error strings (empty if valid).
         """
+        import os
+
         errors = []
         if not config.get("executable_path"):
             errors.append("executable_path is required for local VLM launch")
@@ -418,6 +460,15 @@ class GUIServer:
         port = config.get("port")
         if port is not None and (not isinstance(port, int) or port < 1 or port > 65535):
             errors.append(f"port must be 1-65535, got {port}")
+
+        # mmproj_path: if set, file must exist (Session 606: stale path = silent launch failure)
+        mmproj_path = config.get("mmproj_path")
+        if mmproj_path and isinstance(mmproj_path, str) and not os.path.isfile(mmproj_path):
+            errors.append(
+                f"mmproj_path does not exist: {mmproj_path} — "
+                "stale path from a previous model? Clear it if VLM is disabled"
+            )
+
         return errors
 
     def _persist_local_vlm_config(self, config: dict) -> bool:
@@ -432,13 +483,21 @@ class GUIServer:
             print(f"[GUI] VLM config validation failed: {errors}", flush=True)
             return False
 
+        # Strip empty-string fields before merge — prevents zombie keys in YAML
+        self._strip_empty_optional_fields(config)
+
         if self._orchestrator:
             try:
                 vis_cfg = self._orchestrator._config.vlm_config
                 vis_cfg.provider = "llama"
                 if "llama" not in vis_cfg.providers:
                     vis_cfg.providers["llama"] = {}
-                vis_cfg.providers["llama"].update(config)
+                existing = vis_cfg.providers["llama"]
+                # Delete zombie keys that were cleared
+                for k in list(existing.keys()):
+                    if k in ("mmproj_path", "extra_args", "device", "tensor_split") and k not in config:
+                        del existing[k]
+                existing.update(config)
                 self._orchestrator._config.save_to_yaml(self._config_path)
                 print(
                     f"[GUI] Local VLM config persisted via orchestrator to "
@@ -471,7 +530,12 @@ class GUIServer:
                 data["vlm"]["providers"] = {}
             if "llama" not in data["vlm"]["providers"]:
                 data["vlm"]["providers"]["llama"] = {}
-            data["vlm"]["providers"]["llama"].update(config)
+            existing_yaml = data["vlm"]["providers"]["llama"]
+            # Delete zombie keys that were cleared
+            for k in list(existing_yaml.keys()):
+                if k in ("mmproj_path", "extra_args", "device", "tensor_split") and k not in config:
+                    del existing_yaml[k]
+            existing_yaml.update(config)
 
             with open(config_path, "w", encoding="utf-8") as f:
                 ry.dump(data, f)
@@ -4806,8 +4870,9 @@ class GUIServer:
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
         tts_text: Optional[str] = None,
+        chunks: Optional[list] = None,
     ) -> None:
-        """Emit response event to all clients (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text)."""
+        """Emit response event to all clients (NANO-037: codex, NANO-042: reasoning, NANO-044: memories, NANO-056: stimulus, NANO-094: emotion, NANO-109: tts_text, NANO-111: chunks)."""
         data = {"text": text, "is_final": is_final}
         if activated_codex_entries:
             data["activated_codex_entries"] = activated_codex_entries
@@ -4822,6 +4887,8 @@ class GUIServer:
             data["emotion_confidence"] = emotion_confidence
         if tts_text is not None:
             data["tts_text"] = tts_text
+        if chunks is not None:
+            data["chunks"] = chunks
         await self.sio.emit("response", data)
 
     async def emit_stimulus_fired(
@@ -4864,6 +4931,31 @@ class GUIServer:
     async def emit_avatar_tool_mood(self, tool_mood: str) -> None:
         """Emit avatar tool mood event from tool invocation (NANO-093)."""
         await self.sio.emit("avatar_tool_mood", {"tool_mood": tool_mood})
+
+    async def emit_llm_chunk(
+        self,
+        text: str,
+        is_final: bool,
+        emotion: str | None = None,
+        emotion_confidence: float | None = None,
+    ) -> None:
+        """Emit streaming LLM sentence chunk for real-time dashboard text (NANO-111)."""
+        data: dict = {"text": text, "is_final": is_final}
+        if emotion is not None:
+            data["emotion"] = emotion
+            data["emotion_confidence"] = emotion_confidence
+        await self.sio.emit("llm_chunk", data)
+
+    async def emit_llm_token(self, token: str, is_final: bool) -> None:
+        """Emit token-level LLM text for real-time dashboard display (NANO-111)."""
+        await self.sio.emit("llm_token", {"token": token, "is_final": is_final})
+
+    async def emit_barge_in_truncated(self, truncated_text: str, delivered_sentences: int) -> None:
+        """Emit barge-in truncation event for frontend bubble update (NANO-111 Phase 2.5)."""
+        await self.sio.emit("barge_in_truncated", {
+            "truncated_text": truncated_text,
+            "delivered_sentences": delivered_sentences,
+        })
 
     async def emit_avatar_load_model(
         self,

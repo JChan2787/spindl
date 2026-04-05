@@ -53,6 +53,11 @@ class EventType(Enum):
     AVATAR_MOOD = auto()       # Emotion classifier produced mood for avatar
     AVATAR_TOOL_MOOD = auto()  # Tool invocation mapped to avatar visual category
 
+    # Streaming events (NANO-111)
+    LLM_CHUNK = auto()  # Sentence-level chunk from streaming LLM response
+    LLM_TOKEN = auto()  # Token-level text from streaming LLM (for dashboard display)
+    BARGE_IN_TRUNCATED = auto()  # Response truncated to delivered sentences (Phase 2.5)
+
     # Error events
     PIPELINE_ERROR = auto()  # Processing error occurred
 
@@ -125,6 +130,9 @@ class ResponseReadyEvent(Event):
     """Confidence score (0-100) of the emotion classification (NANO-094)."""
     tts_text: Optional[str] = None
     """TTS-safe version of the response with formatting stripped (NANO-109)."""
+    chunks: Optional[list] = None
+    """Per-sentence breakdown with emotion for sub-bubble display (NANO-111 Session 606).
+    Each dict: {text, emotion, emotion_confidence}. None for blocking path."""
 
 
 @dataclass
@@ -371,3 +379,56 @@ class AvatarToolMoodEvent(Event):
 
     event_type: EventType = field(default=EventType.AVATAR_TOOL_MOOD, init=False)
     tool_mood: str = ""
+
+
+@dataclass
+class LLMChunkEvent(Event):
+    """
+    Sentence-level chunk from streaming LLM response (NANO-111).
+
+    Emitted as each sentence is extracted from the LLM token stream.
+    The dashboard uses these to display response text incrementally.
+    """
+
+    event_type: EventType = field(default=EventType.LLM_CHUNK, init=False)
+    text: str = ""
+    """Sentence text for display."""
+    is_final: bool = False
+    """True if this is the last sentence in the response."""
+    emotion: Optional[str] = None
+    """Per-sentence emotion classification (Session 606)."""
+    emotion_confidence: Optional[float] = None
+    """Confidence score for per-sentence emotion (Session 606)."""
+
+
+@dataclass
+class LLMTokenEvent(Event):
+    """
+    Token-level text from streaming LLM response (NANO-111).
+
+    Emitted for every StreamChunk from the LLM provider — each token or
+    small group of tokens as they're generated. The dashboard uses these
+    for real-time word-by-word text display (like ChatGPT).
+    """
+
+    event_type: EventType = field(default=EventType.LLM_TOKEN, init=False)
+    token: str = ""
+    """Token text (typically 1-3 words per chunk)."""
+    is_final: bool = False
+    """True on the last token in the response."""
+
+
+@dataclass
+class BargeInTruncatedEvent(Event):
+    """
+    Emitted when barge-in truncates the response to delivered sentences (NANO-111 Phase 2.5).
+
+    The frontend uses this to update the last assistant bubble to show only
+    what was actually spoken, and the history is amended to match.
+    """
+
+    event_type: EventType = field(default=EventType.BARGE_IN_TRUNCATED, init=False)
+    truncated_text: str = ""
+    """The response text truncated to only delivered sentences."""
+    delivered_sentences: int = 0
+    """Number of sentences that were actually delivered before barge-in."""

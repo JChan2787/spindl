@@ -6,7 +6,7 @@ import { CodexIndicator } from "./codex-indicator";
 import { MemoryIndicator } from "./memory-indicator";
 import { StimulusSourceBadge } from "./stimulus-source-badge";
 import { useSettingsStore } from "@/lib/stores";
-import type { ChatMessage } from "@/lib/stores/chat-store";
+import type { ChatMessage, SentenceChunk } from "@/lib/stores/chat-store";
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -57,20 +57,31 @@ export function ChatMessageBubble({ message, characterName }: ChatMessageBubbleP
           )}
         </div>
 
-        {/* Message text */}
-        <p className={cn(
-          "text-sm whitespace-pre-wrap break-words",
-          !message.isFinal && !isUser && "animate-pulse"
-        )}>
-          {message.text}
-          {!message.isFinal && !isUser && (
-            <span className="inline-block ml-1 opacity-50">▊</span>
-          )}
-        </p>
+        {/* Message content — sub-bubbles or single text */}
+        {!isUser && message.chunks && message.chunks.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            {message.chunks.map((chunk, i) => (
+              <SentenceBubble key={i} chunk={chunk} />
+            ))}
+            {!message.isFinal && (
+              <span className="inline-block ml-1 opacity-50 animate-pulse">▊</span>
+            )}
+          </div>
+        ) : (
+          <p className={cn(
+            "text-sm whitespace-pre-wrap break-words",
+            !message.isFinal && !isUser && "animate-pulse"
+          )}>
+            {message.text}
+            {!message.isFinal && !isUser && (
+              <span className="inline-block ml-1 opacity-50">▊</span>
+            )}
+          </p>
+        )}
 
-        {/* Emotion classifier tag (NANO-094) — display-only */}
+        {/* Single emotion label for entire response — bottom-right */}
         {!isUser && showEmotion && message.emotion && (
-          <span className="text-xs text-muted-foreground mt-0.5 block">
+          <span className="text-xs text-muted-foreground mt-1 block text-right">
             {message.emotion}
             {message.emotionConfidence != null && ` \u2014 ${Math.round(message.emotionConfidence * 100)}%`}
           </span>
@@ -83,6 +94,16 @@ export function ChatMessageBubble({ message, characterName }: ChatMessageBubbleP
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+function SentenceBubble({ chunk }: { chunk: SentenceChunk }) {
+  return (
+    <div className="rounded border border-border/30 bg-background/20 px-2 py-1.5">
+      <p className="text-sm whitespace-pre-wrap break-words">
+        {chunk.text}
+      </p>
     </div>
   );
 }

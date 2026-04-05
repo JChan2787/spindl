@@ -63,9 +63,15 @@ class AudioPlayback:
         self._finished = False  # Set when audio exhausted (distinct from _playing)
         self._lock = threading.Lock()
         self._monitor_thread: Optional[threading.Thread] = None
+        self._streaming_finalized: bool = True  # NANO-111: True = not streaming or done
 
         # NANO-069: Audio level tracking (written in audio thread, read in monitor)
         self._current_rms: float = 0.0
+
+        # NANO-111 Session 606: Per-chunk boundary tracking for [text][tts] sync
+        self._chunk_boundaries: list[int] = []  # sample offsets where chunks start
+        self._chunk_callbacks: list[tuple] = []  # (start_cb, end_cb) per chunk
+        self._last_notified_chunk: int = -1  # index of last chunk whose start_cb fired
 
     def configure(self, sample_rate: int, channels: int = 1) -> None:
         """
@@ -143,7 +149,8 @@ class AudioPlayback:
                 outdata[to_copy:, :] = 0
 
             # Check if playback complete
-            if self._playback_position >= len(self._audio_data):
+            # NANO-111: During streaming, don't finish until finalized
+            if self._playback_position >= len(self._audio_data) and self._streaming_finalized:
                 self._playing = False
                 self._finished = True
 
@@ -165,6 +172,37 @@ class AudioPlayback:
                         except Exception:
                             pass
                     return
+
+            # NANO-111 Session 606: Fire chunk boundary callbacks
+            with self._lock:
+                pos = self._playback_position
+                boundaries = list(self._chunk_boundaries)
+                callbacks = list(self._chunk_callbacks)
+                last_notified = self._last_notified_chunk
+
+            # Check which chunks playback has entered
+            for i, boundary in enumerate(boundaries):
+                if i <= last_notified:
+                    continue
+                if pos >= boundary:
+                    # Playback reached this chunk — fire start callback
+                    if i < len(callbacks):
+                        start_cb, _ = callbacks[i]
+                        if start_cb is not None:
+                            try:
+                                start_cb()
+                            except Exception:
+                                pass
+                    # Check if previous chunk ended (playback passed its boundary)
+                    if i > 0 and i - 1 < len(callbacks):
+                        _, end_cb = callbacks[i - 1]
+                        if end_cb is not None:
+                            try:
+                                end_cb()
+                            except Exception:
+                                pass
+                    with self._lock:
+                        self._last_notified_chunk = i
 
             # NANO-069: Emit audio level at ~50ms intervals
             now = time.monotonic()
@@ -297,6 +335,91 @@ class AudioPlayback:
             self.on_complete()
 
         return not was_interrupted
+
+    def play_streaming(
+        self,
+        first_chunk: np.ndarray,
+        on_chunk_start: Optional[Callable] = None,
+        on_chunk_end: Optional[Callable] = None,
+    ) -> None:
+        """
+        Start playing audio with the first chunk, expecting more via append_audio() (NANO-111).
+
+        Begins playback immediately on the first chunk. Subsequent chunks are
+        appended via append_audio(). Call finalize_streaming() when the last
+        chunk has been appended so the monitor thread knows to fire on_complete.
+
+        Args:
+            first_chunk: First audio chunk as float32 numpy array.
+            on_chunk_start: Called when playback starts this chunk.
+            on_chunk_end: Called when playback finishes this chunk.
+        """
+        self.stop()
+
+        with self._lock:
+            self._audio_data = first_chunk.astype(np.float32).flatten()
+            self._playback_position = 0
+            self._playing = True
+            self._interrupted = False
+            self._finished = False
+            self._streaming_finalized = False
+            # NANO-111 Session 606: Reset chunk boundary tracking
+            self._chunk_boundaries = [0]  # first chunk starts at sample 0
+            self._chunk_callbacks = [(on_chunk_start, on_chunk_end)]
+            self._last_notified_chunk = -1
+
+        self._stream = sd.OutputStream(
+            samplerate=self.sample_rate,
+            channels=self.channels,
+            dtype=self.DTYPE,
+            device=self.device,
+            callback=self._audio_callback,
+        )
+        self._stream.start()
+
+        # Start background monitor (same as non-blocking play)
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_completion, daemon=True
+        )
+        self._monitor_thread.start()
+
+    def append_audio(
+        self,
+        chunk: np.ndarray,
+        on_chunk_start: Optional[Callable] = None,
+        on_chunk_end: Optional[Callable] = None,
+    ) -> None:
+        """
+        Append an audio chunk to the currently playing stream (NANO-111).
+
+        Thread-safe. The audio callback will seamlessly continue into
+        the appended data. If playback has already passed the end of
+        the previous data, there may be a brief silence gap (natural
+        inter-sentence pause).
+
+        Args:
+            chunk: Audio data as float32 numpy array at the same sample rate.
+            on_chunk_start: Called when playback reaches this chunk's first sample.
+            on_chunk_end: Called when playback finishes this chunk's last sample.
+        """
+        with self._lock:
+            if self._audio_data is None:
+                return
+            boundary = len(self._audio_data)
+            new_data = chunk.astype(np.float32).flatten()
+            self._audio_data = np.concatenate([self._audio_data, new_data])
+            self._chunk_boundaries.append(boundary)
+            self._chunk_callbacks.append((on_chunk_start, on_chunk_end))
+
+    def finalize_streaming(self) -> None:
+        """
+        Signal that no more audio chunks will be appended (NANO-111).
+
+        After this call, the monitor thread will fire on_complete when
+        playback reaches the end of the audio data.
+        """
+        with self._lock:
+            self._streaming_finalized = True
 
     @property
     def is_playing(self) -> bool:

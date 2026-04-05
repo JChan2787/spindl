@@ -54,6 +54,7 @@ export interface ResponseEvent {
   emotion?: string; // NANO-094: Classified emotion mood string
   emotion_confidence?: number; // NANO-094: Normalized confidence (0.0-1.0)
   tts_text?: string; // NANO-109: TTS-safe text with formatting stripped
+  chunks?: Array<{ text: string; emotion?: string; emotion_confidence?: number }>; // NANO-111: Per-sentence sub-bubbles
 }
 
 export interface TTSStatusEvent {
@@ -1377,6 +1378,12 @@ export interface ServerToClientEvents {
   audio_level: (event: AudioLevelEvent) => void;
   // NANO-073b: Mic input level for voice overlay
   mic_level: (event: MicLevelEvent) => void;
+  // NANO-111: Streaming LLM sentence chunks
+  llm_chunk: (event: { text: string; is_final: boolean; emotion?: string; emotion_confidence?: number }) => void;
+  // NANO-111: Token-level LLM text for real-time display
+  llm_token: (event: { token: string; is_final: boolean }) => void;
+  // NANO-111 Phase 2.5: Barge-in truncated response
+  barge_in_truncated: (event: { truncated_text: string; delivered_sentences: number }) => void;
 }
 
 export interface ClientToServerEvents {

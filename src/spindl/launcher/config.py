@@ -275,12 +275,23 @@ def _parse_vision_provider_config(config: dict) -> Optional[VisionProviderConfig
     provider = vlm_data.get("provider", "llama")
     plugin_paths = vlm_data.get("plugin_paths", [])
 
+    # provider: "none" means VLM is explicitly disabled — don't treat
+    # "section exists" as "enabled". Session 606 bug: enabled=True with
+    # provider="none" caused stale mmproj_path to survive and break launches.
+    if provider == "none":
+        return VisionProviderConfig(
+            enabled=False,
+            provider="none",
+            plugin_paths=plugin_paths,
+            provider_config={},
+        )
+
     # Get provider-specific config
     providers = vlm_data.get("providers", {})
     provider_config = providers.get(provider, {})
 
     return VisionProviderConfig(
-        enabled=True,  # If vlm section exists, it's enabled
+        enabled=True,
         provider=provider,
         plugin_paths=plugin_paths,
         provider_config=provider_config,

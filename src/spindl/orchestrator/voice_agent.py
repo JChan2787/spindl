@@ -474,6 +474,14 @@ class VoiceAgentOrchestrator:
             ) if self._provider_holder else 8192,
         )
 
+        # NANO-111 Phase 2: Wire streaming playback callbacks
+        self._callbacks._on_response_ready_streaming = self._on_response_ready_streaming
+        self._callbacks._append_playback_audio = self._append_playback_audio
+        self._callbacks._finalize_playback_streaming = self._finalize_playback_streaming
+
+        # NANO-111 Phase 2.5: Wire history manager for barge-in truncation
+        self._callbacks._history_manager = self._history_manager
+
         # NANO-076: Wire session file getter for snapshot sidecar persistence
         self._callbacks.set_session_file_getter(lambda: self.session_file)
 
@@ -733,6 +741,54 @@ class VoiceAgentOrchestrator:
 
         # Start playback
         self._playback.play(audio)
+
+    def _on_response_ready_streaming(
+        self,
+        first_chunk: np.ndarray,
+        on_chunk_start=None,
+        on_chunk_end=None,
+    ) -> None:
+        """
+        Called when the first TTS audio chunk is ready for streaming playback (NANO-111 Phase 2).
+
+        Starts playback immediately. Subsequent chunks arrive via _append_playback_audio().
+        """
+        if not self._running:
+            return
+
+        # Emit TTS started event with estimated duration (first chunk only — updates later)
+        duration = len(first_chunk) / self._playback.sample_rate
+        if self._event_bus:
+            self._event_bus.emit(TTSStartedEvent(duration=duration))
+
+        # Transition state machine
+        self._state_machine.start_system_speaking()
+
+        # Start streaming playback with first chunk
+        self._playback.play_streaming(
+            first_chunk,
+            on_chunk_start=on_chunk_start,
+            on_chunk_end=on_chunk_end,
+        )
+
+    def _append_playback_audio(
+        self,
+        chunk: np.ndarray,
+        on_chunk_start=None,
+        on_chunk_end=None,
+    ) -> None:
+        """Append an audio chunk to the currently streaming playback (NANO-111 Phase 2)."""
+        if not self._running:
+            return
+        self._playback.append_audio(
+            chunk,
+            on_chunk_start=on_chunk_start,
+            on_chunk_end=on_chunk_end,
+        )
+
+    def _finalize_playback_streaming(self) -> None:
+        """Signal that no more audio chunks will arrive (NANO-111 Phase 2)."""
+        self._playback.finalize_streaming()
 
     def _on_playback_complete(self) -> None:
         """Called when TTS playback finishes naturally."""

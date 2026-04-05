@@ -29,6 +29,9 @@ from spindl.core.events import (
     StimulusFiredEvent,
     AvatarMoodEvent,
     AvatarToolMoodEvent,
+    LLMChunkEvent,
+    LLMTokenEvent,
+    BargeInTruncatedEvent,
 )
 
 if TYPE_CHECKING:
@@ -86,6 +89,9 @@ class EventBridge:
         self._subscribe(EventType.MIC_LEVEL, self._on_mic_level)
         self._subscribe(EventType.AVATAR_MOOD, self._on_avatar_mood)
         self._subscribe(EventType.AVATAR_TOOL_MOOD, self._on_avatar_tool_mood)
+        self._subscribe(EventType.LLM_CHUNK, self._on_llm_chunk)
+        self._subscribe(EventType.LLM_TOKEN, self._on_llm_token)
+        self._subscribe(EventType.BARGE_IN_TRUNCATED, self._on_barge_in_truncated)
 
         logger.info(f"EventBridge started with {len(self._subscription_ids)} subscriptions")
 
@@ -164,6 +170,7 @@ class EventBridge:
                 emotion=event.emotion,
                 emotion_confidence=event.emotion_confidence,
                 tts_text=event.tts_text,
+                chunks=event.chunks,
             )
         )
 
@@ -314,4 +321,36 @@ class EventBridge:
             return
         self._emit_async(
             self._gui_server.emit_avatar_tool_mood(tool_mood=event.tool_mood)
+        )
+
+    def _on_llm_chunk(self, event: LLMChunkEvent) -> None:
+        """Handle streaming LLM sentence chunk (NANO-111)."""
+        if not self._should_emit():
+            return
+        self._emit_async(
+            self._gui_server.emit_llm_chunk(
+                text=event.text,
+                is_final=event.is_final,
+                emotion=event.emotion,
+                emotion_confidence=event.emotion_confidence,
+            )
+        )
+
+    def _on_llm_token(self, event: LLMTokenEvent) -> None:
+        """Handle token-level LLM text for real-time dashboard display (NANO-111)."""
+        if not self._should_emit():
+            return
+        self._emit_async(
+            self._gui_server.emit_llm_token(token=event.token, is_final=event.is_final)
+        )
+
+    def _on_barge_in_truncated(self, event: BargeInTruncatedEvent) -> None:
+        """Handle barge-in response truncation (NANO-111 Phase 2.5)."""
+        if not self._should_emit():
+            return
+        self._emit_async(
+            self._gui_server.emit_barge_in_truncated(
+                truncated_text=event.truncated_text,
+                delivered_sentences=event.delivered_sentences,
+            )
         )

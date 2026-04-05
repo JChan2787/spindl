@@ -730,6 +730,25 @@ class OrchestratorConfig(BaseModel):
     # Debug settings
     debug: bool = False
 
+    @model_validator(mode="after")
+    def vlm_none_must_not_have_stale_mmproj(self) -> "OrchestratorConfig":
+        """When VLM is disabled (provider='none'), mmproj_path in the LLM
+        provider config is a stale zombie that will cause architecture mismatches
+        on the next launch. Warn loudly and strip it. (Session 606 bug)."""
+        if self.vlm_config.provider == "none":
+            llama_cfg = self.llm_config.providers.get("llama", {})
+            if llama_cfg.get("mmproj_path"):
+                import warnings
+                warnings.warn(
+                    f"VLM is disabled (provider='none') but llm.providers.llama "
+                    f"contains stale mmproj_path: {llama_cfg['mmproj_path']} — "
+                    f"stripping to prevent architecture mismatch on launch",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                llama_cfg.pop("mmproj_path", None)
+        return self
+
     @classmethod
     def from_yaml(cls, path: str) -> "OrchestratorConfig":
         """

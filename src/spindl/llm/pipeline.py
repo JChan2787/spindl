@@ -11,14 +11,16 @@ Session X (NANO-024): Added tool calling support via ToolExecutor.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import Iterator, Optional, TYPE_CHECKING
 
 from .build_context import BuildContext, InputModality
 from .base import LLMProvider, LLMResponse
 from .prompt_block import PromptBlock, create_default_blocks, load_block_config
 from .prompt_builder import PromptBuilder
 from .plugins.base import PipelineContext, PreProcessor, PostProcessor
+from .sentence_segmenter import SentenceSegmenter, SentenceChunk
 
 if TYPE_CHECKING:
     from ..tools import ToolExecutor
@@ -118,6 +120,28 @@ class PipelineResult:
             self.retrieved_memories = []
 
 
+@dataclass
+class StreamingPipelineChunk:
+    """
+    A single sentence-level chunk from the streaming pipeline (NANO-111).
+
+    Yielded by run_stream() as sentences are extracted from the LLM token stream.
+    Each chunk contains both display text and TTS-cleaned text for parallel processing.
+    """
+
+    display_text: str
+    """Original sentence text for chat display."""
+
+    tts_text: str
+    """TTS-cleaned sentence text for speech synthesis."""
+
+    index: int
+    """Sentence order index (0-based). Used for TTS ordering."""
+
+    is_final: bool
+    """True if this is the last sentence in the response."""
+
+
 class LLMPipeline:
     """
     Plugin-aware LLM pipeline orchestrator.
@@ -154,6 +178,8 @@ class LLMPipeline:
         self._post_processors: list[PostProcessor] = post_processors or []
         self._tool_executor: Optional["ToolExecutor"] = tool_executor
         self._block_config: Optional[list[PromptBlock]] = None
+        # NANO-111: Deferred post-processor result from run_stream()
+        self._last_stream_result: Optional[PipelineResult] = None
         # Codex injection wrappers (NANO-045d)
         self._codex_prefix: str = "The following facts are always true in this context:"
         self._codex_suffix: str = ""
@@ -395,6 +421,217 @@ class LLMPipeline:
         return PipelineResult(
             content=response_text,
             usage=TokenUsage.from_llm_response(llm_response),
+            messages=context.messages,
+            input_modality=input_modality.value,
+            state_trigger=state_trigger,
+            activated_codex_entries=activated_codex,
+            retrieved_memories=retrieved_memories,
+            reasoning=context.metadata.get("reasoning"),
+            tts_text=context.metadata.get("tts_text"),
+            block_contents=context.metadata.get("block_contents"),
+        )
+
+    def run_stream(
+        self,
+        user_input: str,
+        persona: dict,
+        generation_params: Optional[dict] = None,
+        state_trigger: Optional[str] = None,
+        input_modality: InputModality = InputModality.TEXT,
+        last_assistant_message: Optional[str] = None,
+        stimulus_source: Optional[str] = None,
+        stimulus_metadata: Optional[dict] = None,
+        addressing_others_prompt: Optional[str] = None,
+        on_token: Optional[callable] = None,
+    ) -> Iterator[StreamingPipelineChunk]:
+        """
+        Execute pipeline with streaming LLM and sentence-level chunking (NANO-111).
+
+        Identical to run() through pre-processing. Then streams LLM tokens,
+        segments into sentences, and yields each sentence with TTS-cleaned text.
+
+        Falls back to yielding a single chunk from run() if:
+        - Provider doesn't support streaming
+        - Tool executor is active (tool calls are incompatible with mid-stream splitting)
+
+        Args:
+            (same as run())
+
+        Yields:
+            StreamingPipelineChunk per complete sentence
+        """
+        logger = logging.getLogger(__name__)
+
+        # Check if streaming is available
+        from .provider_holder import ProviderHolder
+        _inner = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider
+        can_stream = _inner.get_properties().supports_streaming
+
+        if not can_stream or self._tool_executor is not None:
+            # Fallback: run blocking pipeline, yield single chunk.
+            # Tool execution requires _run_with_tools() loop which is
+            # incompatible with streaming. The tool executor is wired
+            # whenever tools are configured — even if the LLM doesn't
+            # call any on this turn, we can't know in advance.
+            result = self.run(
+                user_input, persona, generation_params, state_trigger,
+                input_modality, last_assistant_message, stimulus_source,
+                stimulus_metadata, addressing_others_prompt,
+            )
+            self._last_stream_result = result  # Caller reads this after consuming chunks
+            tts_text = result.tts_text or result.content
+            yield StreamingPipelineChunk(
+                display_text=result.content,
+                tts_text=tts_text,
+                index=0,
+                is_final=True,
+            )
+            return
+
+        # --- Streaming path ---
+
+        # 1-2e. Build context and run pre-processors (identical to run())
+        build_context = BuildContext(
+            input_content=user_input,
+            input_modality=input_modality,
+            persona=persona,
+            state_trigger=state_trigger,
+            last_assistant_message=last_assistant_message,
+            block_config=self._block_config,
+            addressing_others_prompt=addressing_others_prompt,
+        )
+
+        context = PipelineContext(
+            user_input=user_input,
+            persona=persona,
+            messages=self.prompt_builder.build(
+                persona, user_input, build_context=build_context
+            ),
+        )
+
+        if build_context.block_contents is not None:
+            context.metadata["block_contents"] = build_context.block_contents
+        context.metadata["input_modality"] = input_modality.value
+        if stimulus_source:
+            context.metadata["stimulus_source"] = stimulus_source
+        if stimulus_metadata and "twitch_content" in stimulus_metadata:
+            context.metadata["twitch_content"] = stimulus_metadata["twitch_content"]
+
+        for plugin in self._pre_processors:
+            context = plugin.process(context)
+
+        self._inject_codex_content(context)
+        self._inject_rag_content(context)
+        self._inject_twitch_content(context)
+        self._update_deferred_block_contents(context)
+
+        # 3. Resolve generation parameters
+        params = self._resolve_generation_params(persona, generation_params)
+
+        # DEBUG: Dump full prompt to log (same as run())
+        from .provider_holder import ProviderHolder
+        _inner2 = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider
+        provider_type = type(_inner2).__name__
+        is_cloud = _inner2.__class__.is_cloud_provider()
+        provider_label = f"{provider_type} ({'cloud' if is_cloud else 'local'})"
+        print(f"[Prompt] --- BEGIN FULL PROMPT [{provider_label}] ---", flush=True)
+        for msg in context.messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if len(content) > 2000:
+                display = content[:1000] + "\n...[truncated]...\n" + content[-500:]
+            else:
+                display = content
+            print(f"[Prompt] [{role}]:\n{display}", flush=True)
+        print("[Prompt] --- END FULL PROMPT ---", flush=True)
+
+        # 4. Stream LLM tokens, segment into sentences
+        segmenter = SentenceSegmenter()
+
+        # Find the TTS cleanup post-processor for per-sentence cleaning
+        tts_cleanup = None
+        for plugin in self._post_processors:
+            if plugin.name == "tts_cleanup":
+                tts_cleanup = plugin
+                break
+
+        # Accumulate full response for deferred post-processors
+        accumulated_content = []
+        accumulated_reasoning = []
+        stream_input_tokens = 0
+        stream_output_tokens = 0
+        stream_reasoning_tokens = None
+
+        for chunk in self.provider.generate_stream(
+            messages=context.messages,
+            **params,
+        ):
+            # Track content and token usage across all chunks
+            if chunk.content:
+                accumulated_content.append(chunk.content)
+            if chunk.reasoning:
+                accumulated_reasoning.append(chunk.reasoning)
+            if chunk.is_final:
+                stream_input_tokens = chunk.input_tokens or 0
+                stream_output_tokens = chunk.output_tokens or 0
+                stream_reasoning_tokens = chunk.reasoning_tokens
+
+            # NANO-111: Fire token callback for real-time dashboard display
+            if on_token and chunk.content:
+                on_token(chunk.content, chunk.is_final)
+
+            for sentence in segmenter.feed(chunk):
+                display_text = sentence.text
+
+                # Apply TTS cleanup to this sentence
+                if tts_cleanup is not None:
+                    # Create a temporary context for the cleanup plugin
+                    temp_ctx = PipelineContext(
+                        user_input=user_input,
+                        persona=persona,
+                        messages=[],
+                    )
+                    tts_cleanup.process(temp_ctx, display_text)
+                    tts_text = temp_ctx.metadata.get("tts_text", display_text)
+                else:
+                    tts_text = display_text
+
+                yield StreamingPipelineChunk(
+                    display_text=display_text,
+                    tts_text=tts_text,
+                    index=sentence.index,
+                    is_final=sentence.is_final,
+                )
+
+        # --- Deferred post-processing (NANO-111 Session 606) ---
+        # All chunks have been yielded. Now run post-processors on the
+        # accumulated response — same as run() steps 5-8.
+        full_response = "".join(accumulated_content)
+        full_reasoning = "".join(accumulated_reasoning) if accumulated_reasoning else None
+
+        # 5. Stash reasoning in context metadata for post-processors (NANO-042)
+        if full_reasoning:
+            context.metadata["reasoning"] = full_reasoning
+
+        # 6. Run post-processors on accumulated content
+        response_text = full_response
+        for plugin in self._post_processors:
+            response_text = plugin.process(context, response_text)
+
+        # 7. Extract activated codex entries for GUI display (NANO-037 Phase 2)
+        activated_codex = self._extract_codex_display_data(context)
+
+        # 8. Extract retrieved memories for GUI display (NANO-044)
+        retrieved_memories = self._extract_rag_display_data(context)
+
+        # Store result for caller to retrieve after consuming all chunks
+        self._last_stream_result = PipelineResult(
+            content=response_text,
+            usage=TokenUsage(
+                input_tokens=stream_input_tokens,
+                output_tokens=stream_output_tokens,
+                reasoning_tokens=stream_reasoning_tokens,
+            ),
             messages=context.messages,
             input_modality=input_modality.value,
             state_trigger=state_trigger,
