@@ -8,8 +8,8 @@ Guide for AI coding assistants working in the SpindL codebase.
 
 ```
 main (protected, always green CI)
- └── NANO-108-repetition-params              ← feature branch
- └── NANO-109-dual-output-tts-cleanup       ← feature branch
+ └── NANO-112-stt-tts-disable-toggle        ← feature branch
+ └── NANO-111-streaming-tts-pipeline        ← feature branch
  └── NANO-110-addressing-others-stream-deck ← feature branch
  └── NANO-082-e2e-launch-matrix             ← feature branch
 ```
@@ -66,9 +66,9 @@ Runs on every push and every PR targeting `main`.
 ## Project Layout
 
 ```
-src/spindl/             Python backend (~34,400 lines, 135 files)
-gui/src/                Next.js frontend (~32,800 lines, 157 files)
-tests/                  Backend unit tests (116 test modules, ~29,000 lines)
+src/spindl/             Python backend (~37,200 lines, 136 files)
+gui/src/                Next.js frontend (~33,600 lines, 157 files)
+tests/                  Backend unit tests (119 test modules, ~29,800 lines)
 tests_e2e/              E2E tests (Playwright, 8 modules, 5-config matrix)
 scripts/                dev.py (unified launcher), launcher.py (headless), standalone GUI
 config/                 spindl.yaml.example (runtime config template)
@@ -89,7 +89,7 @@ characters/             User character data (gitignored)
 | `core/` | State machine, event bus, context | `AudioStateMachine`, `EventBus`, `ContextManager` |
 | `audio/` | Mic capture, speaker playback, VAD, RMS level emission, stream health watchdog | `AudioCapture` (includes `_watchdog_loop` for dead-stream detection + auto-restart), `AudioPlayback`, `SileroVAD`, `VADTracker` |
 | `avatar/` | Emotion classification + avatar bridge | `ONNXEmotionClassifier`, `AvatarToolMoodSubscriber`, `AvatarConfig` |
-| `llm/` | Prompt building, LLM dispatch, plugins | `LLMProvider` (ABC), `LLMPipeline`, `PromptBuilder`, `PromptBlock` |
+| `llm/` | Prompt building, LLM dispatch, plugins, sentence segmentation | `LLMProvider` (ABC), `LLMPipeline`, `PromptBuilder`, `PromptBlock`, `SentenceSegmenter` |
 | `llm/builtin/` | LLM backend implementations | `LlamaProvider`, `DeepSeekProvider`, `OpenRouterProvider` |
 | `llm/providers/` | Pipeline content providers | `HistoryProvider`, `PersonaProvider`, `InputProvider`, `VoiceStateProvider`, etc. |
 | `llm/plugins/` | Pre/post-processing pipeline | `PreProcessor` (ABC), `PostProcessor` (ABC), `BudgetEnforcer`, `HistoryInjector`, `ReasoningExtractor`, `SummarizationTrigger`, `CodexActivator`, `CodexCooldown`, `TTSCleanupPlugin` (dual-output: raw→chat, cleaned→TTS/subtitles/history) |
@@ -114,11 +114,11 @@ characters/             User character data (gitignored)
 1. Implement the relevant ABC (`LLMProvider`, `STTProvider`, `TTSProvider`, `VLMProvider`, `StimulusModule`, `Tool`)
 2. Register it in the corresponding registry module
 
-**Plugin pipeline.** LLM pre/post-processing uses `PreProcessor` and `PostProcessor` ABCs. Plugins are registered on the `LLMPipeline` and run in order. `TTSCleanupPlugin` is a dual-output `PostProcessor` — it stashes TTS-safe text in `context.metadata["tts_text"]` and returns the original response unchanged. Three consumers get different text: chat display (raw), TTS+subtitles (cleaned), conversation history (cleaned — steers LLM away from generating RP prose). The cleaned text is also stored as `content` in JSONL history, with the raw response preserved as `display_content`.
+**Plugin pipeline.** LLM pre/post-processing uses `PreProcessor` and `PostProcessor` ABCs. Plugins are registered on the `LLMPipeline` and run in order. `TTSCleanupPlugin` is a dual-output `PostProcessor` — it stashes TTS-safe text in `context.metadata["tts_text"]` and returns the original response unchanged. Three consumers get different text: chat display (raw), TTS+subtitles (cleaned), conversation history (cleaned — steers LLM away from generating RP prose). The cleaned text is also stored as `content` in JSONL history, with the raw response preserved as `display_content`. **Streaming gotcha:** When the LLM streams (`generate_stream()`), post-processors run *after* the full response is collected — TTS delivery happens sentence-by-sentence during streaming, but history injection, codex activation, and memory reinforcement are deferred until the stream completes.
 
 **Event bus.** Components communicate via `EventBus` (pub/sub). Event types are defined in `core/events.py`. Use `EventBus.subscribe()` / `EventBus.publish()`. Supports priority ordering and one-shot subscriptions. High-frequency events (e.g., `AUDIO_LEVEL` at 50ms intervals) flow through the same bus — EventBridge forwards them to Socket.IO for frontend visualization.
 
-**State machine.** Agent states: `IDLE → LISTENING → USER_SPEAKING → PROCESSING → SYSTEM_SPEAKING`. Defined as an enum in `core/state_machine.py`. All transitions are thread-safe (Lock-protected). **Gotcha:** During TTS playback, the state machine re-enters `LISTENING` for barge-in (interrupt) support. Frontend components that need to know "system is speaking" should check `audioLevel > 0` instead of `state === "system_speaking"` (see `character-portrait.tsx`).
+**State machine.** Agent states: `IDLE → LISTENING → USER_SPEAKING → PROCESSING → SYSTEM_SPEAKING`. Defined as an enum in `core/state_machine.py`. All transitions are thread-safe (Lock-protected). **Gotcha:** During TTS playback, the state machine re-enters `LISTENING` for barge-in (interrupt) support. Frontend components that need to know "system is speaking" should check `audioLevel > 0` instead of `state === "system_speaking"` (see `character-portrait.tsx`). **TTS-disabled gotcha (NANO-112):** When TTS is off, there's no playback to trigger `_on_playback_complete`, so the state machine would get stuck in `PROCESSING`. The `_on_tts_skipped` callback handles this with a direct `PROCESSING → LISTENING` transition — do NOT use `finish_system_speaking()` (that only transitions from `SYSTEM_SPEAKING`). **Barge-in truncation (NANO-111):** On interrupt, only the sentences that were actually delivered via TTS are stored in conversation history (`_delivered_sentences` list). The full LLM response is discarded. This prevents phantom context from unheard text leaking into subsequent turns.
 
 **Prompt blocks.** The prompt builder supports three modes: legacy (template string), provider (registered `ContextProvider` plugins), and block (configurable `PromptBlock` dataclasses). Block mode is default. Block definitions live in `llm/prompt_block.py`.
 
@@ -128,7 +128,7 @@ characters/             User character data (gitignored)
 
 **Thread safety.** Audio capture, playback, VAD, stimuli engine, and VTS driver all run in daemon threads. Use `SimpleQueue` for inter-thread command dispatch (see `vts/driver.py`). Use `threading.Lock` for shared state (see `core/state_machine.py`).
 
-**Event types.** 28 `EventType` enum values in `core/events.py`:
+**Event types.** 20 `EventType` enum values in `core/events.py`:
 - Speech pipeline: `TRANSCRIPTION_READY`, `RESPONSE_READY`, `TTS_STARTED`, `TTS_COMPLETED`, `TTS_INTERRUPTED`
 - State: `STATE_CHANGED`
 - Audio viz: `AUDIO_LEVEL` (speaker RMS), `MIC_LEVEL` (mic RMS)
@@ -137,9 +137,58 @@ characters/             User character data (gitignored)
 - Tools: `TOOL_INVOKED`, `TOOL_RESULT`
 - Stimuli: `STIMULUS_FIRED`
 - Avatar: `AVATAR_MOOD`, `AVATAR_TOOL_MOOD`
+- Streaming (NANO-111): `LLM_CHUNK` (sentence-level, carries text + index), `LLM_TOKEN` (token-level raw text for dashboard display), `BARGE_IN_TRUNCATED` (response truncated to delivered sentences)
 - Error: `PIPELINE_ERROR`
 
-Key event data: `ResponseReadyEvent` carries `emotion`, `emotion_confidence`, `stimulus_source`, `tts_text` (NANO-109: TTS-safe text, separate from display text). `ToolInvokedEvent`/`ToolResultEvent` carry `tool_call_id` and `iteration`.
+Key event data: `ResponseReadyEvent` carries `emotion`, `emotion_confidence`, `stimulus_source`, `tts_text`, and `chunks` (list of `{text}` per sentence — `None` for blocking path). Emotion is single-per-response (classified on full text). `LLMChunkEvent` carries `text`, `index`, `is_final`. `ToolInvokedEvent`/`ToolResultEvent` carry `tool_call_id` and `iteration`.
+
+### Streaming TTS Pipeline (NANO-111)
+
+The voice response path streams LLM output and delivers TTS sentence-by-sentence in parallel, rather than waiting for the full response before synthesizing audio.
+
+**Flow:**
+```
+LLM generate_stream() → token stream
+    → SentenceSegmenter (stateless regex, handles abbreviations/ellipsis/reasoning tags)
+    → sentence boundary detected
+    → _parallel_tts_delivery() thread:
+        per sentence (3-thread semaphore cap):
+            TTSCleanupPlugin.clean(sentence) → TTS-safe text
+            TTSProvider.synthesize(cleaned) → audio bytes
+            LLMChunkEvent emitted (sentence text)
+        ordered audio concatenation → play_streaming() (starts on first chunk)
+    → stream completes:
+        ONNXEmotionClassifier.classify(full_response) → single mood
+        AvatarMoodEvent emitted (one per response)
+        post-processors run (history, codex, memory)
+    → ResponseReadyEvent with chunks[] metadata + emotion
+```
+
+**Single emotion per response (NANO-111, Session 608):** Per-sentence emotion classification was implemented then reverted — rapid-fire `AvatarMoodEvent`s corrupted THREE.js `crossFadeTo()` chains in the avatar mixer (orphaned action weights, visual stuttering). The fix was architectural: one classify call on the full response text, one `AvatarMoodEvent` per response. `LLMChunkEvent` carries text only (no emotion fields).
+
+**Key classes:**
+- `SentenceSegmenter` (`llm/sentence_segmenter.py`) — stateless regex boundary detector on token stream. Handles abbreviations (Mr., Dr., etc.), ellipsis, `<think>` reasoning tags, numbered lists.
+- `_parallel_tts_delivery()` (`orchestrator/callbacks.py`) — spawns TTS synthesis per sentence with `ThreadPoolExecutor` (max 3 workers). Results are ordered by index regardless of completion order.
+- `_delivered_sentences` (`orchestrator/callbacks.py`) — tracks which sentences have been played back. On barge-in, only delivered sentences are stored in conversation history.
+
+**Text-only mode (TTS disabled, NANO-112):** When TTS is off, `_emit_text_only_chunks()` segments the response into sentences without synthesis. Chunks are delivered via `fallback_chunks` in the `response` event (NOT via `LLMChunkEvent` — those are tied to the streaming playback lifecycle and cause duplicate parent bubbles without it).
+
+### STT/TTS Disable Flow (NANO-112)
+
+STT and TTS are independently toggleable from the launcher GUI. The disable chain spans four layers:
+
+| Layer | What happens when disabled |
+|-------|---------------------------|
+| **Launcher GUI** | Switch toggle in STT/TTS section headers. Card content collapses. `sttEnabled`/`ttsEnabled` in POST body. |
+| **write-config route** | Writes `enabled: true/false` to `launcher.services.stt.enabled` / `launcher.services.tts.enabled` in YAML. (Previously hardcoded `true` — this was the original bug.) |
+| **Pydantic config** | `STTConfig.enabled` / `TTSConfig.enabled` propagated from `launcher.services` in `OrchestratorConfig._from_dict()`. |
+| **Voice agent** | Provider initialization skipped. Audio capture not started (STT). Playback config skipped (TTS). State machine speech callback not wired (STT). `_on_tts_skipped` handles `PROCESSING → LISTENING` transition (TTS). |
+
+**Health check three-way status:** `HealthStatusEvent.stt` and `.tts` are `boolean | "disabled"`. Backend returns `"disabled"` string (not `False`) for intentionally off services — distinguishes "off by choice" from "down by failure." Frontend badges: `"disabled"` → secondary/"OFF", `true` → default/"OK", `false` → destructive/"DOWN".
+
+**Downstream effects when disabled:**
+- STT off: mic toggle disabled on dashboard, MIC badge hidden, Stream Deck toggle disabled (no point without voice input), `launcher-store.selectIsFormComplete` skips STT validation
+- TTS off: character editor TTS fields show "TTS disabled — field ignored" badge, text-only chunk emission via `fallback_chunks`
 
 ### Prompt Composition (Block Model)
 
@@ -195,13 +244,14 @@ Two components: a backend emotion pipeline and a standalone desktop renderer.
 - Socket.IO bridge to orchestrator. Events: state, amplitude (lipsync), TTS status, avatar_mood, avatar_tool_mood.
 - Transparent window mode (alpha stash + force-opaque materials), 7-light rig + bloom + color grading.
 
-**Event flow:**
+**Event flow (NANO-111):**
 ```
-LLM response text → ONNXEmotionClassifier.classify()
-    → AvatarMoodEvent (mood, confidence)
+LLM response completes → ONNXEmotionClassifier.classify(full_response)
+    → AvatarMoodEvent (mood, confidence) — one per response
     → Socket.IO → spindl-avatar renderer
     → expression composites + animation crossfade
 ```
+Classification is one-per-response, not per-sentence. Per-sentence was implemented then reverted (Session 608) — rapid-fire mood events corrupted THREE.js crossfade chains. The single-emotion approach eliminates orphaned action weights in the animation mixer.
 
 ### Subtitle Overlay
 
@@ -241,7 +291,7 @@ Standalone Tauri 2 app (`spindl-stream-deck/`). Dynamic button grid — one hold
 | Route | Purpose |
 |-------|---------|
 | `/` | Dashboard — hero character portrait (audio-reactive glow), transcription, responses, tool calls |
-| `/launcher` | Service configuration wizard (LLM, STT, TTS, VLM, embedding) |
+| `/launcher` | Service configuration wizard (LLM, STT, TTS, VLM, embedding) — STT/TTS sections have enable/disable toggles |
 | `/prompt` | Prompt Workshop — block editor, token breakdown, injection wrappers |
 | `/characters` | Character manager — CRUD, avatar cropping, import/export |
 | `/memories` | Memory curation — general, flashcards, summaries, search |
@@ -258,7 +308,7 @@ Standalone Tauri 2 app (`spindl-stream-deck/`). Dynamic button grid — one hold
 | `agent-store` | Pipeline state, transcription, responses, health, tools, audio/mic level, shutdown |
 | `chat-store` | Chat message history, hydration, metadata (emotion, codex, memories, reasoning) |
 | `connection-store` | Socket.IO connection status |
-| `launcher-store` | Service config, launch progress, model lists, validation |
+| `launcher-store` | Service config, launch progress, model lists, validation, STT/TTS enable toggles |
 | `character-store` | Character CRUD, avatar data, VRM binding, import/export |
 | `codex-store` | Global + per-character lorebook entries |
 | `memory-store` | Memory collections (general/flashcards/summaries), search, CRUD |
@@ -343,6 +393,18 @@ Async events from different threads do NOT have guaranteed ordering across a Soc
 
 **Anti-pattern:** Relying on event A to set state that event B reads. If A and B cross thread boundaries through async scheduling, B may arrive first.
 
+### State Machine Transitions and TTS-Off (NANO-112, Session 609)
+
+`finish_system_speaking()` only transitions from `SYSTEM_SPEAKING`. If TTS is disabled, the state machine is in `PROCESSING` when the LLM response completes — calling `finish_system_speaking()` is a no-op and the agent gets stuck. Use a direct `_transition(AudioState.PROCESSING, AudioState.LISTENING)` via a dedicated `_on_tts_skipped` callback.
+
+**The pattern:** When bypassing a pipeline stage that normally triggers a state transition, wire a dedicated callback for the bypass path instead of reusing the normal-path callback. The normal callback may have preconditions (like "must be in state X") that don't hold in the bypass case.
+
+### Text-Only Chunk Delivery (NANO-112, Session 609)
+
+`LLMChunkEvent`s are tied to the streaming TTS playback lifecycle — `currentAssistantMsgId` in the frontend's `SocketProvider` tracks which parent bubble owns the chunks. Emitting `LLMChunkEvent`s without that lifecycle (e.g., synchronous text-only chunking) creates a second parent bubble.
+
+**The fix:** Route text-only chunks through `fallback_chunks` on the `response` event instead. The frontend renders them as sub-bubbles within the response bubble, not as standalone chunks.
+
 ## Windows-Specific Gotchas
 
 - **Bash paths:** Always use forward slashes (`c:/Users/...`) in shell commands. A trailing `\` before a closing `"` is interpreted as an escaped quote.
@@ -357,7 +419,7 @@ Primary config: `config/spindl.yaml` (copy from `spindl.yaml.example`).
 Key sections:
 - `audio:` — capture_rate (16000), chunk_size (512)
 - `character:` — default character, character directory
-- `services:` — per-service config (enabled, platform, command, health_check, depends_on)
+- `services:` — per-service config (enabled, platform, command, health_check, depends_on). STT and TTS have `enabled` flags that gate provider initialization — these are the flags the launcher GUI toggles write to (NANO-112)
 - `providers:` — LLM, STT, TTS, VLM provider settings
 - `memory:` — enabled, relevance_threshold, top_k, reflection_interval, reflection_prompt, reflection_system_message, reflection_delimiter, scoring_w_relevance, scoring_w_recency
 - `stimuli:` — enabled, patience config (enabled, seconds, prompt), twitch config (enabled, channel, credentials), addressing_others config (contexts list with id/label/prompt)
