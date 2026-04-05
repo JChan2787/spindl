@@ -103,6 +103,8 @@ class OrchestratorCallbacks:
         self._on_response_ready_streaming: Optional[Callable[[np.ndarray], None]] = None
         self._append_playback_audio: Optional[Callable[[np.ndarray], None]] = None
         self._finalize_playback_streaming: Optional[Callable[[], None]] = None
+        # NANO-112: Called when voice path completes without TTS (no playback to trigger state transition)
+        self._on_tts_skipped: Optional[Callable[[], None]] = None
         self._event_bus = event_bus
         self._context_manager = context_manager
 
@@ -338,6 +340,11 @@ class OrchestratorCallbacks:
                         self._total_turns += 1
                         # NANO-112: Segment for sub-bubble rendering via response event
                         _voice_tts_off_chunks = self._emit_text_only_chunks(response)
+                        # NANO-112: No playback → manually transition back to listening.
+                        # Normally _on_playback_complete fires finish_system_speaking(),
+                        # but with no TTS there's no playback to complete.
+                        if self._on_tts_skipped is not None:
+                            self._on_tts_skipped()
 
                     # Emit response event AFTER TTS so llm_chunk events
                     # from _parallel_tts_delivery land first.

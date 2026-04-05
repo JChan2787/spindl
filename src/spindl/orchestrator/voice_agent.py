@@ -490,6 +490,17 @@ class VoiceAgentOrchestrator:
         self._callbacks._append_playback_audio = self._append_playback_audio
         self._callbacks._finalize_playback_streaming = self._finalize_playback_streaming
 
+        # NANO-112: Wire TTS-skipped callback for voice path state transition.
+        # Can't use _on_playback_complete — that calls finish_system_speaking()
+        # which only transitions SYSTEM_SPEAKING→LISTENING. With TTS off, state
+        # is still PROCESSING (never entered SYSTEM_SPEAKING). Need direct transition.
+        def _on_tts_skipped():
+            if self._state_machine:
+                self._state_machine._transition(
+                    AgentState.LISTENING, "tts_skipped"
+                )
+        self._callbacks._on_tts_skipped = _on_tts_skipped
+
         # NANO-111 Phase 2.5: Wire history manager for barge-in truncation
         self._callbacks._history_manager = self._history_manager
 
