@@ -1452,6 +1452,10 @@ class VoiceAgentOrchestrator:
             "model": props.model_name,
             "context_size": props.context_length,
             "available_providers": available,
+            # NANO-114: surface role-history capability for dashboard Workshop
+            "supports_role_history": bool(
+                getattr(props, "supports_role_history", False)
+            ),
         }
         # NANO-089: validate response shape before returning
         try:

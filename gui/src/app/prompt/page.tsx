@@ -5,6 +5,7 @@ import {
   usePromptStore,
   useConnectionStore,
   useBlockEditorStore,
+  useSettingsStore,
 } from "@/lib/stores";
 import {
   PromptViewer,
@@ -12,6 +13,7 @@ import {
   BlockList,
   BlockDetail,
   InjectionWrappersCard,
+  MessageArrayPreview,
 } from "@/components/prompt";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +44,12 @@ export default function PromptCompositionPage() {
   const pendingOverrides = useBlockEditorStore((s) => s.pendingOverrides);
   const pendingDisabled = useBlockEditorStore((s) => s.pendingDisabled);
   const pendingOrder = useBlockEditorStore((s) => s.pendingOrder);
+  // NANO-114: active provider's role-array capability locks the recent_history
+  // block position (history gets spliced into the message array, not the
+  // system prompt, so drag-to-reorder is meaningless for that block).
+  const supportsRoleHistory = useSettingsStore(
+    (s) => s.llmConfig.supports_role_history,
+  );
 
   const {
     selectBlock,
@@ -223,6 +231,16 @@ export default function PromptCompositionPage() {
             onSelectBlock={(id) => selectBlock(id)}
             onToggleBlock={(id) => toggleBlockEnabled(id)}
             onReorder={(order) => setPendingOrder(order)}
+            lockedBlockIds={
+              supportsRoleHistory
+                ? new Set(["recent_history"])
+                : undefined
+            }
+            lockReason={
+              supportsRoleHistory
+                ? "spliced to message array"
+                : undefined
+            }
           />
         </div>
 
@@ -273,6 +291,9 @@ export default function PromptCompositionPage() {
               <TabsList>
                 <TabsTrigger value="breakdown">Token Breakdown</TabsTrigger>
                 <TabsTrigger value="prompt">Raw Prompt</TabsTrigger>
+                {supportsRoleHistory && (
+                  <TabsTrigger value="messages">Message Array</TabsTrigger>
+                )}
               </TabsList>
               <TabsContent value="breakdown">
                 <TokenBreakdown
@@ -287,6 +308,11 @@ export default function PromptCompositionPage() {
                   timestamp={currentSnapshot.timestamp}
                 />
               </TabsContent>
+              {supportsRoleHistory && (
+                <TabsContent value="messages">
+                  <MessageArrayPreview messages={currentSnapshot.messages} />
+                </TabsContent>
+              )}
             </Tabs>
           ) : (
             <Card>

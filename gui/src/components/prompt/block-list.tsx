@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getBlockBorderColor } from "@/lib/constants/block-colors";
 import type { BlockInfo, BlockTokenData } from "@/types/events";
-import { Layers, GripVertical } from "lucide-react";
+import { Layers, GripVertical, Lock } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -43,6 +43,11 @@ interface BlockListProps {
   onToggleBlock: (blockId: string) => void;
   /** Callback when blocks are reordered via drag-and-drop */
   onReorder?: (orderedIds: string[]) => void;
+  /** NANO-114: Block IDs whose position is anchored by the active provider
+   * (history splice-path). Drag is disabled and a lock affordance is shown. */
+  lockedBlockIds?: Set<string>;
+  /** NANO-114: Reason string shown on locked blocks (e.g. "spliced to message array"). */
+  lockReason?: string;
 }
 
 // --- Sortable block row (extracted for useSortable hook) ---
@@ -55,6 +60,8 @@ interface SortableBlockRowProps {
   hasOverride: boolean;
   editMode: boolean;
   isDraggable: boolean;
+  isLocked: boolean;
+  lockReason?: string;
   onSelect: () => void;
   onToggle: () => void;
 }
@@ -67,9 +74,12 @@ function SortableBlockRow({
   hasOverride,
   editMode,
   isDraggable,
+  isLocked,
+  lockReason,
   onSelect,
   onToggle,
 }: SortableBlockRowProps) {
+  const effectiveDraggable = isDraggable && !isLocked;
   const {
     attributes,
     listeners,
@@ -77,7 +87,7 @@ function SortableBlockRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: block.id, disabled: !isDraggable });
+  } = useSortable({ id: block.id, disabled: !effectiveDraggable });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -100,8 +110,8 @@ function SortableBlockRow({
       `}
       onClick={() => editMode && onSelect()}
     >
-      {/* Drag handle (edit mode + draggable only) */}
-      {editMode && isDraggable && (
+      {/* Drag handle (edit mode + draggable + not locked) */}
+      {editMode && isDraggable && !isLocked && (
         <button
           className="shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground touch-none"
           aria-label="Drag to reorder"
@@ -111,6 +121,17 @@ function SortableBlockRow({
         >
           <GripVertical className="h-4 w-4" />
         </button>
+      )}
+
+      {/* NANO-114: Lock indicator for position-anchored blocks */}
+      {editMode && isLocked && (
+        <div
+          className="shrink-0 text-amber-500"
+          aria-label="Position locked — spliced to message array"
+          title={lockReason ?? "Position locked"}
+        >
+          <Lock className="h-4 w-4" />
+        </div>
       )}
 
       {/* Block info */}
@@ -124,6 +145,14 @@ function SortableBlockRow({
               className="h-2 w-2 rounded-full bg-purple-500 shrink-0"
               title="Has override"
             />
+          )}
+          {isLocked && lockReason && (
+            <Badge
+              variant="outline"
+              className="text-[10px] font-normal text-amber-600 border-amber-500/40 shrink-0"
+            >
+              {lockReason}
+            </Badge>
           )}
         </div>
         {block.section_header && (
@@ -170,6 +199,8 @@ export function BlockList({
   onSelectBlock,
   onToggleBlock,
   onReorder,
+  lockedBlockIds,
+  lockReason,
 }: BlockListProps) {
   // Build a lookup for token data by block ID
   const tokenMap = new Map<string, number>();
@@ -204,6 +235,8 @@ export function BlockList({
     const hasOverride =
       block.has_override || pendingOverrides[block.id] !== undefined;
 
+    const isLocked = lockedBlockIds?.has(block.id) ?? false;
+
     return (
       <SortableBlockRow
         key={block.id}
@@ -214,6 +247,8 @@ export function BlockList({
         hasOverride={hasOverride}
         editMode={editMode}
         isDraggable={isDraggable}
+        isLocked={isLocked}
+        lockReason={lockReason}
         onSelect={() => onSelectBlock(block.id)}
         onToggle={() => onToggleBlock(block.id)}
       />

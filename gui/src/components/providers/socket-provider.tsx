@@ -508,6 +508,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
           model: validated.model ?? "",
           context_size: validated.context_size,
           available_providers: validated.available_providers,
+          // NANO-114: role-history capability drives Workshop block lock
+          supports_role_history: validated.supports_role_history ?? false,
         });
       }
       setSavingLLM(false);

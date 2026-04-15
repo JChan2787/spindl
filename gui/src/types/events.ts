@@ -207,6 +207,9 @@ export interface ConfigLoadedEvent {
       model: string;
       context_size: number | null;
       available_providers: string[];
+      // NANO-114: True when active provider's chat template benefits from
+      // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
+      supports_role_history?: boolean;
     };
     // NANO-093/094: Avatar bridge config
     avatar?: {
@@ -378,6 +381,9 @@ export interface LLMConfigUpdatedEvent {
   model: string;
   context_size: number | null;
   available_providers: string[];
+  // NANO-114: True when active provider's chat template benefits from
+  // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
+  supports_role_history?: boolean;
   persisted?: boolean;
   success?: boolean;
   error?: string;

@@ -118,6 +118,9 @@ export interface LLMRuntimeConfig {
   model: string;
   context_size: number | null;
   available_providers: string[];
+  // NANO-114: True when active provider's chat template benefits from
+  // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
+  supports_role_history: boolean;
 }
 
 // VLM provider runtime config (NANO-065c, extended NANO-079)
@@ -405,6 +408,7 @@ const DEFAULT_LLM: LLMRuntimeConfig = {
   model: "",
   context_size: null,
   available_providers: [],
+  supports_role_history: false,
 };
 
 const DEFAULT_VLM: VLMRuntimeConfig = {
@@ -646,6 +650,8 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
           model: config.settings.llm.model,
           context_size: config.settings.llm.context_size,
           available_providers: config.settings.llm.available_providers,
+          supports_role_history:
+            config.settings.llm.supports_role_history ?? false,
         }
       : DEFAULT_LLM,
     // VLM state hydrated via request_vlm_config socket call (NANO-065c)
