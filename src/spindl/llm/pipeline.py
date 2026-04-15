@@ -345,6 +345,9 @@ class LLMPipeline:
         if stimulus_metadata and "twitch_content" in stimulus_metadata:
             context.metadata["twitch_content"] = stimulus_metadata["twitch_content"]
 
+        # NANO-114: Stash provider capability for HistoryInjector splice/flatten branch
+        self._stash_provider_capabilities(context)
+
         # 2. Run pre-processors
         for plugin in self._pre_processors:
             context = plugin.process(context)
@@ -517,6 +520,9 @@ class LLMPipeline:
         if stimulus_metadata and "twitch_content" in stimulus_metadata:
             context.metadata["twitch_content"] = stimulus_metadata["twitch_content"]
 
+        # NANO-114: Stash provider capability for HistoryInjector splice/flatten branch
+        self._stash_provider_capabilities(context)
+
         for plugin in self._pre_processors:
             context = plugin.process(context)
 
@@ -683,6 +689,9 @@ class LLMPipeline:
 
         if build_context.block_contents is not None:
             context.metadata["block_contents"] = build_context.block_contents
+
+        # NANO-114: Stash provider capability for HistoryInjector splice/flatten branch
+        self._stash_provider_capabilities(context)
 
         # 2. Run pre-processors
         for plugin in self._pre_processors:
@@ -970,6 +979,26 @@ class LLMPipeline:
                 entry["chars"] = len(history_text)
                 entry["content"] = history_text
                 entry["deferred"] = False
+
+    def _stash_provider_capabilities(self, context: PipelineContext) -> None:
+        """
+        NANO-114: Read active provider's capability flags into context metadata
+        so preprocessors (HistoryInjector) can branch on them without needing
+        a direct provider reference.
+
+        Currently stashes `supports_role_history` for history splice/flatten
+        decision. Defaults to False if the provider doesn't report it or
+        properties query fails — preserves legacy flattened path.
+        """
+        from .provider_holder import ProviderHolder
+        try:
+            inner = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider
+            props = inner.get_properties()
+            context.metadata["provider_supports_role_history"] = bool(
+                getattr(props, "supports_role_history", False)
+            )
+        except Exception:
+            context.metadata["provider_supports_role_history"] = False
 
     def _extract_codex_display_data(self, context: PipelineContext) -> list[dict]:
         """

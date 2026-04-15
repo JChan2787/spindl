@@ -164,6 +164,7 @@ class LlamaProvider(LLMProvider):
             context_length=self._context_length,
             supports_tools=True,  # llama.cpp supports OpenAI-compatible tool calling
             supports_tool_role=supports_tool_role,
+            supports_role_history=True,  # NANO-114: llama.cpp with --jinja wraps role-array history in real template delimiters
         )
 
     def generate(

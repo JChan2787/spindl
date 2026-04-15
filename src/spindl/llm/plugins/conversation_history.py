@@ -369,14 +369,21 @@ class ConversationHistoryManager:
 
 class HistoryInjector(PreProcessor):
     """
-    PreProcessor that injects conversation history into the system prompt.
+    PreProcessor that injects conversation history into the prompt.
 
-    Formats visible history turns as inline text and substitutes them into
-    the [RECENT_HISTORY] placeholder in the system message. This keeps
-    history inside the system prompt's ### Conversation section, preserving
-    the positional emphasis of "Respond as [PERSONA_NAME]." at the end.
+    Two paths, selected by the active provider's `supports_role_history`
+    capability (stashed on context.metadata by the pipeline):
 
-    Result: messages remain [system, user] — no message splicing.
+    - **Flattened (default, False):** formats visible history turns as inline
+      text and substitutes into the [RECENT_HISTORY] placeholder in the
+      system message. Preserves positional emphasis of
+      "Respond as [PERSONA_NAME]." at the end. Messages stay [system, user].
+
+    - **Spliced (NANO-114, True):** collapses [RECENT_HISTORY] placeholder to
+      empty string and splices real role-tagged messages into context.messages
+      between the system prompt and the current user turn. Required for
+      strict chat-template models (Gemma-3, Gemma-4) whose jinja templates
+      refuse to treat flattened bracket headers as turn boundaries.
     """
 
     PLACEHOLDER = "[RECENT_HISTORY]"
@@ -396,16 +403,15 @@ class HistoryInjector(PreProcessor):
 
     def process(self, context: PipelineContext) -> PipelineContext:
         """
-        Inject conversation history into the system prompt.
-
-        Formats history as inline text and replaces [RECENT_HISTORY]
-        in the system message. If no history, the placeholder collapses.
+        Inject conversation history via flatten or splice path based on
+        provider capability.
 
         Args:
             context: Current pipeline context
 
         Returns:
-            Modified context with history inlined in system prompt
+            Modified context. Flatten path: system message updated.
+            Splice path: context.messages extended with role-array history.
         """
         persona_id = context.persona.get("id", "unknown")
         persona_name = context.persona.get("name", "Assistant")
@@ -414,8 +420,11 @@ class HistoryInjector(PreProcessor):
 
         history_messages = self._manager.get_visible_history()
 
+        use_splice = bool(context.metadata.get("provider_supports_role_history", False))
+
         if self._manager._debug:
-            print(f"[DEBUG:HistoryInjector] ====== HISTORY INJECTION START ======")
+            mode = "SPLICE" if use_splice else "FLATTEN"
+            print(f"[DEBUG:HistoryInjector] ====== HISTORY INJECTION START [{mode}] ======")
             print(f"[DEBUG:HistoryInjector] In-memory _history count: {len(self._manager._history)}")
             print(f"[DEBUG:HistoryInjector] Visible history messages: {len(history_messages)}")
             print(f"[DEBUG:HistoryInjector] Current user input: {context.user_input[:50]}...")
@@ -426,7 +435,8 @@ class HistoryInjector(PreProcessor):
                 print(f"[DEBUG:HistoryInjector]   (no history to inject)")
             print(f"[DEBUG:HistoryInjector] ====== HISTORY INJECTION END ======")
 
-        # Format history as inline text for system prompt injection
+        # Always compute flattened text (used for flatten path AND for token
+        # counting on splice path — Workshop block counts stay honest).
         if history_messages:
             formatted = self._format_history(history_messages, persona_name)
         else:
@@ -435,7 +445,18 @@ class HistoryInjector(PreProcessor):
         # NANO-045b: Stash formatted history text for per-block token counting
         context.metadata["history_formatted"] = formatted
 
-        # Replace placeholder in system message
+        if use_splice:
+            self._splice_role_history(context, history_messages)
+        else:
+            self._inject_flattened(context, formatted)
+
+        return context
+
+    def _inject_flattened(self, context: PipelineContext, formatted: str) -> None:
+        """
+        Legacy path: substitute [RECENT_HISTORY] in the system message with
+        bracket-formatted history text.
+        """
         if context.messages and context.messages[0].get("role") == "system":
             system_content = context.messages[0]["content"]
             if self.PLACEHOLDER in system_content:
@@ -445,7 +466,55 @@ class HistoryInjector(PreProcessor):
                 system_content = re.sub(r"\n{3,}", "\n\n", system_content)
                 context.messages[0]["content"] = system_content
 
-        return context
+    def _splice_role_history(
+        self, context: PipelineContext, history_messages: list[dict]
+    ) -> None:
+        """
+        NANO-114: Collapse [RECENT_HISTORY] placeholder to empty string and
+        splice real role-tagged messages between the system prompt and the
+        current user turn.
+
+        Also strips the orphan "### Conversation" section header when both
+        [CONVERSATION_SUMMARY] and [RECENT_HISTORY] collapsed to empty (no
+        summary in history and no turns to inject).
+        """
+        if not context.messages or context.messages[0].get("role") != "system":
+            return
+
+        import re
+
+        system_content = context.messages[0]["content"]
+
+        # Collapse the history placeholder to empty
+        system_content = system_content.replace(self.PLACEHOLDER, "")
+
+        # Strip orphan "### Conversation" header when its content blocks are
+        # both empty. Matches the header followed by any amount of whitespace
+        # before the next "###" section or end of string.
+        system_content = re.sub(
+            r"\n### Conversation\s*(?=\n###|\Z)",
+            "",
+            system_content,
+        )
+
+        # Collapse 3+ consecutive newlines to 2
+        system_content = re.sub(r"\n{3,}", "\n\n", system_content)
+        context.messages[0]["content"] = system_content
+
+        if not history_messages:
+            return
+
+        # Splice history into context.messages between system (idx 0) and
+        # the current user turn (last message). Summary turns (role=system)
+        # are preserved as intermediate system messages — llama.cpp + jinja
+        # handles multi-system arrays; if a specific model regresses, fall
+        # back to coercing summaries onto the main system prompt.
+        current_user = context.messages[-1]
+        context.messages[:] = (
+            [context.messages[0]]
+            + list(history_messages)
+            + [current_user]
+        )
 
     def _format_history(
         self, messages: list[dict], persona_name: str
