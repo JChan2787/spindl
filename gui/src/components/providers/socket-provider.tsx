@@ -258,25 +258,57 @@ export function SocketProvider({ children }: SocketProviderProps) {
       setResponse(event.text, event.is_final, event.activated_codex_entries, event.reasoning, event.retrieved_memories, event.stimulus_source);
 
       if (!currentAssistantMsgId) {
-        // No streaming occurred (blocking path / text input / stimulus).
-        // Build chunks from response event if available, otherwise plain text.
-        // No llm_chunk events will follow — safe to clear ID after creation.
-        const chunks = event.chunks?.map((c: { text: string; emotion?: string; emotion_confidence?: number }) => ({
-          text: c.text,
-          emotion: c.emotion,
-          emotionConfidence: c.emotion_confidence,
-        }));
-        addAssistantMessage({
-          text: event.text,
-          isFinal: event.is_final,
-          reasoning: event.reasoning,
-          activatedCodexEntries: event.activated_codex_entries,
-          retrievedMemories: event.retrieved_memories,
-          stimulusSource: event.stimulus_source,
-          emotion: event.emotion,
-          emotionConfidence: event.emotion_confidence,
-          chunks,
-        });
+        // ID is null: either (a) no streaming occurred (blocking/text/stimulus
+        // path — no llm_chunk events fired), or (b) streaming completed AND a
+        // barge-in already rewrote the bubble AND cleared the tracked ID.
+        //
+        // Session 639 fix: distinguish (a) from (b) by checking whether the
+        // most-recent assistant message is flagged bargeInTruncated. If so,
+        // this response event belongs to THAT bubble — update in place with
+        // metadata, preserve the truncated text and chunks. DO NOT create a
+        // duplicate bubble with the full pre-barge response.
+        const messages = useChatStore.getState().messages;
+        let recentTruncatedId: string | null = null;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            if (messages[i].bargeInTruncated) {
+              recentTruncatedId = messages[i].id;
+            }
+            break;
+          }
+        }
+
+        if (recentTruncatedId) {
+          // Case (b): barge-in already rewrote this bubble. Keep truncated
+          // text/chunks; only apply metadata from the response.
+          updateAssistantMessage(recentTruncatedId, {
+            isFinal: event.is_final,
+            reasoning: event.reasoning,
+            activatedCodexEntries: event.activated_codex_entries,
+            retrievedMemories: event.retrieved_memories,
+            stimulusSource: event.stimulus_source,
+            emotion: event.emotion,
+            emotionConfidence: event.emotion_confidence,
+          });
+        } else {
+          // Case (a): no streaming occurred. Build fresh bubble from event.
+          const chunks = event.chunks?.map((c: { text: string; emotion?: string; emotion_confidence?: number }) => ({
+            text: c.text,
+            emotion: c.emotion,
+            emotionConfidence: c.emotion_confidence,
+          }));
+          addAssistantMessage({
+            text: event.text,
+            isFinal: event.is_final,
+            reasoning: event.reasoning,
+            activatedCodexEntries: event.activated_codex_entries,
+            retrievedMemories: event.retrieved_memories,
+            stimulusSource: event.stimulus_source,
+            emotion: event.emotion,
+            emotionConfidence: event.emotion_confidence,
+            chunks,
+          });
+        }
         // Don't set currentAssistantMsgId — no llm_chunk events follow this path
       } else {
         // Streaming path: llm_token/llm_chunk already built the bubble.
