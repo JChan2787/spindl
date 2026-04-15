@@ -363,6 +363,10 @@ export function SocketProvider({ children }: SocketProviderProps) {
             // NANO-094: Emotion classifier metadata
             emotion: t.emotion,
             emotionConfidence: t.emotion_confidence,
+            // NANO-111 Phase 2.5 / Session 639: mark truncated turns on reload
+            // so any late `response` event from a re-run cannot restore the
+            // full pre-barge text to the bubble.
+            bargeInTruncated: t.barge_in_truncated,
           }));
         hydrateHistory(hydrated);
       }

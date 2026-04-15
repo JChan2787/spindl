@@ -304,4 +304,63 @@ class TestRequestChatHistory:
         assert "stimulus_source" not in turns[1]
         assert "activated_codex_entries" not in turns[1]
         assert "retrieved_memories" not in turns[1]
+        assert "barge_in_truncated" not in turns[1]
+
+    @pytest.mark.asyncio
+    async def test_barge_in_truncated_turn_shows_truncated_content(self, tmp_path) -> None:
+        """NANO-111 Phase 2.5 / Session 639: when a turn is flagged
+        barge_in_truncated, display text is `content` (what user heard),
+        NOT `display_content` (full pre-barge generation).
+        """
+        session_file = tmp_path / "test_session.jsonl"
+        _write_jsonl(session_file, [
+            {"turn_id": 1, "role": "user", "content": "Tell us something.",
+             "timestamp": "T1", "hidden": False},
+            # Assistant turn that was barge-in-truncated: `content` is the
+            # spoken portion; `display_content` preserves the full generation.
+            {"turn_id": 2, "role": "assistant",
+             "content": "Oh cool! Running tests sounds like a good time.",
+             "display_content": (
+                 "Oh cool! Running tests sounds like a good time. "
+                 "Let me know if there's anything specific you need from me."
+                 "Anything in particular you're testing today?"
+             ),
+             "barge_in_truncated": True,
+             "timestamp": "T2", "hidden": False},
+        ])
+
+        server = _make_server(with_orchestrator=True, session_file=session_file)
+        handler = server._handlers["request_chat_history"]
+        await handler("test-sid", {})
+
+        turns = server.sio.emit.call_args[0][1]["turns"]
+        assert len(turns) == 2
+        # Display text is the truncated content, NOT the full generation
+        assert turns[1]["text"] == "Oh cool! Running tests sounds like a good time."
+        assert "Anything in particular" not in turns[1]["text"]
+        # Flag is propagated to frontend
+        assert turns[1]["barge_in_truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_non_truncated_turn_prefers_display_content(self, tmp_path) -> None:
+        """NANO-109 behavior is unchanged: without barge_in_truncated,
+        display_content is preferred over content (formatting vs. LLM-clean)."""
+        session_file = tmp_path / "test_session.jsonl"
+        _write_jsonl(session_file, [
+            {"turn_id": 1, "role": "user", "content": "hey", "timestamp": "T1", "hidden": False},
+            # Non-truncated turn: display_content has formatting, content is cleaned
+            {"turn_id": 2, "role": "assistant",
+             "content": "Hey there! How are you?",
+             "display_content": "Hey there! 🎉 How are you?",
+             "timestamp": "T2", "hidden": False},
+        ])
+
+        server = _make_server(with_orchestrator=True, session_file=session_file)
+        handler = server._handlers["request_chat_history"]
+        await handler("test-sid", {})
+
+        turns = server.sio.emit.call_args[0][1]["turns"]
+        # Still prefers display_content (NANO-109 unchanged)
+        assert turns[1]["text"] == "Hey there! 🎉 How are you?"
+        assert "barge_in_truncated" not in turns[1]
         assert "input_modality" not in turns[0]

@@ -164,12 +164,23 @@ def register_session_handlers(server: "GUIServer") -> None:
                     # NANO-109: display_content holds raw LLM output (with
                     # formatting); content holds cleaned text for LLM replay.
                     # Chat display should show the raw version when available.
-                    display_text = t.get("display_content") or t.get("content", "")
+                    #
+                    # NANO-111 Phase 2.5 / Session 639: when barge_in_truncated
+                    # is set, display_content is the PRE-barge full generation
+                    # (preserved for inspection) and content is the truncated
+                    # form the user actually heard. Chat bubble must show the
+                    # truncated form to match what was spoken.
+                    if t.get("barge_in_truncated"):
+                        display_text = t.get("content", "")
+                    else:
+                        display_text = t.get("display_content") or t.get("content", "")
                     turn = {
                         "role": role,
                         "text": display_text,
                         "timestamp": t.get("timestamp", ""),
                     }
+                    if t.get("barge_in_truncated"):
+                        turn["barge_in_truncated"] = True
                     # NANO-075: Forward metadata for hydration survival
                     if role == "user":
                         input_mod = t.get("input_modality")

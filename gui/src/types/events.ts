@@ -292,6 +292,10 @@ export interface ChatHistoryTurn {
   // NANO-094: Emotion classifier metadata
   emotion?: string; // assistant turns
   emotion_confidence?: number; // assistant turns
+  // NANO-111 Phase 2.5 / Session 639: set when this assistant turn was
+  // truncated by a barge-in. `text` is already the truncated form on
+  // reload; this flag is purely display-layer metadata.
+  barge_in_truncated?: boolean; // assistant turns
 }
 
 export interface ChatHistoryEvent {
