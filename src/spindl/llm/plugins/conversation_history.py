@@ -1,5 +1,6 @@
 """Conversation history plugin for persistent multi-turn conversations."""
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +14,27 @@ from ...history.jsonl_store import (
     get_next_turn_id,
     save_last_session,
 )
+
+# NANO-114 Phase 3: Structural-token patterns that indicate Gemma-4-style
+# chat-template pollution in assistant output. When these appear in content
+# destined for history replay, the content is collapsed to an inert placeholder
+# to prevent compounding pollution across barge-in cycles.
+_STRUCTURAL_TOKEN_PATTERNS = (
+    re.compile(r"(?m)^\s*#{2,}\s+\w"),       # "### Rules", "## Context", etc.
+    re.compile(r"<\s*(start|end)_of_turn\s*>", re.IGNORECASE),
+    re.compile(r"<\|[^|>]+\|>"),              # <|im_start|>, <|endoftext|>, etc.
+)
+_SANITIZED_PLACEHOLDER = "[interrupted]"
+
+
+def _is_structurally_polluted(content: str) -> bool:
+    """
+    Return True if content contains chat-template structural tokens that
+    would compound if replayed through history (NANO-114 §Smoke Test Findings).
+    """
+    if not content:
+        return False
+    return any(pat.search(content) for pat in _STRUCTURAL_TOKEN_PATTERNS)
 
 
 class ConversationHistoryManager:
@@ -243,20 +265,33 @@ class ConversationHistoryManager:
         Updates both in-memory history and the JSONL file on disk.
         Called when barge-in truncates the response to only delivered sentences.
 
+        NANO-114 Phase 3: If truncated content contains structural tokens
+        (e.g. '### Rules', '<start_of_turn>', '<|im_start|>'), the replay
+        content is collapsed to '[interrupted]' to prevent compounding
+        pollution across barge-in cycles on strict chat-template models.
+        The original polluted generation is preserved on display_content.
+
         Args:
             truncated_content: The text that was actually spoken/delivered.
         """
         if not self._history:
             return
 
+        polluted = _is_structurally_polluted(truncated_content)
+        replay_content = _SANITIZED_PLACEHOLDER if polluted else truncated_content
+
         # Find the last assistant turn in memory
         for i in range(len(self._history) - 1, -1, -1):
             if self._history[i].get("role") == "assistant":
                 original = self._history[i].get("content", "")
-                self._history[i]["content"] = truncated_content
-                # Preserve the full generation as display_content for inspection
+                self._history[i]["content"] = replay_content
+                # Preserve the full generation as display_content for inspection.
+                # If pollution was detected, also preserve the pre-sanitization
+                # truncated form so the UI can show what the model emitted.
                 if "display_content" not in self._history[i]:
                     self._history[i]["display_content"] = original
+                if polluted:
+                    self._history[i]["sanitized_from"] = truncated_content
                 break
         else:
             return  # No assistant turn found
@@ -264,11 +299,14 @@ class ConversationHistoryManager:
         # Amend the JSONL file on disk
         if self._session_file and self._session_file.exists():
             from ...history.jsonl_store import patch_last_turn
-            patch_last_turn(self._session_file, {
-                "content": truncated_content,
+            patch = {
+                "content": replay_content,
                 "display_content": original,
                 "barge_in_truncated": True,
-            })
+            }
+            if polluted:
+                patch["sanitized_from"] = truncated_content
+            patch_last_turn(self._session_file, patch)
 
     @property
     def session_file(self) -> Path | None:
