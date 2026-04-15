@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Flame, Hash, Percent, Repeat, Rewind, TrendingDown, UserMinus } from "lucide-react";
+import { Filter, Flame, Hash, ListFilter, Percent, Repeat, Rewind, TrendingDown, UserMinus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useSettingsStore } from "@/lib/stores";
@@ -154,6 +154,16 @@ export function GenerationSettings() {
     [handleChange]
   );
 
+  const handleTopKChange = useCallback(
+    (value: number) => handleChange({ top_k: value }),
+    [handleChange]
+  );
+
+  const handleMinPChange = useCallback(
+    (value: number) => handleChange({ min_p: value }),
+    [handleChange]
+  );
+
   const handleRepeatPenaltyChange = useCallback(
     (value: number) => handleChange({ repeat_penalty: value }),
     [handleChange]
@@ -227,6 +237,42 @@ export function GenerationSettings() {
         <p className="text-xs text-muted-foreground">
           Temperature controls randomness. Max Tokens limits response length. Top P controls nucleus sampling breadth. Changes apply to the next LLM call.
         </p>
+
+        <div className="border-t border-border pt-4">
+          <p className="text-xs font-medium text-muted-foreground mb-4">Tail Sampling (local-only)</p>
+
+          <div className="space-y-6">
+            <Slider
+              label="Top K"
+              value={config.top_k}
+              min={0}
+              max={200}
+              step={1}
+              icon={<ListFilter className="h-3 w-3" />}
+              formatValue={(v) => v.toString()}
+              parseInput={(v) => parseInt(v, 10)}
+              minLabel="0 (disabled)"
+              maxLabel="200"
+              onChange={handleTopKChange}
+            />
+
+            <Slider
+              label="Min P"
+              value={config.min_p}
+              min={0}
+              max={1}
+              step={0.005}
+              icon={<Filter className="h-3 w-3" />}
+              minLabel="0.0 (off)"
+              maxLabel="1.0"
+              onChange={handleMinPChange}
+            />
+
+            <p className="text-xs text-muted-foreground">
+              Top K caps the candidate pool to the K highest-probability tokens. Min P drops any token below min_p * top_token_prob. Both clip the distribution tail where training-data leaks and EOS drift live. Defaults: top_k=40, min_p=0.05.
+            </p>
+          </div>
+        </div>
 
         <div className="border-t border-border pt-4">
           <p className="text-xs font-medium text-muted-foreground mb-4">Repetition Control</p>

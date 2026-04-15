@@ -46,6 +46,8 @@ export interface GenerationParamsConfig {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  top_k: number;
+  min_p: number;
   repeat_penalty: number;
   repeat_last_n: number;
   frequency_penalty: number;
@@ -350,6 +352,8 @@ const DEFAULT_GENERATION: GenerationParamsConfig = {
   temperature: 0.7,
   max_tokens: 256,
   top_p: 0.95,
+  top_k: 40,
+  min_p: 0.05,
   repeat_penalty: 1.1,
   repeat_last_n: 64,
   frequency_penalty: 0.0,

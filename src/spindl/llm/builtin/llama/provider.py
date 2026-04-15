@@ -54,6 +54,8 @@ class LlamaProvider(LLMProvider):
         self._default_temperature: float = 0.7
         self._default_max_tokens: int = 256
         self._default_top_p: float = 0.95
+        self._default_top_k: int = 40
+        self._default_min_p: float = 0.05
         self._default_repeat_penalty: float = 1.1
         self._default_repeat_last_n: int = 64
         self._default_frequency_penalty: float = 0.0
@@ -83,6 +85,8 @@ class LlamaProvider(LLMProvider):
         self._default_temperature = config.get("temperature", 0.7)
         self._default_max_tokens = config.get("max_tokens", 256)
         self._default_top_p = config.get("top_p", 0.95)
+        self._default_top_k = config.get("top_k", 40)
+        self._default_min_p = config.get("min_p", 0.05)
         self._default_repeat_penalty = config.get("repeat_penalty", 1.1)
         self._default_repeat_last_n = config.get("repeat_last_n", 64)
         self._default_frequency_penalty = config.get("frequency_penalty", 0.0)
@@ -212,6 +216,8 @@ class LlamaProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "top_p": kwargs.get("top_p", self._default_top_p),
+            "top_k": kwargs.get("top_k", self._default_top_k),
+            "min_p": kwargs.get("min_p", self._default_min_p),
             "repeat_penalty": kwargs.get("repeat_penalty", self._default_repeat_penalty),
             "repeat_last_n": kwargs.get("repeat_last_n", self._default_repeat_last_n),
             "frequency_penalty": kwargs.get("frequency_penalty", self._default_frequency_penalty),
@@ -360,6 +366,8 @@ class LlamaProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "top_p": kwargs.get("top_p", self._default_top_p),
+            "top_k": kwargs.get("top_k", self._default_top_k),
+            "min_p": kwargs.get("min_p", self._default_min_p),
             "repeat_penalty": kwargs.get("repeat_penalty", self._default_repeat_penalty),
             "repeat_last_n": kwargs.get("repeat_last_n", self._default_repeat_last_n),
             "frequency_penalty": kwargs.get("frequency_penalty", self._default_frequency_penalty),

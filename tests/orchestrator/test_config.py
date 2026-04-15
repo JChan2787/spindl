@@ -832,6 +832,95 @@ llm:
         assert "frequency_penalty: 0.0" in content
         assert "presence_penalty: 0.0" in content
 
+    # --- NANO-115: Tail sampling params (top_k / min_p) ---
+
+    def test_save_to_yaml_updates_top_k(self, tmp_path: Path) -> None:
+        """save_to_yaml persists top_k under llm provider section."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.llm_config.provider_config["top_k"] = 50
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "top_k: 50" in content
+
+    def test_save_to_yaml_updates_min_p(self, tmp_path: Path) -> None:
+        """save_to_yaml persists min_p under llm provider section."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.llm_config.provider_config["min_p"] = 0.1
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "min_p: 0.1" in content
+
+    def test_save_to_yaml_defaults_for_missing_tail_sampling_params(self, tmp_path: Path) -> None:
+        """save_to_yaml writes defaults when tail sampling params not in provider_config."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.save_to_yaml(str(config_file))
+
+        content = config_file.read_text()
+        assert "top_k: 40" in content
+        assert "min_p: 0.05" in content
+
+    def test_save_to_yaml_roundtrips_all_sampling_params_together(self, tmp_path: Path) -> None:
+        """All sampler params (tail + repetition + penalty) round-trip in a single save."""
+        config_file = tmp_path / "spindl.yaml"
+        config_file.write_text("""
+llm:
+  provider: llama
+  providers:
+    llama:
+      temperature: 0.7
+      max_tokens: 256
+      top_p: 0.95
+""")
+        config = OrchestratorConfig.from_yaml(str(config_file))
+        config.llm_config.provider_config["top_k"] = 60
+        config.llm_config.provider_config["min_p"] = 0.07
+        config.llm_config.provider_config["repeat_penalty"] = 1.15
+        config.llm_config.provider_config["repeat_last_n"] = 96
+        config.llm_config.provider_config["frequency_penalty"] = 0.2
+        config.llm_config.provider_config["presence_penalty"] = -0.1
+        config.save_to_yaml(str(config_file))
+
+        # Reload and confirm all values survive the round trip
+        reloaded = OrchestratorConfig.from_yaml(str(config_file))
+        assert reloaded.llm_config.provider_config["top_k"] == 60
+        assert reloaded.llm_config.provider_config["min_p"] == 0.07
+        assert reloaded.llm_config.provider_config["repeat_penalty"] == 1.15
+        assert reloaded.llm_config.provider_config["repeat_last_n"] == 96
+        assert reloaded.llm_config.provider_config["frequency_penalty"] == 0.2
+        assert reloaded.llm_config.provider_config["presence_penalty"] == -0.1
+
 
 class TestSaveToYamlStimuliPrompt:
     """Tests for save_to_yaml patience prompt persistence."""

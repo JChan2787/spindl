@@ -1062,6 +1062,8 @@ class GUIServer:
                     "temperature": config.llm_config.provider_config.get("temperature", 0.7),
                     "max_tokens": config.llm_config.provider_config.get("max_tokens", 256),
                     "top_p": config.llm_config.provider_config.get("top_p", 0.95),
+                    "top_k": config.llm_config.provider_config.get("top_k", 40),
+                    "min_p": config.llm_config.provider_config.get("min_p", 0.05),
                     "repeat_penalty": config.llm_config.provider_config.get("repeat_penalty", 1.1),
                     "repeat_last_n": config.llm_config.provider_config.get("repeat_last_n", 64),
                     "frequency_penalty": config.llm_config.provider_config.get("frequency_penalty", 0.0),

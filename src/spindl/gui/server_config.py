@@ -501,6 +501,8 @@ def register_config_handlers(server: "GUIServer") -> None:
             temperature = ...
             max_tokens = ...
             top_p = ...
+            top_k = ...
+            min_p = ...
             repeat_penalty = ...
             repeat_last_n = ...
             frequency_penalty = ...
@@ -521,6 +523,17 @@ def register_config_handlers(server: "GUIServer") -> None:
                 val = float(data["top_p"])
                 if 0.0 <= val <= 1.0:
                     top_p = val
+                    updated = True
+            if "top_k" in data:
+                val = int(data["top_k"])
+                # top_k=0 disables the k-cap (llama.cpp semantics).
+                if 0 <= val <= 1000:
+                    top_k = val
+                    updated = True
+            if "min_p" in data:
+                val = float(data["min_p"])
+                if 0.0 <= val <= 1.0:
+                    min_p = val
                     updated = True
             if "repeat_penalty" in data:
                 val = float(data["repeat_penalty"])
@@ -548,6 +561,8 @@ def register_config_handlers(server: "GUIServer") -> None:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
                     repeat_penalty=repeat_penalty,
                     repeat_last_n=repeat_last_n,
                     frequency_penalty=frequency_penalty,
@@ -560,6 +575,8 @@ def register_config_handlers(server: "GUIServer") -> None:
                     f"temp={pc.get('temperature', 0.7)}, "
                     f"max_tokens={pc.get('max_tokens', 256)}, "
                     f"top_p={pc.get('top_p', 0.95)}, "
+                    f"top_k={pc.get('top_k', 40)}, "
+                    f"min_p={pc.get('min_p', 0.05)}, "
                     f"repeat_penalty={pc.get('repeat_penalty', 1.1)}, "
                     f"repeat_last_n={pc.get('repeat_last_n', 64)}, "
                     f"freq_penalty={pc.get('frequency_penalty', 0.0)}, "
@@ -583,6 +600,8 @@ def register_config_handlers(server: "GUIServer") -> None:
                         "temperature": pc.get("temperature", 0.7),
                         "max_tokens": pc.get("max_tokens", 256),
                         "top_p": pc.get("top_p", 0.95),
+                        "top_k": pc.get("top_k", 40),
+                        "min_p": pc.get("min_p", 0.05),
                         "repeat_penalty": pc.get("repeat_penalty", 1.1),
                         "repeat_last_n": pc.get("repeat_last_n", 64),
                         "frequency_penalty": pc.get("frequency_penalty", 0.0),

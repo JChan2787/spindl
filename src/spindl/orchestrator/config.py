@@ -1044,6 +1044,8 @@ class OrchestratorConfig(BaseModel):
             prov["temperature"] = self.llm_config.provider_config.get("temperature", 0.7)
             prov["max_tokens"] = self.llm_config.provider_config.get("max_tokens", 256)
             prov["top_p"] = self.llm_config.provider_config.get("top_p", 0.95)
+            prov["top_k"] = self.llm_config.provider_config.get("top_k", 40)
+            prov["min_p"] = self.llm_config.provider_config.get("min_p", 0.05)
             prov["repeat_penalty"] = self.llm_config.provider_config.get("repeat_penalty", 1.1)
             prov["repeat_last_n"] = self.llm_config.provider_config.get("repeat_last_n", 64)
             prov["frequency_penalty"] = self.llm_config.provider_config.get("frequency_penalty", 0.0)

@@ -184,6 +184,8 @@ export interface ConfigLoadedEvent {
       temperature: number;
       max_tokens: number;
       top_p: number;
+      top_k: number;
+      min_p: number;
       repeat_penalty: number;
       repeat_last_n: number;
       frequency_penalty: number;
@@ -345,6 +347,8 @@ export interface GenerationParamsUpdatedEvent {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  top_k: number;
+  min_p: number;
   repeat_penalty: number;
   repeat_last_n: number;
   frequency_penalty: number;
@@ -356,6 +360,12 @@ export interface SetGenerationParamsPayload {
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
+  top_k?: number;
+  min_p?: number;
+  repeat_penalty?: number;
+  repeat_last_n?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
 }
 
 // NANO-065a: Runtime tools toggle

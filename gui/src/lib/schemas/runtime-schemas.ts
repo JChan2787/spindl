@@ -64,6 +64,8 @@ export const LocalLLMConfigEventSchema = z.object({
     temperature: z.number().optional(),
     max_tokens: z.number().optional(),
     top_p: z.number().optional(),
+    top_k: z.number().optional(),
+    min_p: z.number().optional(),
     repeat_penalty: z.number().optional(),
     repeat_last_n: z.number().optional(),
     frequency_penalty: z.number().optional(),

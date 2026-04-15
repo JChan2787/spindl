@@ -1289,6 +1289,8 @@ class VoiceAgentOrchestrator:
         temperature: Optional[float] = ...,
         max_tokens: Optional[int] = ...,
         top_p: Optional[float] = ...,
+        top_k: Optional[int] = ...,
+        min_p: Optional[float] = ...,
         repeat_penalty: Optional[float] = ...,
         repeat_last_n: Optional[int] = ...,
         frequency_penalty: Optional[float] = ...,
@@ -1305,6 +1307,8 @@ class VoiceAgentOrchestrator:
             temperature: New temperature. Ellipsis (...) = keep current.
             max_tokens: New max tokens. Ellipsis (...) = keep current.
             top_p: New top_p. Ellipsis (...) = keep current.
+            top_k: New top_k. Ellipsis (...) = keep current.
+            min_p: New min_p. Ellipsis (...) = keep current.
             repeat_penalty: New repeat_penalty. Ellipsis (...) = keep current.
             repeat_last_n: New repeat_last_n. Ellipsis (...) = keep current.
             frequency_penalty: New frequency_penalty. Ellipsis (...) = keep current.
@@ -1322,6 +1326,12 @@ class VoiceAgentOrchestrator:
         if top_p is not ...:
             self._runtime_generation_overrides["top_p"] = top_p
             self._config.llm_config.provider_config["top_p"] = top_p
+        if top_k is not ...:
+            self._runtime_generation_overrides["top_k"] = top_k
+            self._config.llm_config.provider_config["top_k"] = top_k
+        if min_p is not ...:
+            self._runtime_generation_overrides["min_p"] = min_p
+            self._config.llm_config.provider_config["min_p"] = min_p
         if repeat_penalty is not ...:
             self._runtime_generation_overrides["repeat_penalty"] = repeat_penalty
             self._config.llm_config.provider_config["repeat_penalty"] = repeat_penalty
