@@ -282,8 +282,17 @@ export function SocketProvider({ children }: SocketProviderProps) {
         // Streaming path: llm_token/llm_chunk already built the bubble.
         // Finalize with metadata — do NOT overwrite chunks or clear ID.
         // The last llm_chunk (is_final=true) clears currentAssistantMsgId.
+        //
+        // Session 639 fix: if barge_in_truncated already rewrote this bubble's
+        // text, preserve the truncated text. response can still update metadata
+        // (reasoning / codex entries / memories) but must not restore the full
+        // pre-barge-in response to the display.
+        const existing = useChatStore.getState().messages.find(
+          (m) => m.id === currentAssistantMsgId
+        );
+        const isTruncated = existing?.bargeInTruncated === true;
         updateAssistantMessage(currentAssistantMsgId, {
-          text: event.text,
+          ...(isTruncated ? {} : { text: event.text }),
           isFinal: event.is_final,
           reasoning: event.reasoning,
           activatedCodexEntries: event.activated_codex_entries,
@@ -300,21 +309,38 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     // NANO-111 Phase 2.5: Barge-in truncated response.
     // Updates the last assistant bubble to show only what was actually spoken.
+    //
+    // Session 639 fix: barge-in races with the last llm_chunk(is_final=true)
+    // which clears currentAssistantMsgId. If barge-in arrives AFTER the final
+    // chunk clears the ID (common when interrupting during the last sentence),
+    // we must still target the most-recent assistant message by scanning the
+    // store — otherwise the bubble keeps rendering the full pre-barge text.
     socket.on("barge_in_truncated", (event: { truncated_text: string; delivered_sentences: number }) => {
-      if (currentAssistantMsgId) {
-        const msg = useChatStore.getState().messages.find((m) => m.id === currentAssistantMsgId);
+      const messages = useChatStore.getState().messages;
+      let targetId: string | null = currentAssistantMsgId;
+      if (!targetId) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            targetId = messages[i].id;
+            break;
+          }
+        }
+      }
+      if (targetId) {
+        const msg = messages.find((m) => m.id === targetId);
         if (msg) {
           // Truncate chunks to only delivered sentences
           const truncatedChunks = msg.chunks?.slice(0, event.delivered_sentences);
-          updateAssistantMessage(currentAssistantMsgId, {
+          updateAssistantMessage(targetId, {
             text: event.truncated_text,
             chunks: truncatedChunks,
+            bargeInTruncated: true,
           });
         }
-        // Barge-in kills playback — remaining llm_chunk events won't fire,
-        // so clear the tracked ID here.
-        currentAssistantMsgId = null;
       }
+      // Barge-in kills playback — remaining llm_chunk events won't fire,
+      // so clear the tracked ID here unconditionally.
+      currentAssistantMsgId = null;
     });
 
     // NANO-073a + NANO-075: Chat history hydration with metadata survival

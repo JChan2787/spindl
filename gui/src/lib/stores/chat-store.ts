@@ -23,6 +23,10 @@ export interface ChatMessage {
   emotionConfidence?: number;
   // Per-sentence sub-bubbles (NANO-111 Session 606) — streaming responses only
   chunks?: SentenceChunk[];
+  // NANO-111 Phase 2.5 / Session 639: set when barge_in_truncated has rewritten
+  // this bubble's text. Guards against a late-arriving `response` event
+  // overwriting the truncated display with the full pre-barge-in generation.
+  bargeInTruncated?: boolean;
 }
 
 interface ChatStoreState {
@@ -79,6 +83,7 @@ export const useChatStore = create<ChatStoreState>((set) => ({
           emotion: msg.emotion,
           emotionConfidence: msg.emotionConfidence,
           chunks: msg.chunks,
+          bargeInTruncated: msg.bargeInTruncated,
         },
       ],
     }));
