@@ -48,7 +48,8 @@ async def emit_sessions(
 
     if conversations_dir.exists():
         for filepath in sorted(
-            (p for p in conversations_dir.glob("*.jsonl") if ".snapshot." not in p.name),
+            (p for p in conversations_dir.glob("*.jsonl")
+             if ".snapshot." not in p.name and ".twitch." not in p.name),
             key=lambda p: p.stat().st_mtime, reverse=True,
         ):
             # Parse filename: {persona}_{timestamp}.jsonl

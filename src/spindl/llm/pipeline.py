@@ -909,6 +909,8 @@ class LLMPipeline:
 
         if context.messages and context.messages[0].get("role") == "system":
             system_prompt = context.messages[0]["content"]
+            has_placeholder = "[RAG_CONTEXT]" in system_prompt
+            print(f"[NANO-115 DEBUG] _inject_rag_content: content_len={len(rag_content)}, placeholder_present={has_placeholder}", flush=True)
 
             # Replace placeholder with content (or empty string)
             system_prompt = system_prompt.replace("[RAG_CONTEXT]", rag_content)
