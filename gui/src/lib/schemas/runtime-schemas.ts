@@ -189,6 +189,8 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_buffer_size: z.number().int().min(1).max(50),
   twitch_max_message_length: z.number().int().min(50).max(1000),
   twitch_prompt_template: z.string(),
+  twitch_audience_window: z.number().int().min(25).max(300).default(25),
+  twitch_audience_char_cap: z.number().int().min(50).max(500).default(150),
   twitch_has_credentials: z.boolean(),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),

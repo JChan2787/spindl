@@ -274,7 +274,12 @@ class VoiceAgentOrchestrator:
             conversations_dir=self._config.conversations_dir,
             debug=self._config.debug,
         )
-        twitch_history_injector = TwitchHistoryInjector(self._twitch_transcript)
+        twitch_history_injector = TwitchHistoryInjector(
+            self._twitch_transcript,
+            audience_window=self._config.stimuli_config.twitch_audience_window,
+            audience_char_cap=self._config.stimuli_config.twitch_audience_char_cap,
+        )
+        self._twitch_history_injector = twitch_history_injector
 
         # Codex: Create activator and cooldown plugins (NANO-037)
         # Must be registered BEFORE budget_enforcer so codex tokens are counted
@@ -1865,6 +1870,8 @@ class VoiceAgentOrchestrator:
         twitch_buffer_size: Optional[int] = None,
         twitch_max_message_length: Optional[int] = None,
         twitch_prompt_template: Optional[str] = None,
+        twitch_audience_window: Optional[int] = None,
+        twitch_audience_char_cap: Optional[int] = None,
         addressing_others_contexts: Optional[list] = None,
     ) -> None:
         """
@@ -1959,6 +1966,14 @@ class VoiceAgentOrchestrator:
                 cfg.twitch_max_message_length = twitch_max_message_length
             if twitch_prompt_template is not None:
                 cfg.twitch_prompt_template = twitch_prompt_template
+            if twitch_audience_window is not None:
+                cfg.twitch_audience_window = twitch_audience_window
+                if hasattr(self, "_twitch_history_injector"):
+                    self._twitch_history_injector.audience_window = twitch_audience_window
+            if twitch_audience_char_cap is not None:
+                cfg.twitch_audience_char_cap = twitch_audience_char_cap
+                if hasattr(self, "_twitch_history_injector"):
+                    self._twitch_history_injector.audience_char_cap = twitch_audience_char_cap
 
         # Addressing-others contexts (NANO-110) — config-only, no live module
         if addressing_others_contexts is not None:

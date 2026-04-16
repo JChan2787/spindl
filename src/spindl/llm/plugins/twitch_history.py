@@ -260,9 +260,13 @@ class TwitchHistoryInjector(PreProcessor):
         self,
         transcript_manager: TwitchTranscriptManager,
         persona_name: str = "Assistant",
+        audience_window: int = 25,
+        audience_char_cap: int = 150,
     ):
         self._manager = transcript_manager
         self._persona_name = persona_name
+        self.audience_window = audience_window
+        self.audience_char_cap = audience_char_cap
 
     @property
     def name(self) -> str:
@@ -270,8 +274,8 @@ class TwitchHistoryInjector(PreProcessor):
 
     def process(self, context: PipelineContext) -> PipelineContext:
         persona_name = context.persona.get("name", self._persona_name)
-        audience_window = int(context.metadata.get("twitch_audience_window", 25))
-        char_cap = int(context.metadata.get("twitch_audience_char_cap", 150))
+        audience_window = self.audience_window
+        char_cap = self.audience_char_cap
 
         window = self._manager.get_injection_window(
             max_messages=audience_window,

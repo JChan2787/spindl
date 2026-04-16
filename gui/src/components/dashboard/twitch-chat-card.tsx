@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Tv, Wifi, WifiOff, Layers, MessageSquare } from "lucide-react";
+import { Tv, Wifi, WifiOff, Layers, MessageSquare, History, Scissors } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -126,6 +126,22 @@ export function TwitchChatCard() {
     [updatePendingStimuli, emitChanges]
   );
 
+  const handleAudienceWindowChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ twitch_audience_window: value });
+      emitChanges({ twitch_audience_window: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleAudienceCharCapChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ twitch_audience_char_cap: value });
+      emitChanges({ twitch_audience_char_cap: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
   // Poll Twitch status every 2 seconds when enabled
   useEffect(() => {
     if (!effectiveConfig.twitch_enabled) {
@@ -205,6 +221,28 @@ export function TwitchChatCard() {
               step={1}
               icon={<Layers className="h-3 w-3" />}
               onChange={handleBufferSizeChange}
+            />
+
+            <Slider
+              label="Audience Window"
+              value={effectiveConfig.twitch_audience_window}
+              min={25}
+              max={300}
+              step={5}
+              icon={<History className="h-3 w-3" />}
+              onChange={handleAudienceWindowChange}
+              unit=" msgs"
+            />
+
+            <Slider
+              label="Message Length Cap"
+              value={effectiveConfig.twitch_audience_char_cap}
+              min={50}
+              max={500}
+              step={10}
+              icon={<Scissors className="h-3 w-3" />}
+              onChange={handleAudienceCharCapChange}
+              unit=" chars"
             />
 
             <div className="space-y-1">

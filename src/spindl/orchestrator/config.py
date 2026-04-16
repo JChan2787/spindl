@@ -482,6 +482,10 @@ class StimuliConfig(BaseModel):
         "Pick the most interesting message and respond to it naturally."
     )
 
+    # NANO-115: Audience transcript injection controls
+    twitch_audience_window: int = Field(default=25, ge=25, le=300)
+    twitch_audience_char_cap: int = Field(default=150, ge=50, le=500)
+
     # Addressing-others contexts (NANO-110)
     addressing_others_contexts: list[AddressingContext] = Field(
         default_factory=_default_addressing_contexts,
@@ -526,6 +530,12 @@ class StimuliConfig(BaseModel):
             ),
             twitch_prompt_template=twitch.get(
                 "prompt_template", defaults.twitch_prompt_template
+            ),
+            twitch_audience_window=twitch.get(
+                "audience_window", defaults.twitch_audience_window
+            ),
+            twitch_audience_char_cap=twitch.get(
+                "audience_char_cap", defaults.twitch_audience_char_cap
             ),
             addressing_others_contexts=contexts,
         )
@@ -1090,6 +1100,8 @@ class OrchestratorConfig(BaseModel):
         tw["buffer_size"] = self.stimuli_config.twitch_buffer_size
         tw["max_message_length"] = self.stimuli_config.twitch_max_message_length
         tw["prompt_template"] = self.stimuli_config.twitch_prompt_template
+        tw["audience_window"] = self.stimuli_config.twitch_audience_window
+        tw["audience_char_cap"] = self.stimuli_config.twitch_audience_char_cap
 
         # Addressing-others contexts (NANO-110, nested under stimuli)
         if "addressing_others" not in stim:

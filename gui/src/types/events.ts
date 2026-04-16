@@ -597,6 +597,8 @@ export interface SetStimuliConfigPayload {
   twitch_buffer_size?: number;
   twitch_max_message_length?: number;
   twitch_prompt_template?: string;
+  twitch_audience_window?: number;
+  twitch_audience_char_cap?: number;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts?: AddressingContext[];
 }

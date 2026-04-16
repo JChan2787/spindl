@@ -86,6 +86,8 @@ export interface StimuliConfig {
   twitch_buffer_size: number;
   twitch_max_message_length: number;
   twitch_prompt_template: string;
+  twitch_audience_window: number;
+  twitch_audience_char_cap: number;
   // Resolved by backend — true when credentials available (config or env vars)
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
@@ -391,6 +393,8 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_buffer_size: 10,
   twitch_max_message_length: 300,
   twitch_prompt_template: "Recent Twitch chat messages:\n{messages}\nPick the most interesting message and respond to it naturally.",
+  twitch_audience_window: 25,
+  twitch_audience_char_cap: 150,
   twitch_has_credentials: false,
   addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
 };
