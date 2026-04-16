@@ -1,11 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useEffect } from "react";
-import { Cpu, Volume2, Mic, Eye, Database, GitBranch } from "lucide-react";
+import { Cpu, Volume2, Mic, Eye, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { useSettingsStore, useAgentStore } from "@/lib/stores";
-import { getSocket } from "@/lib/socket";
 
 interface ProviderCardProps {
   title: string;
@@ -70,27 +68,8 @@ function maskSensitiveValue(key: string, value: string): string {
 }
 
 export function ProviderDisplay() {
-  const { providers, generationConfig, setGenerationConfig } = useSettingsStore();
+  const { providers } = useSettingsStore();
   const health = useAgentStore((s) => s.health);
-  const socket = getSocket();
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  const handleHistoryModeChange = useCallback(
-    (mode: "auto" | "splice" | "flatten") => {
-      setGenerationConfig({ ...generationConfig, force_role_history: mode });
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        socket.emit("set_generation_params", { force_role_history: mode });
-      }, 300);
-    },
-    [generationConfig, socket, setGenerationConfig]
-  );
 
   return (
     <CollapsibleCard
@@ -106,28 +85,6 @@ export function ProviderDisplay() {
         isConfigured={!!providers.llm}
         isHealthy={health?.llm ?? null}
       />
-
-      <div className="px-3 pb-3 -mt-1">
-        <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-          <GitBranch className="h-3 w-3" />
-          History Mode
-        </p>
-        <div className="flex gap-1 rounded-md bg-muted p-1">
-          {(["auto", "splice", "flatten"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => handleHistoryModeChange(mode)}
-              className={`flex-1 text-xs py-1 px-2 rounded transition-colors ${
-                generationConfig.force_role_history === mode
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {mode === "auto" ? "Auto" : mode === "splice" ? "Splice" : "Flatten"}
-            </button>
-          ))}
-        </div>
-      </div>
 
       <ProviderCard
         title="TTS"
