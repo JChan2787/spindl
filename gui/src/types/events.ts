@@ -357,6 +357,7 @@ export interface GenerationParamsUpdatedEvent {
   repeat_last_n: number;
   frequency_penalty: number;
   presence_penalty: number;
+  force_role_history: "auto" | "splice" | "flatten";
   persisted: boolean;
 }
 
@@ -370,6 +371,7 @@ export interface SetGenerationParamsPayload {
   repeat_last_n?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  force_role_history?: "auto" | "splice" | "flatten";
 }
 
 // NANO-065a: Runtime tools toggle

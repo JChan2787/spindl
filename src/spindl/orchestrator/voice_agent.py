@@ -388,6 +388,9 @@ class VoiceAgentOrchestrator:
         prompt_provider_registry = create_prompt_provider_registry()
         self._pipeline = LLMPipeline(self._llm_provider, PromptBuilder(prompt_provider_registry))
 
+        # NANO-115: Apply history splice/flatten override from config
+        self._pipeline._force_role_history = self._config.force_role_history
+
         # NANO-045a: Block-based prompt assembly (default on).
         # Explicit `prompt_blocks: false` in config disables it (legacy template mode).
         if self._config.prompt_blocks is False:
@@ -1485,6 +1488,8 @@ class VoiceAgentOrchestrator:
             "supports_role_history": bool(
                 getattr(props, "supports_role_history", False)
             ),
+            # NANO-115: user override for splice/flatten path
+            "force_role_history": self._config.force_role_history,
         }
         # NANO-089: validate response shape before returning
         try:

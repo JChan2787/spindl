@@ -177,6 +177,7 @@ class LLMPipeline:
         self._pre_processors: list[PreProcessor] = pre_processors or []
         self._post_processors: list[PostProcessor] = post_processors or []
         self._tool_executor: Optional["ToolExecutor"] = tool_executor
+        self._force_role_history: str = "auto"
         self._block_config: Optional[list[PromptBlock]] = None
         # NANO-111: Deferred post-processor result from run_stream()
         self._last_stream_result: Optional[PipelineResult] = None
@@ -1016,10 +1017,16 @@ class LLMPipeline:
         so preprocessors (HistoryInjector) can branch on them without needing
         a direct provider reference.
 
-        Currently stashes `supports_role_history` for history splice/flatten
-        decision. Defaults to False if the provider doesn't report it or
-        properties query fails — preserves legacy flattened path.
+        NANO-115: Respects force_role_history override — "splice" forces True,
+        "flatten" forces False, "auto" defers to provider capability.
         """
+        if self._force_role_history == "splice":
+            context.metadata["provider_supports_role_history"] = True
+            return
+        if self._force_role_history == "flatten":
+            context.metadata["provider_supports_role_history"] = False
+            return
+
         from .provider_holder import ProviderHolder
         try:
             inner = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider

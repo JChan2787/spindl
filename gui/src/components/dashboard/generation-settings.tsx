@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Filter, Flame, Hash, ListFilter, Percent, Repeat, Rewind, TrendingDown, UserMinus } from "lucide-react";
+import { Filter, Flame, GitBranch, Hash, ListFilter, Percent, Repeat, Rewind, TrendingDown, UserMinus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useSettingsStore } from "@/lib/stores";
@@ -332,6 +332,31 @@ export function GenerationSettings() {
               Repeat Penalty and Repeat Last N are local-only (llama.cpp). Frequency and Presence Penalty apply to all providers.
             </p>
           </div>
+        </div>
+
+        <div className="border-t border-border pt-4">
+          <p className="text-xs font-medium text-muted-foreground mb-3 flex items-center gap-2">
+            <GitBranch className="h-3 w-3" />
+            History Mode
+          </p>
+          <div className="flex gap-1 rounded-md bg-muted p-1">
+            {(["auto", "splice", "flatten"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => handleChange({ force_role_history: mode })}
+                className={`flex-1 text-xs py-1.5 px-2 rounded transition-colors ${
+                  config.force_role_history === mode
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {mode === "auto" ? "Auto" : mode === "splice" ? "Splice" : "Flatten"}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            Auto defers to provider capability. Splice sends real role-array turns (required for Gemma). Flatten embeds history as text in the system prompt.
+          </p>
         </div>
       </CardContent>
     </Card>

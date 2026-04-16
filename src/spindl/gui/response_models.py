@@ -23,6 +23,8 @@ class LLMConfigResponse(BaseModel):
     # lock the Workshop's recent_history block position and render the Message
     # Array Preview panel.
     supports_role_history: bool = False
+    # NANO-115: User override for splice/flatten path
+    force_role_history: str = "auto"
 
 
 class CloudVLMConfig(BaseModel):

@@ -1068,6 +1068,7 @@ class GUIServer:
                     "repeat_last_n": config.llm_config.provider_config.get("repeat_last_n", 64),
                     "frequency_penalty": config.llm_config.provider_config.get("frequency_penalty", 0.0),
                     "presence_penalty": config.llm_config.provider_config.get("presence_penalty", 0.0),
+                    "force_role_history": config.force_role_history,
                 },
                 "stimuli": build_stimuli_hydration(config.stimuli_config),
                 # NANO-065a: Tools runtime state

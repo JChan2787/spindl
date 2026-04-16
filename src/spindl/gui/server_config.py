@@ -556,6 +556,14 @@ def register_config_handlers(server: "GUIServer") -> None:
                     presence_penalty = val
                     updated = True
 
+            # NANO-115: Handle force_role_history override (separate from gen params)
+            if "force_role_history" in data:
+                val = data["force_role_history"]
+                if val in ("auto", "splice", "flatten"):
+                    server._orchestrator._config.force_role_history = val
+                    server._orchestrator._pipeline._force_role_history = val
+                    updated = True
+
             if updated:
                 server._orchestrator.update_generation_params(
                     temperature=temperature,
@@ -606,6 +614,7 @@ def register_config_handlers(server: "GUIServer") -> None:
                         "repeat_last_n": pc.get("repeat_last_n", 64),
                         "frequency_penalty": pc.get("frequency_penalty", 0.0),
                         "presence_penalty": pc.get("presence_penalty", 0.0),
+                        "force_role_history": server._orchestrator._config.force_role_history,
                         "persisted": persisted,
                     },
                     to=sid,

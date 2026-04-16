@@ -22,6 +22,7 @@ export const LLMConfigUpdatedSchema = z.object({
   // NANO-114: True when active provider's chat template benefits from
   // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
   supports_role_history: z.boolean().optional().default(false),
+  force_role_history: z.enum(["auto", "splice", "flatten"]).optional().default("auto"),
   persisted: z.boolean().optional(),
   success: z.boolean().optional(),
   error: z.string().optional(),

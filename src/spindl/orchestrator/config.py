@@ -719,6 +719,11 @@ class OrchestratorConfig(BaseModel):
     budget_strategy: Literal["truncate", "drop", "reject"] = "truncate"
     response_reserve: int = Field(default=300, ge=0)
 
+    # NANO-115: History splice/flatten override
+    # "auto" defers to provider capability, "splice" forces role-array,
+    # "flatten" forces bracket-formatted text in system prompt.
+    force_role_history: Literal["auto", "splice", "flatten"] = "auto"
+
     # Character settings (NANO-034: ST V2 Character Cards)
     character_id: str = "spindle"
     characters_dir: str = "./characters"
@@ -802,6 +807,10 @@ class OrchestratorConfig(BaseModel):
         # LLM settings (NANO-018/019: provider-based, clean break)
         if "llm" in data:
             config.llm_config = LLMConfig.from_dict(data["llm"])
+            # NANO-115: History splice/flatten override
+            config.force_role_history = data["llm"].get(
+                "force_role_history", config.force_role_history
+            )
 
         # VLM settings (NANO-023/024: backend for vision tools)
         if "vlm" in data:
@@ -1050,6 +1059,9 @@ class OrchestratorConfig(BaseModel):
             prov["repeat_last_n"] = self.llm_config.provider_config.get("repeat_last_n", 64)
             prov["frequency_penalty"] = self.llm_config.provider_config.get("frequency_penalty", 0.0)
             prov["presence_penalty"] = self.llm_config.provider_config.get("presence_penalty", 0.0)
+
+        # NANO-115: History splice/flatten override
+        data["llm"]["force_role_history"] = self.force_role_history
 
         # --- VLM ---
         if "vlm" not in data:
