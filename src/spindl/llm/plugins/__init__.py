@@ -32,6 +32,10 @@ from .codex_cooldown import (
     create_codex_cooldown,
     create_codex_plugins,
 )
+from .twitch_history import (
+    TwitchTranscriptManager,
+    TwitchHistoryInjector,
+)
 
 __all__ = [
     # Base
@@ -60,4 +64,7 @@ __all__ = [
     "CodexCooldownPlugin",
     "create_codex_cooldown",
     "create_codex_plugins",
+    # Twitch Audience Transcript (NANO-115)
+    "TwitchTranscriptManager",
+    "TwitchHistoryInjector",
 ]

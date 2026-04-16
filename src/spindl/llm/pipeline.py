@@ -366,7 +366,10 @@ class LLMPipeline:
         # Twitch content arrives via stimulus_metadata, populated above.
         self._inject_twitch_content(context)
 
-        # 2e. Patch deferred block char counts now that injections are done (NANO-045b)
+        # 2e. Inject persistent audience chat transcript (NANO-115)
+        self._inject_audience_chat(context)
+
+        # 2f. Patch deferred block char counts now that injections are done (NANO-045b)
         self._update_deferred_block_contents(context)
 
         # 3. Resolve generation parameters
@@ -529,6 +532,7 @@ class LLMPipeline:
         self._inject_codex_content(context)
         self._inject_rag_content(context)
         self._inject_twitch_content(context)
+        self._inject_audience_chat(context)
         self._update_deferred_block_contents(context)
 
         # 3. Resolve generation parameters
@@ -697,10 +701,11 @@ class LLMPipeline:
         for plugin in self._pre_processors:
             context = plugin.process(context)
 
-        # 2b-2e. Inject deferred content and patch block char counts
+        # 2b-2f. Inject deferred content and patch block char counts
         self._inject_codex_content(context)
         self._inject_rag_content(context)
         self._inject_twitch_content(context)
+        self._inject_audience_chat(context)
         self._update_deferred_block_contents(context)
 
         # Estimate tokens via tiktoken
@@ -941,6 +946,26 @@ class LLMPipeline:
 
             context.messages[0]["content"] = system_prompt
 
+    def _inject_audience_chat(self, context: PipelineContext) -> None:
+        """
+        Inject persistent audience chat transcript into the system prompt (NANO-115).
+
+        Replaces [AUDIENCE_CHAT] placeholder with the formatted audience window
+        prepared by TwitchHistoryInjector preprocessor. If no content, placeholder
+        collapses to empty string.
+        """
+        audience_content = context.metadata.get("audience_chat_formatted", "")
+
+        if context.messages and context.messages[0].get("role") == "system":
+            system_prompt = context.messages[0]["content"]
+
+            system_prompt = system_prompt.replace("[AUDIENCE_CHAT]", audience_content)
+
+            import re
+            system_prompt = re.sub(r"\n{3,}", "\n\n", system_prompt)
+
+            context.messages[0]["content"] = system_prompt
+
     def _update_deferred_block_contents(self, context: PipelineContext) -> None:
         """
         Patch deferred block char counts after injection (NANO-045b).
@@ -971,6 +996,11 @@ class LLMPipeline:
                 entry["deferred"] = False
             elif block_id == "twitch_context":
                 real_content = context.metadata.get("twitch_content", "")
+                entry["chars"] = len(real_content)
+                entry["content"] = real_content
+                entry["deferred"] = False
+            elif block_id == "audience_chat":
+                real_content = context.metadata.get("audience_chat_formatted", "")
                 entry["chars"] = len(real_content)
                 entry["content"] = real_content
                 entry["deferred"] = False

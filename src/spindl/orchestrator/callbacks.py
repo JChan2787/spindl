@@ -108,6 +108,9 @@ class OrchestratorCallbacks:
         self._event_bus = event_bus
         self._context_manager = context_manager
 
+        # NANO-115: Twitch audience transcript dual-write callback
+        self._on_twitch_response: Optional[Callable[[str, list[str]], None]] = None
+
         # Runtime generation parameter overrides (NANO-053)
         self._generation_params: Optional[dict] = None
 
@@ -1001,6 +1004,18 @@ class OrchestratorCallbacks:
                 tts_response = result.tts_text or response  # NANO-109
 
                 self._last_response = response
+
+                # NANO-115: Dual-write assistant reply to audience transcript
+                if stimulus_source == "twitch" and self._on_twitch_response:
+                    usernames = []
+                    if stimulus_metadata and "messages" in stimulus_metadata:
+                        usernames = list({
+                            m["username"] for m in stimulus_metadata["messages"]
+                            if isinstance(m, dict) and "username" in m
+                        })
+                    reply_text = tts_response if tts_response else response
+                    if reply_text:
+                        self._on_twitch_response(reply_text, usernames)
 
                 # Classify emotion for avatar + chat display (NANO-094)
                 emotion, emotion_confidence = self._classify_emotion(response or "")

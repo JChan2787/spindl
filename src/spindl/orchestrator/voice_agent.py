@@ -37,6 +37,8 @@ from ..llm.plugins import (
     SummarizationTrigger,
     BudgetEnforcer,
     TTSCleanupPlugin,
+    TwitchTranscriptManager,
+    TwitchHistoryInjector,
     create_codex_plugins,
 )
 from ..llm.plugins.reasoning_extractor import ReasoningExtractor
@@ -267,6 +269,13 @@ class VoiceAgentOrchestrator:
         history_recorder = HistoryRecorder(self._history_manager)
         tts_cleanup = TTSCleanupPlugin()
 
+        # NANO-115: Twitch audience transcript persistence + injection
+        self._twitch_transcript = TwitchTranscriptManager(
+            conversations_dir=self._config.conversations_dir,
+            debug=self._config.debug,
+        )
+        twitch_history_injector = TwitchHistoryInjector(self._twitch_transcript)
+
         # Codex: Create activator and cooldown plugins (NANO-037)
         # Must be registered BEFORE budget_enforcer so codex tokens are counted
         # Store manager for hot-reload (NANO-036)
@@ -413,12 +422,14 @@ class VoiceAgentOrchestrator:
         # 3. RAGInjector - query memories, stage for injection (NANO-043)
         # 4. BudgetEnforcer - enforces hard limits (includes codex + RAG tokens)
         # 5. HistoryInjector - injects remaining history into messages
+        # 6. TwitchHistoryInjector - stages audience transcript for injection (NANO-115)
         self._pipeline.register_pre_processor(summarizer)
         self._pipeline.register_pre_processor(codex_activator)
         if rag_injector:
             self._pipeline.register_pre_processor(rag_injector)
         self._pipeline.register_pre_processor(budget_enforcer)
         self._pipeline.register_pre_processor(history_injector)
+        self._pipeline.register_pre_processor(twitch_history_injector)
 
         # PostProcessors
         # 0. ReasoningExtractor - strip inline <think> blocks (NANO-042)
@@ -504,6 +515,9 @@ class VoiceAgentOrchestrator:
         # NANO-111 Phase 2.5: Wire history manager for barge-in truncation
         self._callbacks._history_manager = self._history_manager
 
+        # NANO-115: Wire Twitch transcript dual-write callback
+        self._callbacks._on_twitch_response = self._twitch_transcript.record_assistant_reply
+
         # NANO-076: Wire session file getter for snapshot sidecar persistence
         self._callbacks.set_session_file_getter(lambda: self.session_file)
 
@@ -564,6 +578,7 @@ class VoiceAgentOrchestrator:
                 max_message_length=stimuli_cfg.twitch_max_message_length,
                 prompt_template=stimuli_cfg.twitch_prompt_template,
                 enabled=stimuli_cfg.twitch_enabled,
+                on_message_accepted=self._twitch_transcript.record_audience_message,
             )
             self._stimuli_engine.register_module(twitch)
             logger.info(
@@ -1009,6 +1024,10 @@ class VoiceAgentOrchestrator:
         persona_id = self._persona.get("id") if self._persona else None
         if persona_id and self._history_manager:
             self._history_manager.ensure_session(persona_id)
+
+        # NANO-115: Bind Twitch transcript to voice session file
+        if self._twitch_transcript and self._history_manager:
+            self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
 
         # Start reflection system background thread (NANO-043 Phase 3)
         if self._reflection_system:
@@ -2206,6 +2225,9 @@ class VoiceAgentOrchestrator:
         if persona_id:
             self._history_manager.ensure_session(persona_id)
         self._history_manager.clear_session()
+        # NANO-115: Rebind Twitch transcript to new session file
+        if self._twitch_transcript:
+            self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
         # NANO-107: update session-scoped retrieval filter
         if self._memory_store and self._history_manager.session_file:
             self._memory_store.set_session_id(self._history_manager.session_file.stem)
@@ -2328,6 +2350,10 @@ class VoiceAgentOrchestrator:
         # 10. Open new session
         if self._history_manager:
             self._history_manager.switch_to_persona(persona_id)
+
+        # NANO-115: Rebind Twitch transcript to new persona session
+        if self._twitch_transcript and self._history_manager:
+            self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
 
         # 11. Restart reflection system with new session_id
         if self._reflection_system:

@@ -35,6 +35,8 @@ You are [PERSONA_NAME].
 
 [TWITCH_CONTEXT]
 
+[AUDIENCE_CHAT]
+
 ### Rules
 
 [PERSONA_RULES]

@@ -15,7 +15,7 @@ import os
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from .base import StimulusModule
 from .models import StimulusData, StimulusSource
@@ -59,6 +59,7 @@ class TwitchModule(StimulusModule):
         max_message_length: int = 300,
         prompt_template: Optional[str] = None,
         enabled: bool = False,
+        on_message_accepted: Optional["Callable[[str, str, str], None]"] = None,
     ):
         self._channel = channel
         self._app_id = app_id
@@ -68,6 +69,7 @@ class TwitchModule(StimulusModule):
         self._max_message_length = max_message_length
         self._prompt_template = prompt_template or _DEFAULT_PROMPT_TEMPLATE
         self._enabled = enabled
+        self._on_message_accepted = on_message_accepted
 
         self._connected = False
         self._running = False
@@ -312,6 +314,11 @@ class TwitchModule(StimulusModule):
                         channel=msg.room.name,
                     )
                 )
+                if self._on_message_accepted:
+                    try:
+                        self._on_message_accepted(msg.user.name, msg.text, msg.room.name)
+                    except Exception:
+                        logger.exception("on_message_accepted callback failed")
                 logger.debug(
                     "Twitch [#%s] %s: %s", msg.room.name, msg.user.name, msg.text
                 )
