@@ -257,6 +257,13 @@ export async function POST(request: Request) {
       };
     }
 
+    // NANO-115 Session 645: history mode lives at llm.force_role_history.
+    // Written after the llm section is built so both local and cloud branches
+    // carry the user's choice into the final YAML.
+    if (existingConfig.llm && typeof existingConfig.llm === "object") {
+      (existingConfig.llm as Record<string, unknown>).force_role_history = body.historyMode;
+    }
+
     // ========================================
     // VLM Configuration (NANO-059)
     // ========================================
@@ -931,6 +938,9 @@ export async function GET() {
         relevanceThreshold: raw?.memory?.relevance_threshold ?? 0.25,
         topK: raw?.memory?.top_k ?? 5,
       },
+
+      // NANO-115 Session 645: history mode — coerce legacy "auto" to "flatten"
+      historyMode: (raw?.llm?.force_role_history === "splice" ? "splice" : "flatten") as "splice" | "flatten",
 
       // NANO-063: Per-provider API key map for key isolation on provider switch
       savedProviderKeys,

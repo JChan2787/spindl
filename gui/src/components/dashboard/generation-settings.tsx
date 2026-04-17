@@ -340,7 +340,7 @@ export function GenerationSettings() {
             History Mode
           </p>
           <div className="flex gap-1 rounded-md bg-muted p-1">
-            {(["auto", "splice", "flatten"] as const).map((mode) => (
+            {(["splice", "flatten"] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => handleChange({ force_role_history: mode })}
@@ -350,12 +350,12 @@ export function GenerationSettings() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {mode === "auto" ? "Auto" : mode === "splice" ? "Splice" : "Flatten"}
+                {mode === "splice" ? "Splice" : "Flatten"}
               </button>
             ))}
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Auto defers to provider capability. Splice sends real role-array turns (required for Gemma). Flatten embeds history as text in the system prompt.
+            Splice sends real role-array turns (required for Gemma). Flatten embeds history as text in the system prompt.
           </p>
         </div>
       </CardContent>

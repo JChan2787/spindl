@@ -17,8 +17,7 @@ import {
   ModelCombobox,
   type ModelOption,
 } from "@/components/ui/model-combobox";
-import { useLauncherStore, useSettingsStore } from "@/lib/stores";
-import { getSocket } from "@/lib/socket";
+import { useLauncherStore } from "@/lib/stores";
 import { CLOUD_PROVIDERS, CLOUD_PROVIDER_IDS, type CloudProvider } from "@/lib/constants/cloud-providers";
 
 interface FieldRowProps {
@@ -390,27 +389,7 @@ function CloudLLMFields() {
 }
 
 export function LLMSection() {
-  const { llmProviderType, setLLMProviderType } = useLauncherStore();
-  const { generationConfig, setGenerationConfig } = useSettingsStore();
-  const socket = getSocket();
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  const handleHistoryModeChange = useCallback(
-    (mode: "auto" | "splice" | "flatten") => {
-      setGenerationConfig({ ...generationConfig, force_role_history: mode });
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        socket.emit("set_generation_params", { force_role_history: mode });
-      }, 300);
-    },
-    [generationConfig, socket, setGenerationConfig]
-  );
+  const { llmProviderType, setLLMProviderType, historyMode, setHistoryMode } = useLauncherStore();
 
   return (
     <Card>
@@ -451,22 +430,22 @@ export function LLMSection() {
             History Mode
           </p>
           <div className="flex gap-1 rounded-md bg-muted p-1">
-            {(["auto", "splice", "flatten"] as const).map((mode) => (
+            {(["splice", "flatten"] as const).map((mode) => (
               <button
                 key={mode}
-                onClick={() => handleHistoryModeChange(mode)}
+                onClick={() => setHistoryMode(mode)}
                 className={`flex-1 text-xs py-1.5 px-2 rounded transition-colors ${
-                  generationConfig.force_role_history === mode
+                  historyMode === mode
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {mode === "auto" ? "Auto" : mode === "splice" ? "Splice" : "Flatten"}
+                {mode === "splice" ? "Splice" : "Flatten"}
               </button>
             ))}
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Auto defers to provider capability. Splice sends real role-array turns (required for Gemma). Flatten embeds history as text in the system prompt.
+            Splice sends real role-array turns (required for Gemma). Flatten embeds history as text in the system prompt. Applied on next launch.
           </p>
         </div>
       </CardContent>

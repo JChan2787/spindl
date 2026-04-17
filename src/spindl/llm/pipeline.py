@@ -177,7 +177,7 @@ class LLMPipeline:
         self._pre_processors: list[PreProcessor] = pre_processors or []
         self._post_processors: list[PostProcessor] = post_processors or []
         self._tool_executor: Optional["ToolExecutor"] = tool_executor
-        self._force_role_history: str = "auto"
+        self._force_role_history: str = "flatten"
         self._block_config: Optional[list[PromptBlock]] = None
         # NANO-111: Deferred post-processor result from run_stream()
         self._last_stream_result: Optional[PipelineResult] = None
@@ -970,29 +970,17 @@ class LLMPipeline:
 
     def _stash_provider_capabilities(self, context: PipelineContext) -> None:
         """
-        NANO-114: Read active provider's capability flags into context metadata
-        so preprocessors (HistoryInjector) can branch on them without needing
-        a direct provider reference.
+        NANO-114: Stash provider-capability flags into context metadata so
+        preprocessors (HistoryInjector) can branch on them without holding a
+        provider reference.
 
-        NANO-115: Respects force_role_history override — "splice" forces True,
-        "flatten" forces False, "auto" defers to provider capability.
+        NANO-115 (Session 645): `force_role_history` is either "splice" or
+        "flatten" — the prior "auto" option was removed. The mode is user-owned,
+        not derived from provider capability.
         """
-        if self._force_role_history == "splice":
-            context.metadata["provider_supports_role_history"] = True
-            return
-        if self._force_role_history == "flatten":
-            context.metadata["provider_supports_role_history"] = False
-            return
-
-        from .provider_holder import ProviderHolder
-        try:
-            inner = self.provider.provider if isinstance(self.provider, ProviderHolder) else self.provider
-            props = inner.get_properties()
-            context.metadata["provider_supports_role_history"] = bool(
-                getattr(props, "supports_role_history", False)
-            )
-        except Exception:
-            context.metadata["provider_supports_role_history"] = False
+        context.metadata["provider_supports_role_history"] = (
+            self._force_role_history == "splice"
+        )
 
     def _extract_codex_display_data(self, context: PipelineContext) -> list[dict]:
         """

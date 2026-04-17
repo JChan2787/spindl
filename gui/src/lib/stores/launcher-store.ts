@@ -194,6 +194,9 @@ interface LauncherStoreState {
   // Embedding Configuration (NANO-043 Phase 5)
   embedding: EmbeddingConfig;
 
+  // History mode (NANO-115 Session 645) — persists to llm.force_role_history in YAML
+  historyMode: "splice" | "flatten";
+
   // NANO-063: Per-provider API key recall map
   savedProviderKeys: Record<string, string>;
 
@@ -232,6 +235,9 @@ interface LauncherStoreState {
 
   // Actions - Embedding (NANO-043 Phase 5)
   updateEmbedding: (updates: Partial<EmbeddingConfig>) => void;
+
+  // Actions - History mode (NANO-115 Session 645)
+  setHistoryMode: (mode: "splice" | "flatten") => void;
 
   // Actions - NANO-063: Provider key isolation
   setSavedProviderKeys: (keys: Record<string, string>) => void;
@@ -279,6 +285,7 @@ export interface HydrateConfig {
   ttsProviderType: LLMProviderType;
   ttsLocal: Partial<TTSLocalConfig>;
   embedding?: Partial<EmbeddingConfig>;
+  historyMode?: "splice" | "flatten";
   savedProviderKeys?: Record<string, string>;
 }
 
@@ -435,6 +442,9 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
   // Initial state - Embedding (NANO-043 Phase 5)
   embedding: DEFAULT_EMBEDDING,
 
+  // Initial state - History mode (NANO-115 Session 645)
+  historyMode: "flatten" as const,
+
   // NANO-063: Per-provider API key recall
   savedProviderKeys: {},
 
@@ -517,6 +527,9 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
   updateEmbedding: (updates) =>
     set((state) => ({ embedding: { ...state.embedding, ...updates } })),
 
+  // History Mode Actions (NANO-115 Session 645)
+  setHistoryMode: (historyMode) => set({ historyMode }),
+
   // NANO-063: Provider key isolation
   setSavedProviderKeys: (savedProviderKeys) => set({ savedProviderKeys }),
 
@@ -555,6 +568,7 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
       ttsProviderType: config.ttsProviderType,
       ttsLocal: { ...state.ttsLocal, ...config.ttsLocal },
       embedding: { ...state.embedding, ...(config.embedding || {}) },
+      historyMode: config.historyMode ?? state.historyMode,
       savedProviderKeys: config.savedProviderKeys || {},
       isLoading: false,
     })),
@@ -638,6 +652,7 @@ export const useLauncherStore = create<LauncherStoreState>((set) => ({
       ttsProviderType: "local",
       ttsLocal: DEFAULT_TTS_LOCAL,
       embedding: DEFAULT_EMBEDDING,
+      historyMode: "flatten" as const,
       savedProviderKeys: {},
       isLoading: false,
       isValidating: false,

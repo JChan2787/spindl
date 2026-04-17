@@ -556,10 +556,13 @@ def register_config_handlers(server: "GUIServer") -> None:
                     presence_penalty = val
                     updated = True
 
-            # NANO-115: Handle force_role_history override (separate from gen params)
+            # NANO-115: Handle force_role_history override (separate from gen params).
+            # Session 645 removed "auto"; coerce legacy payloads for safety.
             if "force_role_history" in data:
                 val = data["force_role_history"]
-                if val in ("auto", "splice", "flatten"):
+                if val == "auto":
+                    val = "flatten"
+                if val in ("splice", "flatten"):
                     server._orchestrator._config.force_role_history = val
                     server._orchestrator._pipeline._force_role_history = val
                     updated = True

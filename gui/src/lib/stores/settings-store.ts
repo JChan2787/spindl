@@ -52,7 +52,7 @@ export interface GenerationParamsConfig {
   repeat_last_n: number;
   frequency_penalty: number;
   presence_penalty: number;
-  force_role_history: "auto" | "splice" | "flatten";
+  force_role_history: "splice" | "flatten";
 }
 
 // Prompt injection wrapper config (NANO-045d + NANO-052 follow-up)
@@ -361,7 +361,7 @@ const DEFAULT_GENERATION: GenerationParamsConfig = {
   repeat_last_n: 64,
   frequency_penalty: 0.0,
   presence_penalty: 0.0,
-  force_role_history: "auto",
+  force_role_history: "flatten",
 };
 
 const DEFAULT_AVATAR: AvatarRuntimeConfig = {

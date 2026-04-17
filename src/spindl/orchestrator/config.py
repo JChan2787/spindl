@@ -1,5 +1,6 @@
 """Configuration models for VoiceAgentOrchestrator (NANO-089: Pydantic validation layer)."""
 
+import logging
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -8,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ruamel.yaml import YAML as RuamelYAML
 
 from spindl.utils.paths import resolve_relative_path
+
+logger = logging.getLogger(__name__)
 
 
 def _make_ruamel_yaml() -> RuamelYAML:
@@ -733,10 +736,11 @@ class OrchestratorConfig(BaseModel):
     budget_strategy: Literal["truncate", "drop", "reject"] = "truncate"
     response_reserve: int = Field(default=300, ge=0)
 
-    # NANO-115: History splice/flatten override
-    # "auto" defers to provider capability, "splice" forces role-array,
-    # "flatten" forces bracket-formatted text in system prompt.
-    force_role_history: Literal["auto", "splice", "flatten"] = "auto"
+    # NANO-115: History mode — "splice" = role-array, "flatten" = bracket text.
+    # The prior "auto" option was removed (Session 645): it was always
+    # equivalent to "flatten" for every cloud provider, making it dishonest
+    # UX. YAML files carrying "auto" are silently coerced to "flatten" on load.
+    force_role_history: Literal["splice", "flatten"] = "flatten"
 
     # Character settings (NANO-034: ST V2 Character Cards)
     character_id: str = "spindle"
@@ -821,10 +825,17 @@ class OrchestratorConfig(BaseModel):
         # LLM settings (NANO-018/019: provider-based, clean break)
         if "llm" in data:
             config.llm_config = LLMConfig.from_dict(data["llm"])
-            # NANO-115: History splice/flatten override
-            config.force_role_history = data["llm"].get(
+            # NANO-115: History mode (splice or flatten). Session 645 removed
+            # "auto" — any YAML still carrying it is coerced to "flatten".
+            raw_history = data["llm"].get(
                 "force_role_history", config.force_role_history
             )
+            if raw_history == "auto":
+                logger.info(
+                    "Migrating force_role_history 'auto' -> 'flatten' (Session 645)"
+                )
+                raw_history = "flatten"
+            config.force_role_history = raw_history
 
         # VLM settings (NANO-023/024: backend for vision tools)
         if "vlm" in data:
