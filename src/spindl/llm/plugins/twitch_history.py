@@ -8,6 +8,21 @@ from typing import Optional
 
 from .base import PipelineContext, PreProcessor
 
+_TRUNCATION_MARKER = "..."
+
+
+def _format_audience_timestamp(ms: int) -> str:
+    """Format a Unix-millis timestamp as mmddyyyy-hh-mm-ss:ms (local time).
+
+    Matches the stimuli.twitch.format_twitch_timestamp format for consistency
+    between the fresh-batch user message and the rolling audience transcript.
+    """
+    if not ms or ms <= 0:
+        return ""
+    seconds, millis = divmod(int(ms), 1000)
+    dt = datetime.fromtimestamp(seconds)
+    return dt.strftime("%m%d%Y-%H-%M-%S") + f":{millis:03d}"
+
 
 class TwitchTranscriptManager:
     """
@@ -110,9 +125,18 @@ class TwitchTranscriptManager:
             self._lru.append(t)
 
     def record_audience_message(
-        self, username: str, text: str, channel: str = ""
+        self,
+        username: str,
+        text: str,
+        channel: str = "",
+        sent_timestamp_ms: int = 0,
     ) -> None:
-        """Persist an incoming audience message to the transcript."""
+        """Persist an incoming audience message to the transcript.
+
+        sent_timestamp_ms: Unix millis from twitchAPI ChatMessage.sent_timestamp.
+        Stored on the turn for later rendering in the audience injection window.
+        Falls back to 0 when the source is local/synthetic (e.g., backfill).
+        """
         if self._transcript_file is None:
             return
 
@@ -123,6 +147,7 @@ class TwitchTranscriptManager:
             "text": text,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "channel": channel,
+            "sent_timestamp_ms": int(sent_timestamp_ms) if sent_timestamp_ms else 0,
         }
 
         self._append_to_disk(turn)
@@ -217,7 +242,7 @@ class TwitchTranscriptManager:
             entry = dict(turn)
             text_field = "text"
             if text_field in entry and len(entry[text_field]) > char_cap:
-                entry[text_field] = entry[text_field][:char_cap] + "\u2026"
+                entry[text_field] = entry[text_field][:char_cap] + _TRUNCATION_MARKER
             result.append(entry)
 
         return result
@@ -288,7 +313,9 @@ class TwitchHistoryInjector(PreProcessor):
                 if turn.get("role") == "audience":
                     username = turn.get("username", "???")
                     text = turn.get("text", "")
-                    lines.append(f"{username}: {text}")
+                    ts = _format_audience_timestamp(turn.get("sent_timestamp_ms", 0))
+                    suffix = f" [{ts}]" if ts else ""
+                    lines.append(f"{username}: {text}{suffix}")
                 elif turn.get("role") == "assistant":
                     text = turn.get("text", "")
                     lines.append(f"[{persona_name}]: {text}")

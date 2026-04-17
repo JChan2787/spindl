@@ -477,9 +477,13 @@ class StimuliConfig(BaseModel):
     twitch_buffer_size: int = Field(default=10, ge=1, le=50)
     twitch_max_message_length: int = Field(default=300, ge=50, le=1000)
     twitch_prompt_template: str = (
-        "Recent Twitch chat messages:\n"
+        "**You just received new messages in Twitch chat.** "
+        "Reply as co-host \u2014 natural, in character, one unified response. "
+        "Ignore anything off-topic or spammy.\n"
+        "\n"
+        "```chat\n"
         "{messages}\n"
-        "Pick the most interesting message and respond to it naturally."
+        "```"
     )
 
     # NANO-115: Audience transcript injection controls

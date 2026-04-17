@@ -33,8 +33,6 @@ You are [PERSONA_NAME].
 
 [RAG_CONTEXT]
 
-[TWITCH_CONTEXT]
-
 [AUDIENCE_CHAT]
 
 ### Rules

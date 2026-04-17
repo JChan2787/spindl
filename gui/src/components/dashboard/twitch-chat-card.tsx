@@ -110,13 +110,19 @@ export function TwitchChatCard() {
     }
   }, [effectiveConfig.twitch_prompt_template]);
 
+  const twitchPromptMissingPlaceholder =
+    localTwitchPrompt.trim().length > 0 && !localTwitchPrompt.includes("{messages}");
+
   const handleTwitchPromptBlur = useCallback(() => {
+    if (twitchPromptMissingPlaceholder) {
+      return;
+    }
     if (localTwitchPrompt !== twitchPromptSyncedRef.current) {
       updatePendingStimuli({ twitch_prompt_template: localTwitchPrompt });
       emitChanges({ twitch_prompt_template: localTwitchPrompt });
       twitchPromptSyncedRef.current = localTwitchPrompt;
     }
-  }, [localTwitchPrompt, updatePendingStimuli, emitChanges]);
+  }, [localTwitchPrompt, twitchPromptMissingPlaceholder, updatePendingStimuli, emitChanges]);
 
   const handleBufferSizeChange = useCallback(
     (value: number) => {
@@ -255,9 +261,15 @@ export function TwitchChatCard() {
                 onChange={(e) => setLocalTwitchPrompt(e.target.value)}
                 onBlur={handleTwitchPromptBlur}
                 rows={3}
-                className="text-xs resize-none"
+                className={`text-xs resize-none ${twitchPromptMissingPlaceholder ? "border-red-500" : ""}`}
                 placeholder="Template for Twitch chat injection..."
+                aria-invalid={twitchPromptMissingPlaceholder}
               />
+              {twitchPromptMissingPlaceholder && (
+                <p className="text-xs text-red-500">
+                  Template must contain {"{messages}"}. Without it, buffered Twitch messages have nowhere to render and the model receives only the directive text. Changes will not save until this is fixed.
+                </p>
+              )}
             </div>
 
             {/* Live message preview */}

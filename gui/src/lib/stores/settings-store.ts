@@ -392,7 +392,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_app_secret: "",
   twitch_buffer_size: 10,
   twitch_max_message_length: 300,
-  twitch_prompt_template: "Recent Twitch chat messages:\n{messages}\nPick the most interesting message and respond to it naturally.",
+  twitch_prompt_template: "**You just received new messages in Twitch chat.** Reply as co-host \u2014 natural, in character, one unified response. Ignore anything off-topic or spammy.\n\n```chat\n{messages}\n```",
   twitch_audience_window: 25,
   twitch_audience_char_cap: 150,
   twitch_has_credentials: false,

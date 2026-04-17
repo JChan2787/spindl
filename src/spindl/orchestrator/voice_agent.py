@@ -585,6 +585,7 @@ class VoiceAgentOrchestrator:
                 buffer_size=stimuli_cfg.twitch_buffer_size,
                 max_message_length=stimuli_cfg.twitch_max_message_length,
                 prompt_template=stimuli_cfg.twitch_prompt_template,
+                char_cap=stimuli_cfg.twitch_audience_char_cap,
                 enabled=stimuli_cfg.twitch_enabled,
                 on_message_accepted=self._twitch_transcript.record_audience_message,
             )
@@ -1949,6 +1950,8 @@ class VoiceAgentOrchestrator:
                     if twitch_prompt_template is not None:
                         module.prompt_template = twitch_prompt_template
                         cfg.twitch_prompt_template = twitch_prompt_template
+                    if twitch_audience_char_cap is not None:
+                        module.char_cap = twitch_audience_char_cap
                     break
 
             # Update config even if module isn't registered yet

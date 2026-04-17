@@ -120,9 +120,9 @@ class TestPromptBlock:
 class TestDefaultBlocks:
     """Tests for create_default_blocks()."""
 
-    def test_returns_16_blocks(self, default_blocks: list[PromptBlock]):
-        """Default registry has exactly 16 blocks."""
-        assert len(default_blocks) == 16
+    def test_returns_15_blocks(self, default_blocks: list[PromptBlock]):
+        """Default registry has exactly 15 blocks."""
+        assert len(default_blocks) == 15
 
     def test_all_blocks_enabled(self, default_blocks: list[PromptBlock]):
         """All default blocks are enabled."""
@@ -130,9 +130,9 @@ class TestDefaultBlocks:
             assert block.enabled is True, f"Block {block.id} should be enabled"
 
     def test_order_is_sequential(self, default_blocks: list[PromptBlock]):
-        """Default blocks are ordered 0-15."""
+        """Default blocks are ordered 0-14."""
         orders = [b.order for b in default_blocks]
-        assert orders == list(range(16))
+        assert orders == list(range(15))
 
     def test_block_ids_unique(self, default_blocks: list[PromptBlock]):
         """All block IDs are unique."""
@@ -145,7 +145,7 @@ class TestDefaultBlocks:
         expected = {
             "persona_name", "persona_appearance", "persona_personality",
             "scenario", "example_dialogue", "modality_context", "voice_state",
-            "codex_context", "rag_context", "twitch_context", "audience_chat",
+            "codex_context", "rag_context", "audience_chat",
             "persona_rules", "modality_rules", "conversation_summary",
             "recent_history", "closing_instruction",
         }
@@ -163,13 +163,12 @@ class TestDefaultBlocks:
         }
 
     def test_late_stage_blocks_are_static(self, default_blocks: list[PromptBlock]):
-        """Codex, RAG, Twitch, and history blocks are static with placeholder content."""
+        """Codex, RAG, Audience, and history blocks are static with placeholder content."""
         block_map = {b.id: b for b in default_blocks}
 
         for block_id, expected_content in [
             ("codex_context", "[CODEX_CONTEXT]"),
             ("rag_context", "[RAG_CONTEXT]"),
-            ("twitch_context", "[TWITCH_CONTEXT]"),
             ("audience_chat", "[AUDIENCE_CHAT]"),
             ("recent_history", "[RECENT_HISTORY]"),
         ]:
@@ -201,8 +200,8 @@ class TestLoadBlockConfig:
     def test_empty_config_preserves_defaults(self, default_blocks: list[PromptBlock]):
         """Empty config dict returns defaults unchanged."""
         result = load_block_config({}, default_blocks)
-        assert len(result) == 16
-        assert [b.order for b in result] == list(range(16))
+        assert len(result) == 15
+        assert [b.order for b in result] == list(range(15))
 
     def test_reorder_blocks(self):
         """Config order reorders blocks."""
@@ -258,7 +257,7 @@ class TestLoadBlockConfig:
         # all other blocks appended after
         assert result[0].id == "persona_name"
         assert result[1].id == "persona_appearance"
-        assert len(result) == 16  # no extra blocks created
+        assert len(result) == 15  # no extra blocks created
 
     def test_unknown_block_in_disabled_ignored(self):
         """Unknown block ID in disabled list is silently ignored."""
@@ -272,8 +271,8 @@ class TestLoadBlockConfig:
         result = load_block_config(config)
         assert result[0].id == "persona_name"
         assert result[1].id == "closing_instruction"
-        # Remaining 14 blocks appended after
-        assert len(result) == 16
+        # Remaining 13 blocks appended after
+        assert len(result) == 15
         remaining_ids = [b.id for b in result[2:]]
         assert "persona_appearance" in remaining_ids
         assert "persona_rules" in remaining_ids
@@ -478,13 +477,13 @@ class TestBlockAssembly:
         assert "asterisks" not in system
 
     def test_late_stage_placeholders_preserved(self, structured_persona: dict):
-        """Codex, RAG, Twitch, and history placeholders survive in assembled prompt."""
+        """Codex, RAG, Audience, and history placeholders survive in assembled prompt."""
         messages = self._build_with_blocks(structured_persona)
         system = messages[0]["content"]
 
         assert "[CODEX_CONTEXT]" in system
         assert "[RAG_CONTEXT]" in system
-        assert "[TWITCH_CONTEXT]" in system
+        assert "[AUDIENCE_CHAT]" in system
         assert "[RECENT_HISTORY]" in system
 
     def test_closing_instruction_dynamic(self, structured_persona: dict):
@@ -593,7 +592,7 @@ class TestPipelineBlockConfig:
         pipeline.set_block_config(config)
 
         assert pipeline._block_config is not None
-        assert len(pipeline._block_config) == 16
+        assert len(pipeline._block_config) == 15
         block_map = {b.id: b for b in pipeline._block_config}
         assert block_map["voice_state"].enabled is False
 
@@ -651,8 +650,8 @@ class TestBlockContentsCapture:
     def test_block_contents_count_matches_enabled(self, structured_persona: dict):
         """block_contents has one entry per enabled block."""
         ctx = self._build_and_get_context(structured_persona)
-        # All 16 default blocks are enabled
-        assert len(ctx.block_contents) == 16
+        # All 15 default blocks are enabled
+        assert len(ctx.block_contents) == 15
 
     def test_block_ids_match_defaults(self, structured_persona: dict):
         """block_contents IDs match the default block IDs in order."""
@@ -675,7 +674,7 @@ class TestBlockContentsCapture:
         """Only injection blocks are flagged as deferred."""
         ctx = self._build_and_get_context(structured_persona)
         deferred_ids = {e["id"] for e in ctx.block_contents if e["deferred"]}
-        assert deferred_ids == {"codex_context", "rag_context", "twitch_context", "audience_chat", "recent_history"}
+        assert deferred_ids == {"codex_context", "rag_context", "audience_chat", "recent_history"}
 
     def test_provider_blocks_have_nonzero_chars(self, structured_persona: dict):
         """Provider-backed blocks with content have positive char counts."""
@@ -705,7 +704,7 @@ class TestBlockContentsCapture:
         ctx = self._build_and_get_context(structured_persona, blocks=blocks)
         ids = {e["id"] for e in ctx.block_contents}
         assert "voice_state" not in ids
-        assert len(ctx.block_contents) == 15
+        assert len(ctx.block_contents) == 14
 
     def test_legacy_mode_no_block_contents(self, structured_persona: dict):
         """Legacy mode (no block_config) leaves block_contents as None."""

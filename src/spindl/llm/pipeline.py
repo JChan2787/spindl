@@ -299,8 +299,8 @@ class LLMPipeline:
             stimulus_source: Optional stimulus identifier (NANO-075). Persisted to JSONL
                             for hydration. E.g., "patience", "custom".
             stimulus_metadata: Optional metadata from stimulus module (NANO-056b).
-                              Contains pre-formatted content for prompt block injection
-                              (e.g., "twitch_content" for Twitch Chat block).
+                              May carry stimulus-specific fields (e.g., message counts,
+                              channel, buffered message list).
             addressing_others_prompt: Optional one-shot prompt to append to voice modality
                                      context (NANO-110). Set when user returns from
                                      addressing someone else.
@@ -342,10 +342,6 @@ class LLMPipeline:
         if stimulus_source:
             context.metadata["stimulus_source"] = stimulus_source
 
-        # NANO-056b: Populate twitch content from stimulus metadata
-        if stimulus_metadata and "twitch_content" in stimulus_metadata:
-            context.metadata["twitch_content"] = stimulus_metadata["twitch_content"]
-
         # NANO-114: Stash provider capability for HistoryInjector splice/flatten branch
         self._stash_provider_capabilities(context)
 
@@ -363,14 +359,10 @@ class LLMPipeline:
         # We replace the [RAG_CONTEXT] placeholder here, same pattern as codex.
         self._inject_rag_content(context)
 
-        # 2d. Inject Twitch chat content into system prompt (NANO-056b)
-        # Twitch content arrives via stimulus_metadata, populated above.
-        self._inject_twitch_content(context)
-
-        # 2e. Inject persistent audience chat transcript (NANO-115)
+        # 2d. Inject persistent audience chat transcript (NANO-115)
         self._inject_audience_chat(context)
 
-        # 2f. Patch deferred block char counts now that injections are done (NANO-045b)
+        # 2e. Patch deferred block char counts now that injections are done (NANO-045b)
         self._update_deferred_block_contents(context)
 
         # 3. Resolve generation parameters
@@ -521,8 +513,6 @@ class LLMPipeline:
         context.metadata["input_modality"] = input_modality.value
         if stimulus_source:
             context.metadata["stimulus_source"] = stimulus_source
-        if stimulus_metadata and "twitch_content" in stimulus_metadata:
-            context.metadata["twitch_content"] = stimulus_metadata["twitch_content"]
 
         # NANO-114: Stash provider capability for HistoryInjector splice/flatten branch
         self._stash_provider_capabilities(context)
@@ -532,7 +522,6 @@ class LLMPipeline:
 
         self._inject_codex_content(context)
         self._inject_rag_content(context)
-        self._inject_twitch_content(context)
         self._inject_audience_chat(context)
         self._update_deferred_block_contents(context)
 
@@ -705,7 +694,6 @@ class LLMPipeline:
         # 2b-2f. Inject deferred content and patch block char counts
         self._inject_codex_content(context)
         self._inject_rag_content(context)
-        self._inject_twitch_content(context)
         self._inject_audience_chat(context)
         self._update_deferred_block_contents(context)
 
@@ -921,34 +909,6 @@ class LLMPipeline:
 
             context.messages[0]["content"] = system_prompt
 
-    def _inject_twitch_content(self, context: PipelineContext) -> None:
-        """
-        Inject Twitch chat content into the system prompt (NANO-056b).
-
-        Replaces [TWITCH_CONTEXT] placeholder with formatted Twitch messages.
-        If no content, placeholder collapses to empty string.
-        Follows the same pattern as _inject_codex_content() and _inject_rag_content().
-
-        Args:
-            context: Pipeline context with metadata["twitch_content"] populated
-                    from stimulus metadata (may be empty string or absent)
-        """
-        twitch_content = context.metadata.get("twitch_content", "")
-
-        if context.messages and context.messages[0].get("role") == "system":
-            system_prompt = context.messages[0]["content"]
-            has_placeholder = "[TWITCH_CONTEXT]" in system_prompt
-            print(f"[NANO-112 DEBUG] _inject_twitch_content: content_len={len(twitch_content)}, placeholder_present={has_placeholder}", flush=True)
-
-            # Replace placeholder with content (or empty string)
-            system_prompt = system_prompt.replace("[TWITCH_CONTEXT]", twitch_content)
-
-            # Clean up excess whitespace from empty placeholder
-            import re
-            system_prompt = re.sub(r"\n{3,}", "\n\n", system_prompt)
-
-            context.messages[0]["content"] = system_prompt
-
     def _inject_audience_chat(self, context: PipelineContext) -> None:
         """
         Inject persistent audience chat transcript into the system prompt (NANO-115).
@@ -994,11 +954,6 @@ class LLMPipeline:
                 entry["deferred"] = False
             elif block_id == "rag_context":
                 real_content = context.metadata.get("rag_content", "")
-                entry["chars"] = len(real_content)
-                entry["content"] = real_content
-                entry["deferred"] = False
-            elif block_id == "twitch_context":
-                real_content = context.metadata.get("twitch_content", "")
                 entry["chars"] = len(real_content)
                 entry["content"] = real_content
                 entry["deferred"] = False

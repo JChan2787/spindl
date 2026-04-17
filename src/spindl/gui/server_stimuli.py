@@ -165,6 +165,21 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_prompt_template = str(twitch_prompt_template).strip()
                 if not twitch_prompt_template:
                     twitch_prompt_template = None
+                elif "{messages}" not in twitch_prompt_template:
+                    await sio.emit(
+                        "stimuli_config_error",
+                        {
+                            "field": "twitch_prompt_template",
+                            "message": (
+                                "twitch_prompt_template must contain the "
+                                "{messages} placeholder. Without it, buffered "
+                                "Twitch messages have nowhere to render and "
+                                "the model receives only the directive text."
+                            ),
+                        },
+                        to=sid,
+                    )
+                    return
             if twitch_audience_window is not None:
                 twitch_audience_window = int(twitch_audience_window)
                 twitch_audience_window = max(25, min(300, twitch_audience_window))

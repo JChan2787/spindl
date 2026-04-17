@@ -155,6 +155,7 @@ class TestTwitchGetStimulus:
         assert module.get_stimulus() is None
 
     def test_returns_stimulus_data(self):
+        """NANO-115: user_input now carries the directive + fenced batch directly."""
         module = TwitchModule(
             channel="testchannel",
             enabled=True,
@@ -167,13 +168,11 @@ class TestTwitchGetStimulus:
         stimulus = module.get_stimulus()
         assert stimulus is not None
         assert stimulus.source == StimulusSource.TWITCH
-        # NANO-056b: user_input is now a short trigger
-        assert stimulus.user_input == "Respond to the Twitch chat messages."
-        # Formatted content is in metadata for prompt block injection
-        assert "alice: hello" in stimulus.metadata["twitch_content"]
-        assert "bob: world" in stimulus.metadata["twitch_content"]
-        assert "Chat:" in stimulus.metadata["twitch_content"]
-        assert "Respond." in stimulus.metadata["twitch_content"]
+        assert "alice: hello" in stimulus.user_input
+        assert "bob: world" in stimulus.user_input
+        assert "Chat:" in stimulus.user_input
+        assert "Respond." in stimulus.user_input
+        assert "twitch_content" not in stimulus.metadata
         assert stimulus.metadata["message_count"] == 2
         assert stimulus.metadata["channel"] == "testchannel"
         assert len(stimulus.metadata["messages"]) == 2
@@ -202,16 +201,18 @@ class TestTwitchGetStimulus:
     def test_metadata_structure(self):
         module = TwitchModule(channel="ch", enabled=True)
         module._running = True
-        module._buffer.append(TwitchMessage(username="viewer", text="hey"))
+        module._buffer.append(
+            TwitchMessage(username="viewer", text="hey", sent_timestamp_ms=1234567890000)
+        )
 
         stimulus = module.get_stimulus()
         assert stimulus.metadata["messages"][0]["username"] == "viewer"
         assert stimulus.metadata["messages"][0]["text"] == "hey"
-        assert "twitch_content" in stimulus.metadata
-        assert "viewer: hey" in stimulus.metadata["twitch_content"]
+        assert stimulus.metadata["messages"][0]["sent_timestamp_ms"] == 1234567890000
+        assert "twitch_content" not in stimulus.metadata
 
-    def test_stimulus_user_input_is_short_trigger(self):
-        """NANO-056b: user_input is a short trigger, not the full template."""
+    def test_stimulus_user_input_carries_batch(self):
+        """NANO-115: user_input IS the directive + fenced batch (not a short trigger)."""
         module = TwitchModule(
             channel="ch",
             enabled=True,
@@ -221,28 +222,39 @@ class TestTwitchGetStimulus:
         module._buffer.append(TwitchMessage(username="alice", text="hello"))
 
         stimulus = module.get_stimulus()
-        assert stimulus.user_input == "Respond to the Twitch chat messages."
-        # Full content is in metadata, not user_input
-        assert "alice: hello" not in stimulus.user_input
-        assert "alice: hello" in stimulus.metadata["twitch_content"]
+        assert "alice: hello" in stimulus.user_input
+        assert "Chat:" in stimulus.user_input
+        assert "Respond." in stimulus.user_input
 
-    def test_stimulus_metadata_contains_twitch_content(self):
-        """NANO-056b: metadata['twitch_content'] contains template-formatted messages."""
+    def test_char_cap_truncates_with_ellipsis_marker(self):
+        """NANO-115: messages longer than char_cap are truncated and marked with '...'."""
         module = TwitchModule(
             channel="ch",
             enabled=True,
-            prompt_template="Recent chat:\n{messages}\nPick one.",
+            prompt_template="{messages}",
+            char_cap=50,
         )
         module._running = True
-        module._buffer.append(TwitchMessage(username="viewer1", text="first"))
-        module._buffer.append(TwitchMessage(username="viewer2", text="second"))
+        long_text = "a" * 80
+        module._buffer.append(TwitchMessage(username="spammer", text=long_text))
 
         stimulus = module.get_stimulus()
-        content = stimulus.metadata["twitch_content"]
-        assert "Recent chat:" in content
-        assert "viewer1: first" in content
-        assert "viewer2: second" in content
-        assert "Pick one." in content
+        assert "..." in stimulus.user_input
+        assert ("a" * 80) not in stimulus.user_input
+        assert ("a" * 50 + "...") in stimulus.user_input
+
+    def test_missing_messages_placeholder_falls_back_to_default(self):
+        """NANO-115: template missing {messages} falls back to default to avoid losing batch."""
+        module = TwitchModule(
+            channel="ch",
+            enabled=True,
+            prompt_template="No placeholder here — just instructions.",
+        )
+        module._running = True
+        module._buffer.append(TwitchMessage(username="alice", text="hello"))
+
+        stimulus = module.get_stimulus()
+        assert "alice: hello" in stimulus.user_input
 
 
 class TestTwitchShouldAccept:

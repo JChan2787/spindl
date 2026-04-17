@@ -65,7 +65,7 @@ def create_default_blocks() -> list[PromptBlock]:
     pipeline inject methods post-build, same as today.
 
     Returns:
-        List of 15 PromptBlock instances in default order.
+        List of 14 PromptBlock instances in default order.
     """
     return [
         PromptBlock(
@@ -129,50 +129,43 @@ def create_default_blocks() -> list[PromptBlock]:
             static_content="[RAG_CONTEXT]",
         ),
         PromptBlock(
-            id="twitch_context",
-            label="Twitch Chat",
-            order=9,
-            is_static=True,
-            static_content="[TWITCH_CONTEXT]",
-        ),
-        PromptBlock(
             id="audience_chat",
             label="Audience Chat",
-            order=10,
+            order=9,
             is_static=True,
             static_content="[AUDIENCE_CHAT]",
         ),
         PromptBlock(
             id="persona_rules",
             label="Character Rules",
-            order=11,
+            order=10,
             placeholder="[PERSONA_RULES]",
             section_header="Rules",
         ),
         PromptBlock(
             id="modality_rules",
             label="Modality Rules",
-            order=12,
+            order=11,
             placeholder="[MODALITY_RULES]",
         ),
         PromptBlock(
             id="conversation_summary",
             label="Summary",
-            order=13,
+            order=12,
             placeholder="[CONVERSATION_SUMMARY]",
             section_header="Conversation",
         ),
         PromptBlock(
             id="recent_history",
             label="Chat History",
-            order=14,
+            order=13,
             is_static=True,
             static_content="[RECENT_HISTORY]",
         ),
         PromptBlock(
             id="closing_instruction",
             label="Closing Instruction",
-            order=15,
+            order=14,
             section_header="Input",
             is_static=True,
             static_content="Respond as {persona_name}.",
