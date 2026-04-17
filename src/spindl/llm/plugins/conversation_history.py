@@ -1,8 +1,11 @@
 """Conversation history plugin for persistent multi-turn conversations."""
 
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from .base import PipelineContext, PreProcessor, PostProcessor
 from ...history.jsonl_store import (
@@ -222,6 +225,24 @@ class ConversationHistoryManager:
         # NANO-109: Use cleaned text for history content (steers LLM output).
         # Preserve raw response as display_content for JSONL inspection.
         history_content = tts_text if tts_text else response
+
+        # NANO-115 item #4: empty/whitespace assistant guard.
+        # R1 timeouts and similar silent failures produce a blank response that,
+        # if committed, pollutes history with a dangling `[assistant]:` turn.
+        # Write the user turn (they did say something), skip the assistant turn,
+        # log the failure so it's visible instead of silent. Next LLM turn sees
+        # user -> user and recovers naturally.
+        if not history_content or not history_content.strip():
+            logger.warning(
+                "Empty/whitespace assistant response; writing user turn only, "
+                "skipping assistant turn (turn_id=%d)",
+                self._next_turn_id,
+            )
+            append_turn(self._session_file, user_turn)
+            self._history.append(user_turn)
+            self._next_turn_id += 1
+            self._pending_user_input = None
+            return
 
         assistant_turn = {
             "turn_id": self._next_turn_id + 1,

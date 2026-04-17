@@ -270,3 +270,87 @@ class TestHistoryRecorderMetadataExtraction:
         assert "stimulus_source" not in turns[1]
         assert "activated_codex_entries" not in turns[1]
         assert "retrieved_memories" not in turns[1]
+
+
+# ============================================================================
+# Tests: NANO-115 item #4 — empty assistant response guard
+# ============================================================================
+
+
+class TestEmptyAssistantGuard:
+    """
+    R1 timeouts and similar silent failures produce a blank assistant response.
+    Committing that response to history leaves a dangling `[assistant]:` turn
+    that pollutes the next LLM turn's context. The guard writes the user turn
+    (they did speak) and skips the assistant turn.
+    """
+
+    def test_empty_string_writes_user_only(self, tmp_path) -> None:
+        mgr = _make_manager(tmp_path)
+        mgr.stash_user_input("Did you hear me?")
+        mgr.store_turn("")
+
+        turns = _read_jsonl(mgr.session_file)
+        assert len(turns) == 1
+        assert turns[0]["role"] == "user"
+        assert turns[0]["content"] == "Did you hear me?"
+
+    def test_whitespace_only_writes_user_only(self, tmp_path) -> None:
+        mgr = _make_manager(tmp_path)
+        mgr.stash_user_input("Hello?")
+        mgr.store_turn("   \n\t  ")
+
+        turns = _read_jsonl(mgr.session_file)
+        assert len(turns) == 1
+        assert turns[0]["role"] == "user"
+
+    def test_turn_id_advances_by_one_on_empty(self, tmp_path) -> None:
+        """Next turn after an empty-response incident uses the next sequential id."""
+        mgr = _make_manager(tmp_path)
+        mgr.stash_user_input("first")
+        mgr.store_turn("")  # timeout — user turn 1 written, assistant skipped
+
+        mgr.stash_user_input("second")
+        mgr.store_turn("real reply")  # turn_ids 2 and 3
+
+        turns = _read_jsonl(mgr.session_file)
+        assert [t["turn_id"] for t in turns] == [1, 2, 3]
+        assert [t["role"] for t in turns] == ["user", "user", "assistant"]
+
+    def test_in_memory_history_matches_jsonl_on_empty(self, tmp_path) -> None:
+        """No phantom assistant turn in _history when response is empty."""
+        mgr = _make_manager(tmp_path)
+        mgr.stash_user_input("Anyone there?")
+        mgr.store_turn("")
+
+        history = mgr.get_history()
+        assert len(history) == 1
+        assert history[0]["role"] == "user"
+
+    def test_tts_text_empty_but_response_whitespace_skips(self, tmp_path) -> None:
+        """When history_content resolves to whitespace (tts_text empty, response blank), skip."""
+        mgr = _make_manager(tmp_path)
+        mgr.stash_user_input("Say something")
+        mgr.store_turn("", tts_text="")
+
+        turns = _read_jsonl(mgr.session_file)
+        assert len(turns) == 1
+        assert turns[0]["role"] == "user"
+
+    def test_non_empty_response_unaffected(self, tmp_path) -> None:
+        """Sanity: the guard does not trigger on normal responses."""
+        mgr = _make_manager(tmp_path)
+        mgr.stash_user_input("Hi")
+        mgr.store_turn("Hi back")
+
+        turns = _read_jsonl(mgr.session_file)
+        assert len(turns) == 2
+        assert turns[1]["content"] == "Hi back"
+
+    def test_pending_user_input_cleared_on_empty(self, tmp_path) -> None:
+        """The stash is cleared even on the skip path — prevents leaking into next turn."""
+        mgr = _make_manager(tmp_path)
+        mgr.stash_user_input("lost in the void")
+        mgr.store_turn("")
+
+        assert mgr._pending_user_input is None
