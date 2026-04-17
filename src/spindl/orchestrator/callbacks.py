@@ -40,6 +40,36 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# NANO-115 item #1: Source labeling.
+# Every user-role message gets a structural `[Message Type - Subtype] ` prefix
+# so modality/origin survives into conversation history.
+def tag_user_input(
+    user_input: str,
+    input_modality: InputModality,
+    stimulus_source: Optional[str] = None,
+) -> str:
+    """
+    Prefix user_input with a message-type tag derived from modality + stimulus_source.
+
+    Voice                        -> [Message Type - Voice]
+    Text (Dashboard typed)       -> [Message Type - Direct Keyboard]
+    Stimulus (source="twitch")   -> [Message Type - Twitch Chat]
+    Stimulus (any other source)  -> [Message Type - Stimuli]  (catch-all)
+
+    Tag uses ASCII hyphen for JSONL/YAML robustness. Preserves the original
+    payload verbatim — only the prefix is added.
+    """
+    if stimulus_source == "twitch":
+        tag = "[Message Type - Twitch Chat]"
+    elif stimulus_source or input_modality == InputModality.STIMULUS:
+        tag = "[Message Type - Stimuli]"
+    elif input_modality == InputModality.VOICE:
+        tag = "[Message Type - Voice]"
+    else:
+        tag = "[Message Type - Direct Keyboard]"
+    return f"{tag} {user_input}" if user_input else tag
+
+
 class OrchestratorCallbacks:
     """
     Callback implementations for AudioStateMachine.
@@ -258,8 +288,11 @@ class OrchestratorCallbacks:
                 else:
 
                     # 5. Generate response via LLM pipeline (returns PipelineResult)
+                    # NANO-115 item #1: Tag user input with source prefix so
+                    # modality persists into conversation history.
+                    tagged_input = tag_user_input(transcription, InputModality.VOICE)
                     result = self._pipeline.run(
-                        transcription,
+                        tagged_input,
                         self._persona,
                         generation_params=self._generation_params,
                         state_trigger=state_trigger,
@@ -727,8 +760,10 @@ class OrchestratorCallbacks:
         # The delivery thread emits LLMChunkEvent per sentence right
         # before audio plays — [text][tts][text][tts] ordering.
 
+        # NANO-115 item #1: Tag user input with source prefix.
+        tagged_input = tag_user_input(transcription, InputModality.VOICE)
         for chunk in self._pipeline.run_stream(
-            transcription,
+            tagged_input,
             self._persona,
             generation_params=self._generation_params,
             state_trigger=state_trigger,
@@ -990,8 +1025,11 @@ class OrchestratorCallbacks:
                 # Text input uses blocking pipeline for full metadata
                 # (token usage, codex, memories, prompt snapshot).
                 # Voice input uses run_stream() for latency; text doesn't need it.
+                # NANO-115 item #1: Tag user input with source prefix so
+                # modality/origin persists into conversation history.
+                tagged_input = tag_user_input(transcription, modality, stimulus_source)
                 result = self._pipeline.run(
-                    transcription,
+                    tagged_input,
                     self._persona,
                     generation_params=self._generation_params,
                     state_trigger=state_trigger,
