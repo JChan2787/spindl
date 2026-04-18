@@ -408,14 +408,19 @@ class TestVoiceMode:
     """Tests for voice modality context."""
 
     def test_voice_modality_context(self, voice_context: BuildContext):
-        """Voice modality context injected."""
+        """Voice modality context injected.
+
+        NANO-115 item #1: Per-turn modality strings retired. Voice variant of
+        the context block still documents the TTS constraint so the model
+        keeps producing speech-friendly responses.
+        """
         providers = [ModalityContextProvider()]
         builder = PromptBuilder(providers=providers)
 
         template = "[MODALITY_CONTEXT]"
         result = builder.build_prompt(template, voice_context)
 
-        assert "voice conversation" in result
+        assert "[Message Type - Voice]" in result
         assert "TTS" in result
 
     def test_voice_modality_rules(self, voice_context: BuildContext):

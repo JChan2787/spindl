@@ -45,11 +45,15 @@ main (protected, always green CI)
 - [ ] CI: green check on PR
 ```
 
-**CI pipeline:** GitHub Actions (`.github/workflows/ci.yml`). Two parallel jobs:
-- Backend: `conda run -n spindl python -m pytest tests/ -m "not hardware" --tb=short -q`
-- Frontend: `cd gui && npm run test:run && npx next build`
+**CI pipeline:** GitHub Actions (`.github/workflows/ci.yml`). Two parallel jobs on `ubuntu-latest`:
+- Backend (Python 3.12, `pip install -e ".[dev]"`, 15 min timeout): `python -m pytest tests/ --tb=short -q -m "not cloud and not vision and not slow and not hardware" --junitxml=test-results.xml`
+- Frontend (Node 22, `npm ci` in `gui/`, 10 min timeout): `npm run test:run` then `npx next build`
 
-Runs on every push and every PR targeting `main`.
+CI runs bare `python` inside `actions/setup-python@v5`. Local dev uses `conda run -n spindl python` — the marker filter and command are otherwise identical. CI excludes four marker groups (`cloud`, `vision`, `slow`, `hardware`); locally you can drop the filter to run everything.
+
+**Not in CI:** `tests_e2e/` (Playwright) requires running services and is invoked manually. The Tauri Rust crates (`spindl-avatar`, `spindl-subtitles`, `spindl-stream-deck`) are not built in CI either.
+
+Runs on every push to `main` and every PR targeting `main`.
 
 ## Quick Reference
 
@@ -66,9 +70,9 @@ Runs on every push and every PR targeting `main`.
 ## Project Layout
 
 ```
-src/spindl/             Python backend (~37,400 lines, 143 files)
-gui/src/                Next.js frontend (~33,600 lines, 157 files)
-tests/                  Backend unit tests (119 test modules, ~29,800 lines)
+src/spindl/             Python backend (~38,170 lines, 144 files)
+gui/src/                Next.js frontend (~34,150 lines, 158 files)
+tests/                  Backend unit tests (98 test modules, ~30,400 lines)
 tests_e2e/              E2E tests (Playwright, 8 modules, 5-config matrix)
 scripts/                dev.py (unified launcher), launcher.py (headless), standalone GUI
 config/                 spindl.yaml.example (runtime config template)
@@ -92,7 +96,7 @@ characters/             User character data (gitignored)
 | `llm/` | Prompt building, LLM dispatch, plugins, sentence segmentation | `LLMProvider` (ABC), `LLMPipeline`, `PromptBuilder`, `PromptBlock`, `SentenceSegmenter` |
 | `llm/builtin/` | LLM backend implementations | `LlamaProvider`, `DeepSeekProvider`, `OpenRouterProvider` |
 | `llm/providers/` | Pipeline content providers | `HistoryProvider`, `PersonaProvider`, `InputProvider`, `VoiceStateProvider`, etc. |
-| `llm/plugins/` | Pre/post-processing pipeline | `PreProcessor` (ABC), `PostProcessor` (ABC), `BudgetEnforcer`, `HistoryInjector`, `ReasoningExtractor`, `SummarizationTrigger`, `CodexActivator`, `CodexCooldown`, `TTSCleanupPlugin` (dual-output: raw→chat, cleaned→TTS/subtitles/history) |
+| `llm/plugins/` | Pre/post-processing pipeline | `PreProcessor` (ABC), `PostProcessor` (ABC), `BudgetEnforcer`, `HistoryInjector`, `TwitchHistoryInjector` (NANO-115), `ConversationHistoryManager` (with empty-assistant guard, NANO-115), `ReasoningExtractor`, `SummarizationTrigger`, `CodexActivator`, `CodexCooldown`, `TTSCleanupPlugin` (dual-output: raw→chat, cleaned→TTS/subtitles/history) |
 | `stt/` | Speech-to-text | `STTProvider` (ABC), `WhisperProvider`, `ParakeetProvider` |
 | `tts/` | Text-to-speech | `TTSProvider` (ABC), `KokoroProvider` |
 | `vision/` | Screen capture + VLM (local, cloud, unified) | `VLMProvider` (ABC), `ScreenCapture`, `VisionProvider`, `LLMVisionProvider` |
@@ -100,7 +104,7 @@ characters/             User character data (gitignored)
 | `characters/` | SillyTavern V2 card models | `Character` (Pydantic), `CharacterLoader` |
 | `codex/` | Lorebook/character book | `CodexActivationManager`, `CodexManager` |
 | `tools/` | Function calling framework | `Tool` (ABC), `ToolExecutor`, `ToolRegistry` |
-| `stimuli/` | Autonomous behavior engine (idle timer, Twitch chat, addressing-others) | `StimulusModule` (ABC), `StimuliEngine`, `PatienceModule`, `TwitchModule` |
+| `stimuli/` | Autonomous behavior engine (idle timer, Twitch chat with `on_message_accepted` callback for transcript persistence, addressing-others) | `StimulusModule` (ABC), `StimuliEngine`, `PatienceModule`, `TwitchModule` |
 | `vts/` | VTubeStudio WebSocket driver | `VTSDriver` |
 | `launcher/` | Service process management | `ServiceRunner`, `HealthChecker`, `LogAggregator` |
 | `gui/` | Socket.IO server, response models | `server.py` (core: connect, lifecycle, emit API), `server_memory.py`, `server_sessions.py`, `server_config.py`, `server_providers.py`, `server_stimuli.py`, `server_vts.py`, `server_avatar.py` (domain handlers — NANO-113), `response_models.py` (Pydantic) |
@@ -192,6 +196,40 @@ STT and TTS are independently toggleable from the launcher GUI. The disable chai
 - STT off: mic toggle disabled on dashboard, MIC badge hidden, Stream Deck toggle disabled (no point without voice input), `launcher-store.selectIsFormComplete` skips STT validation
 - TTS off: character editor TTS fields show "TTS disabled — field ignored" badge, text-only chunk emission via `fallback_chunks`
 
+### Twitch Audience Memory + Source Labeling (NANO-115)
+
+Persistent audience transcript, structural source tags on every user-role turn, and an explicit splice/flatten history-mode control.
+
+**Audience transcript (`llm/plugins/twitch_history.py`):**
+- `TwitchTranscriptManager` — per-stream JSONL sibling file `conversations/{persona}_{timestamp}.twitch.jsonl`. LRU cache (100 entries). Schema: `{turn_id, role: "audience"|"assistant", username, text, timestamp, channel, responding_to}`. Internal-only — never sent to any LLM API.
+- `TwitchHistoryInjector` (`PreProcessor`) — renders the `[AUDIENCE_CHAT]` block (order 9) with chronological + pinned messages, char-cap truncated, self-replies interleaved as `[Spindle]: ...`. Collapses to nothing when transcript is empty.
+- **Dual-write:** `TwitchModule.on_message_accepted` persists every accepted viewer message; `_on_twitch_response` in `orchestrator/callbacks.py` writes Spindle's reply to both the conversation JSONL and the audience transcript with `responding_to: [usernames]`.
+- **Sliders:** `twitch_audience_window` (25–300, default 25 messages) and `twitch_audience_char_cap` (50–500, default 150 chars) — live-swappable from the dashboard Twitch Chat card. Truncated lines get a `...` suffix.
+
+**Twitch fresh batch as user-role message:**
+- The fresh batch *is* the user message. Directive shape: bold markdown line on top, fenced ```chat``` block with `[mmddyyyy-hh-mm-ss:ms]` timestamps per line. Timestamps captured from `ChatMessage.sent_timestamp` on the `TwitchMessage` dataclass.
+- `[TWITCH_CONTEXT]` slot, `_inject_twitch_content()`, and the `twitch_content` metadata field were retired. The `audience_chat` block at order 9 covers rolling memory; the user-role payload covers fresh stimulus.
+
+**Source labeling tags:**
+- `tag_user_input(text, input_modality, stimulus_source)` in `orchestrator/callbacks.py` is the single chokepoint. Applied at three call sites: voice `run()`, voice `run_stream()`, and `process_text_input`.
+- Final taxonomy: `[Message Type - Voice | Direct Keyboard | Twitch Chat | Stimuli]`. ASCII hyphen (JSONL/YAML-safe). Tags are part of message content — they persist verbatim into JSONL and into the `### Conversation` block of subsequent prompts. Old sessions without tags load fine (purely additive).
+- `MODALITY_CONTEXT` in `prompt_library.py` documents the tag grammar once and instructs the model to read the tag when asked about a past message's source. Per-turn modality strings retired — they were deadweight (never persisted into history).
+
+**Empty assistant response guard:**
+- `ConversationHistoryManager.store_turn` in `llm/plugins/conversation_history.py` skips the assistant turn when computed `history_content` is empty or whitespace-only (R1 timeout class of failure). User turn still written. `_next_turn_id` increments by 1 (not 2). `logger.warning` emitted.
+
+**History mode (`force_role_history`):**
+- Two values: `splice` (role-array history outside `[system]:`) and `flatten` (history embedded in system prompt). **Default is `flatten`.** The legacy `auto` value was removed entirely — it always behaved as flatten for every cloud provider (`supports_role_history=False` is the base) and only ever splice for local llama.cpp. Legacy `auto` in YAML or socket payloads is silently coerced to `flatten` with an info log.
+- **Pre-launch control (Launcher page):** `historyMode` is a top-level field on `LauncherConfigSchema`. Toggle writes through `/api/launcher/write-config` POST → Node `fs` writes `llm.force_role_history` to `config/spindl.yaml`. Pre-launch toggles never go through the socket.
+- **Runtime control (Dashboard page):** History Mode segmented toggle in Generation Parameters card emits `set_generation_params` over Socket.IO. The handler is gated on `server._orchestrator is not None` — only safe to use post-launch.
+- **Pipeline override:** `Pipeline._force_role_history` is set from `voice_agent.py` on pipeline creation. `_stash_provider_capabilities` honors it: `splice` forces `provider_supports_role_history=True`, `flatten` forces `False`.
+
+**Gotchas:**
+- **First-turn diagnostic trap.** Splice and flatten produce structurally identical first-turn prompts (no history yet to splice). Verification requires at least a second turn to see the role-array shape outside the `[system]:` block.
+- **Toggle ≠ slider.** Discrete toggles must emit immediately. The Launcher history toggle was briefly debounced like a slider — debounce cancelled emits on page unmount and dropped clicks. Every toggle/button in the codebase emits immediately; only sliders debounce.
+- **`.twitch.jsonl` filtering.** Session viewer + session discovery (`emit_sessions()`, `get_latest_session()`, `.last_session` marker) all explicitly exclude `.twitch.` files. The audience transcript uses `"text"` not `"content"` and `role: "audience"` — would crash session-loading code paths if treated as a regular conversation file.
+- **Pre-existing YAML stickiness.** Code defaults only apply on fresh config. When the C.3 Twitch directive shape was introduced, an existing `config/spindl.yaml` with the old `twitch.prompt_template` value silently kept the old template. For default-template migrations, consider a one-time pass that detects the old default and overwrites it on load.
+
 ### Prompt Composition (Block Model)
 
 The prompt is assembled from 15 configurable blocks:
@@ -200,11 +238,13 @@ The prompt is assembled from 15 configurable blocks:
 persona_name (0) → persona_appearance (1) → persona_personality (2) →
 scenario (3) → example_dialogue (4) → modality_context (5) →
 voice_state (6) → codex_context (7) → rag_context (8) →
-twitch_context (9) → persona_rules (10) → modality_rules (11) →
+audience_chat (9) → persona_rules (10) → modality_rules (11) →
 conversation_summary (12) → recent_history (13) → closing_instruction (14)
 ```
 
-Each block has: `order`, `enabled`, `section_header`, `content_wrapper`, `user_override`. Blocks can be reordered, disabled, or overridden via `spindl.yaml` under `prompt_blocks:`. The dashboard's Prompt Workshop page provides a visual editor. Deferred blocks (`codex_context`, `rag_context`, `twitch_context`, `recent_history`) have their content populated at runtime by pipeline injection.
+Each block has: `order`, `enabled`, `section_header`, `content_wrapper`, `user_override`. Blocks can be reordered, disabled, or overridden via `spindl.yaml` under `prompt_blocks:`. The dashboard's Prompt Workshop page provides a visual editor. Deferred blocks (`codex_context`, `rag_context`, `audience_chat`, `recent_history`) have their content populated at runtime by pipeline injection.
+
+**NANO-115:** `audience_chat` (order 9) is the rolling Twitch audience transcript. The retired `twitch_context` slot — formerly a fresh-batch system block — was eliminated when fresh Twitch batches became the actual user-role message (see "Twitch Audience Memory" below).
 
 ### Memory System
 
@@ -303,21 +343,22 @@ Standalone Tauri 2 app (`spindl-stream-deck/`). Dynamic button grid — one hold
 
 ### State Management
 
-11 Zustand stores in `gui/src/lib/stores/`:
+12 Zustand stores in `gui/src/lib/stores/`:
 
 | Store | Scope |
 |-------|-------|
 | `agent-store` | Pipeline state, transcription, responses, health, tools, audio/mic level, shutdown |
 | `chat-store` | Chat message history, hydration, metadata (emotion, codex, memories, reasoning) |
 | `connection-store` | Socket.IO connection status |
-| `launcher-store` | Service config, launch progress, model lists, validation, STT/TTS enable toggles |
+| `launcher-store` | Service config, launch progress, model lists, validation, STT/TTS enable toggles, `historyMode` (NANO-115 pre-launch splice/flatten) |
 | `character-store` | Character CRUD, avatar data, VRM binding, import/export |
 | `codex-store` | Global + per-character lorebook entries |
 | `memory-store` | Memory collections (general/flashcards/summaries), search, CRUD |
 | `prompt-store` | Current prompt snapshot (messages + token breakdown) |
 | `block-editor-store` | Block config editing state, drag-to-reorder, field overrides |
-| `settings-store` | VAD, pipeline, memory, generation params, stimuli (patience, twitch, addressing-others contexts), tools, LLM/VLM runtime, avatar config (emotion classifier, fade delay, subtitles, stream deck, Tauri install state, connection status) |
+| `settings-store` | VAD, pipeline, memory, generation params (`force_role_history`: `splice | flatten`, NANO-115), stimuli (patience, twitch with `audience_window`/`audience_char_cap`, addressing-others contexts), tools, LLM/VLM runtime, avatar config (emotion classifier, fade delay, subtitles, stream deck, Tauri install state, connection status) |
 | `session-store` | Conversation history, session resume/delete/summarize |
+| `vts-store` | VTubeStudio connection state, plugin auth, hotkey/expression/parameter/model lists |
 
 **Data flow:** `SocketProvider` (root context) listens to 100+ socket events → calls Zustand store setters → components re-render via selectors.
 
@@ -423,8 +464,9 @@ Key sections:
 - `character:` — default character, character directory
 - `services:` — per-service config (enabled, platform, command, health_check, depends_on). STT and TTS have `enabled` flags that gate provider initialization — these are the flags the launcher GUI toggles write to (NANO-112)
 - `providers:` — LLM, STT, TTS, VLM provider settings
+- `llm:` — generation params (temperature, top_p, max_tokens, repeat_penalty, etc.) + `force_role_history`: `splice | flatten` (NANO-115, default `flatten`; legacy `auto` coerced to `flatten` on load)
 - `memory:` — enabled, relevance_threshold, top_k, reflection_interval, reflection_prompt, reflection_system_message, reflection_delimiter, scoring_w_relevance, scoring_w_recency
-- `stimuli:` — enabled, patience config (enabled, seconds, prompt), twitch config (enabled, channel, credentials), addressing_others config (contexts list with id/label/prompt)
+- `stimuli:` — enabled, patience config (enabled, seconds, prompt), twitch config (enabled, channel, credentials, `twitch_audience_window` 25–300, `twitch_audience_char_cap` 50–500, prompt_template — NANO-115), addressing_others config (contexts list with id/label/prompt)
 - `avatar:` — enabled, emotion_classifier, show_emotion_in_chat, confidence_threshold, expression_fade_delay
 - `vtubestudio:` — enabled, host, port, plugin name
 - `prompt_blocks:` — per-block overrides (order, enabled, content)

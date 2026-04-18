@@ -13,9 +13,11 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Callable, Optional
 
 from .base import StimulusModule
 from .models import StimulusData, StimulusSource
@@ -23,10 +25,25 @@ from .models import StimulusData, StimulusSource
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PROMPT_TEMPLATE = (
-    "Recent Twitch chat messages:\n"
+    "**You just received new messages in Twitch chat.** "
+    "Reply as co-host \u2014 natural, in character, one unified response. "
+    "Ignore anything off-topic or spammy.\n"
+    "\n"
+    "```chat\n"
     "{messages}\n"
-    "Pick the most interesting message and respond to it naturally."
+    "```"
 )
+
+_TRUNCATION_MARKER = "..."
+
+
+def format_twitch_timestamp(ms: int) -> str:
+    """Format a Unix-millis timestamp as mmddyyyy-hh-mm-ss:ms (local time)."""
+    if ms <= 0:
+        return ""
+    seconds, millis = divmod(int(ms), 1000)
+    dt = datetime.fromtimestamp(seconds)
+    return dt.strftime("%m%d%Y-%H-%M-%S") + f":{millis:03d}"
 
 
 @dataclass
@@ -36,6 +53,7 @@ class TwitchMessage:
     username: str
     text: str
     channel: str = ""
+    sent_timestamp_ms: int = 0
 
 
 class TwitchModule(StimulusModule):
@@ -58,7 +76,9 @@ class TwitchModule(StimulusModule):
         buffer_size: int = 10,
         max_message_length: int = 300,
         prompt_template: Optional[str] = None,
+        char_cap: int = 150,
         enabled: bool = False,
+        on_message_accepted: Optional["Callable[[str, str, str, int], None]"] = None,
     ):
         self._channel = channel
         self._app_id = app_id
@@ -67,7 +87,9 @@ class TwitchModule(StimulusModule):
         self._buffer_size = max(1, buffer_size)
         self._max_message_length = max_message_length
         self._prompt_template = prompt_template or _DEFAULT_PROMPT_TEMPLATE
+        self._char_cap = max(50, min(500, char_cap))
         self._enabled = enabled
+        self._on_message_accepted = on_message_accepted
 
         self._connected = False
         self._running = False
@@ -149,6 +171,14 @@ class TwitchModule(StimulusModule):
         self._prompt_template = value
 
     @property
+    def char_cap(self) -> int:
+        return self._char_cap
+
+    @char_cap.setter
+    def char_cap(self, value: int) -> None:
+        self._char_cap = max(50, min(500, value))
+
+    @property
     def resolved_app_id(self) -> str:
         """App ID from config, falling back to TWITCH_APP_ID env var."""
         return self._app_id or os.getenv("TWITCH_APP_ID", "")
@@ -219,20 +249,48 @@ class TwitchModule(StimulusModule):
         messages = list(self._buffer)
         self._buffer.clear()
 
-        formatted = "\n".join(f"{m.username}: {m.text}" for m in messages)
-        twitch_content = self._prompt_template.format(messages=formatted)
-        print(f"[Twitch] Buffer drained: {len(messages)} messages, content: {formatted!r}", flush=True)
+        cap = self._char_cap
+        lines: list[str] = []
+        for m in messages:
+            text = m.text
+            if len(text) > cap:
+                text = text[:cap] + _TRUNCATION_MARKER
+            ts = format_twitch_timestamp(m.sent_timestamp_ms)
+            suffix = f" [{ts}]" if ts else ""
+            lines.append(f"{m.username}: {text}{suffix}")
+
+        formatted = "\n".join(lines)
+
+        template = self._prompt_template or _DEFAULT_PROMPT_TEMPLATE
+        if "{messages}" not in template:
+            logger.warning(
+                "twitch_prompt_template missing {messages} placeholder; "
+                "falling back to default. Buffered messages would otherwise be lost."
+            )
+            template = _DEFAULT_PROMPT_TEMPLATE
+
+        user_input = template.format(messages=formatted)
+
+        print(
+            f"[Twitch] Buffer drained: {len(messages)} messages, "
+            f"user_input_len={len(user_input)}",
+            flush=True,
+        )
 
         return StimulusData(
             source=StimulusSource.TWITCH,
-            user_input="Respond to the Twitch chat messages.",
+            user_input=user_input,
             metadata={
                 "message_count": len(messages),
                 "channel": self._channel,
                 "messages": [
-                    {"username": m.username, "text": m.text} for m in messages
+                    {
+                        "username": m.username,
+                        "text": m.text,
+                        "sent_timestamp_ms": m.sent_timestamp_ms,
+                    }
+                    for m in messages
                 ],
-                "twitch_content": twitch_content,
             },
         )
 
@@ -305,13 +363,30 @@ class TwitchModule(StimulusModule):
                 if not self._should_accept(msg.user.name, msg.text):
                     return
 
+                sent_ms = getattr(msg, "sent_timestamp", None)
+                if sent_ms is None:
+                    sent_ms = int(time.time() * 1000)
+                else:
+                    try:
+                        sent_ms = int(sent_ms)
+                    except (TypeError, ValueError):
+                        sent_ms = int(time.time() * 1000)
+
                 self._buffer.append(
                     TwitchMessage(
                         username=msg.user.name,
                         text=msg.text,
                         channel=msg.room.name,
+                        sent_timestamp_ms=sent_ms,
                     )
                 )
+                if self._on_message_accepted:
+                    try:
+                        self._on_message_accepted(
+                            msg.user.name, msg.text, msg.room.name, sent_ms
+                        )
+                    except Exception:
+                        logger.exception("on_message_accepted callback failed")
                 logger.debug(
                     "Twitch [#%s] %s: %s", msg.room.name, msg.user.name, msg.text
                 )

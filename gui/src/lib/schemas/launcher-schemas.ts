@@ -157,6 +157,10 @@ export const LauncherConfigSchema = z.object({
   ttsProviderType: z.enum(["local", "cloud"]),
   ttsLocal: TTSLocalConfigSchema,
   embedding: EmbeddingConfigSchema.optional(),
+  // NANO-115 Session 645: History mode picked pre-launch. Persists to
+  // llm.force_role_history in YAML so the orchestrator picks it up on boot.
+  // Legacy "auto" values in YAML are coerced to "flatten" by the backend on load.
+  historyMode: z.enum(["splice", "flatten"]).default("flatten"),
 });
 
 // ============================================

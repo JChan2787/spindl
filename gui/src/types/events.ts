@@ -184,6 +184,8 @@ export interface ConfigLoadedEvent {
       temperature: number;
       max_tokens: number;
       top_p: number;
+      top_k: number;
+      min_p: number;
       repeat_penalty: number;
       repeat_last_n: number;
       frequency_penalty: number;
@@ -207,6 +209,9 @@ export interface ConfigLoadedEvent {
       model: string;
       context_size: number | null;
       available_providers: string[];
+      // NANO-114: True when active provider's chat template benefits from
+      // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
+      supports_role_history?: boolean;
     };
     // NANO-093/094: Avatar bridge config
     avatar?: {
@@ -287,6 +292,10 @@ export interface ChatHistoryTurn {
   // NANO-094: Emotion classifier metadata
   emotion?: string; // assistant turns
   emotion_confidence?: number; // assistant turns
+  // NANO-111 Phase 2.5 / Session 639: set when this assistant turn was
+  // truncated by a barge-in. `text` is already the truncated form on
+  // reload; this flag is purely display-layer metadata.
+  barge_in_truncated?: boolean; // assistant turns
 }
 
 export interface ChatHistoryEvent {
@@ -342,10 +351,13 @@ export interface GenerationParamsUpdatedEvent {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  top_k: number;
+  min_p: number;
   repeat_penalty: number;
   repeat_last_n: number;
   frequency_penalty: number;
   presence_penalty: number;
+  force_role_history: "splice" | "flatten";
   persisted: boolean;
 }
 
@@ -353,6 +365,13 @@ export interface SetGenerationParamsPayload {
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
+  top_k?: number;
+  min_p?: number;
+  repeat_penalty?: number;
+  repeat_last_n?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  force_role_history?: "splice" | "flatten";
 }
 
 // NANO-065a: Runtime tools toggle
@@ -378,6 +397,9 @@ export interface LLMConfigUpdatedEvent {
   model: string;
   context_size: number | null;
   available_providers: string[];
+  // NANO-114: True when active provider's chat template benefits from
+  // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
+  supports_role_history?: boolean;
   persisted?: boolean;
   success?: boolean;
   error?: string;
@@ -575,6 +597,8 @@ export interface SetStimuliConfigPayload {
   twitch_buffer_size?: number;
   twitch_max_message_length?: number;
   twitch_prompt_template?: string;
+  twitch_audience_window?: number;
+  twitch_audience_char_cap?: number;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts?: AddressingContext[];
 }

@@ -21,6 +21,9 @@ import {
   FileText,
   Loader2,
   AlertCircle,
+  Settings,
+  Users,
+  HelpCircle,
 } from "lucide-react";
 import { useSessionStore } from "@/lib/stores";
 import type { Turn } from "@/types/events";
@@ -46,28 +49,45 @@ function formatTimestamp(iso: string): string {
 function TurnCard({ turn, defaultOpen }: { turn: Turn; defaultOpen: boolean }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
-  const roleConfig = {
+  const roleConfig: Record<string, { icon: typeof User; label: string; className: string; badgeVariant: "default" | "secondary" | "outline" }> = {
     user: {
       icon: User,
       label: "User",
       className: "border-l-blue-500",
-      badgeVariant: "default" as const,
+      badgeVariant: "default",
     },
     assistant: {
       icon: Bot,
       label: "Assistant",
       className: "border-l-green-500",
-      badgeVariant: "secondary" as const,
+      badgeVariant: "secondary",
     },
     summary: {
       icon: FileText,
       label: "Summary",
       className: "border-l-yellow-500",
-      badgeVariant: "outline" as const,
+      badgeVariant: "outline",
+    },
+    system: {
+      icon: Settings,
+      label: "System",
+      className: "border-l-purple-500",
+      badgeVariant: "outline",
+    },
+    audience: {
+      icon: Users,
+      label: "Audience",
+      className: "border-l-orange-500",
+      badgeVariant: "outline",
     },
   };
 
-  const config = roleConfig[turn.role];
+  const config = roleConfig[turn.role] ?? {
+    icon: HelpCircle,
+    label: turn.role,
+    className: "border-l-gray-500",
+    badgeVariant: "outline" as const,
+  };
   const Icon = config.icon;
 
   return (

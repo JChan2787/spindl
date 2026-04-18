@@ -18,6 +18,14 @@ class LLMConfigResponse(BaseModel):
     model: Optional[str] = None
     context_size: Optional[int] = None
     available_providers: list[str] = []
+    # NANO-114: True when active provider's chat template benefits from role-array
+    # history (Gemma-3/Gemma-4 via llama.cpp --jinja). Frontend reads this to
+    # lock the Workshop's recent_history block position and render the Message
+    # Array Preview panel.
+    supports_role_history: bool = False
+    # NANO-115: User-owned history mode — "splice" or "flatten".
+    # Session 645: removed "auto"; "flatten" is the new default.
+    force_role_history: str = "flatten"
 
 
 class CloudVLMConfig(BaseModel):

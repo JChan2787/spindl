@@ -255,7 +255,7 @@ class PromptBuilder:
         persona_name = context.persona.get("name", "Assistant")
 
         # IDs of blocks whose real content arrives after preprocessing (NANO-045b)
-        _DEFERRED_BLOCK_IDS = {"codex_context", "rag_context", "recent_history", "twitch_context"}
+        _DEFERRED_BLOCK_IDS = {"codex_context", "rag_context", "recent_history", "audience_chat"}
 
         # Assemble blocks in order, capturing per-block content data (NANO-045b)
         parts: list[str] = []

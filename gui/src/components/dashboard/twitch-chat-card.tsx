@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Tv, Wifi, WifiOff, Layers, MessageSquare } from "lucide-react";
+import { Tv, Wifi, WifiOff, Layers, MessageSquare, History, Scissors } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -110,18 +110,40 @@ export function TwitchChatCard() {
     }
   }, [effectiveConfig.twitch_prompt_template]);
 
+  const twitchPromptMissingPlaceholder =
+    localTwitchPrompt.trim().length > 0 && !localTwitchPrompt.includes("{messages}");
+
   const handleTwitchPromptBlur = useCallback(() => {
+    if (twitchPromptMissingPlaceholder) {
+      return;
+    }
     if (localTwitchPrompt !== twitchPromptSyncedRef.current) {
       updatePendingStimuli({ twitch_prompt_template: localTwitchPrompt });
       emitChanges({ twitch_prompt_template: localTwitchPrompt });
       twitchPromptSyncedRef.current = localTwitchPrompt;
     }
-  }, [localTwitchPrompt, updatePendingStimuli, emitChanges]);
+  }, [localTwitchPrompt, twitchPromptMissingPlaceholder, updatePendingStimuli, emitChanges]);
 
   const handleBufferSizeChange = useCallback(
     (value: number) => {
       updatePendingStimuli({ twitch_buffer_size: value });
       emitChanges({ twitch_buffer_size: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleAudienceWindowChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ twitch_audience_window: value });
+      emitChanges({ twitch_audience_window: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleAudienceCharCapChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ twitch_audience_char_cap: value });
+      emitChanges({ twitch_audience_char_cap: value });
     },
     [updatePendingStimuli, emitChanges]
   );
@@ -207,6 +229,28 @@ export function TwitchChatCard() {
               onChange={handleBufferSizeChange}
             />
 
+            <Slider
+              label="Audience Window"
+              value={effectiveConfig.twitch_audience_window}
+              min={25}
+              max={300}
+              step={5}
+              icon={<History className="h-3 w-3" />}
+              onChange={handleAudienceWindowChange}
+              unit=" msgs"
+            />
+
+            <Slider
+              label="Message Length Cap"
+              value={effectiveConfig.twitch_audience_char_cap}
+              min={50}
+              max={500}
+              step={10}
+              icon={<Scissors className="h-3 w-3" />}
+              onChange={handleAudienceCharCapChange}
+              unit=" chars"
+            />
+
             <div className="space-y-1">
               <Label className="flex items-center gap-2 text-xs">
                 <MessageSquare className="h-3 w-3" />
@@ -217,9 +261,15 @@ export function TwitchChatCard() {
                 onChange={(e) => setLocalTwitchPrompt(e.target.value)}
                 onBlur={handleTwitchPromptBlur}
                 rows={3}
-                className="text-xs resize-none"
+                className={`text-xs resize-none ${twitchPromptMissingPlaceholder ? "border-red-500" : ""}`}
                 placeholder="Template for Twitch chat injection..."
+                aria-invalid={twitchPromptMissingPlaceholder}
               />
+              {twitchPromptMissingPlaceholder && (
+                <p className="text-xs text-red-500">
+                  Template must contain {"{messages}"}. Without it, buffered Twitch messages have nowhere to render and the model receives only the directive text. Changes will not save until this is fixed.
+                </p>
+              )}
             </div>
 
             {/* Live message preview */}

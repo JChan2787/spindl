@@ -86,6 +86,13 @@ class LLMProperties:
     False for models with strict user/assistant alternation (e.g., gemma3).
     When False, tool results are sent as role: 'user' instead."""
 
+    supports_role_history: bool = False
+    """True if the provider's chat template benefits from role-array history
+    (real user/assistant message entries wrapped by the template) instead of
+    flattened bracket-formatted text inside the system prompt. Enables
+    NANO-114 splice path in HistoryInjector. Default False preserves legacy
+    flattened behavior for providers not explicitly opted in."""
+
 
 @dataclass
 class LLMResponse:

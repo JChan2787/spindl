@@ -98,6 +98,7 @@ export default function LauncherPage() {
           ttsProviderType: store.ttsProviderType,
           ttsLocal: store.ttsLocal,
           embedding: store.embedding,
+          historyMode: store.historyMode,
         }),
       });
 

@@ -171,7 +171,8 @@ def get_latest_session(conversations_dir: Path, persona_id: str) -> Path | None:
         saved_name = marker.read_text(encoding="utf-8").strip()
         if saved_name:
             saved_path = conversations_dir / saved_name
-            if saved_path.exists() and saved_path.stat().st_size > 0:
+            if (saved_path.exists() and saved_path.stat().st_size > 0
+                    and ".twitch." not in saved_name):
                 return saved_path
 
     # Fallback: most recent by filename
@@ -179,7 +180,7 @@ def get_latest_session(conversations_dir: Path, persona_id: str) -> Path | None:
     sessions = sorted(
         (
             p for p in conversations_dir.glob(pattern)
-            if ".snapshot." not in p.name and p.stat().st_size > 0
+            if ".snapshot." not in p.name and ".twitch." not in p.name and p.stat().st_size > 0
         ),
         reverse=True,
     )

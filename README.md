@@ -21,9 +21,10 @@ You talk, it listens, it talks back. The whole voice loop runs locally — mic �
 - **Avatar** — Standalone Tauri 2 + Three.js desktop overlay. Loads VRM models, does lipsync, tracks your cursor, and reacts with facial expressions and body animations based on what it's saying. Emotion classifier picks the mood, which drives both per-character expression composites (custom blend shape recipes) and base animation slots (idle, happy, sad, angry, curious) using Mixamo FBX clips retargeted to VRM skeletons. Assign different VRM models and animation sets per character.
 - **Stream Subtitles** — Separate Tauri 2 window for OBS compositing. Typewriter text synced to TTS duration, chroma key backgrounds, configurable fade. Just window-capture it in OBS.
 - **Stimuli** — The character doesn't just wait for you. It'll start talking on its own if you go idle, and it reads Twitch chat. You can write your own stimulus modules too.
+- **Twitch Audience Memory** — Persistent per-stream audience transcript (sidecar JSONL) with self-recall. The character remembers viewers by username across the whole stream — both their messages and her own replies — so she doesn't re-answer questions or forget who's been talking. Configurable rolling window (25–300 messages) and per-message char cap (50–500). Every user-role turn carries a structural source tag (`[Message Type - Voice | Direct Keyboard | Twitch Chat | Stimuli]`) that persists into history, so the character can tell where any past message came from.
 - **Stream Deck** — Standalone Tauri 2 overlay with hold-to-activate buttons. Signal when you're talking to chat, mods, Discord, or someone in the room — the character suppresses responses while held and gets context-aware prompting on release. Multiple named contexts, each with its own button and custom prompt. Dynamic add/remove from the dashboard.
 - **Prompt Workshop** — Block-based prompt editor. See exactly how many tokens each section costs, reorder them, override individual blocks with your own text, wrap them with injection prefixes/suffixes.
-- **Generation Control** — Temperature, top-p, max tokens, repeat penalty, repeat window, frequency penalty, and presence penalty — all adjustable from the dashboard mid-conversation. Values persist across restarts.
+- **Generation Control** — Temperature, top-p, max tokens, repeat penalty, repeat window, frequency penalty, presence penalty, and history mode (splice role-array vs. flatten-into-system) — all adjustable from the dashboard mid-conversation. Values persist across restarts. History mode is also pickable pre-launch from the Launcher page.
 - **Runtime Swapping** — Switch LLM or VLM providers mid-conversation from the dashboard. No restart needed.
 - **Chat Interface** — Text and voice in one view. Message history persists across sessions.
 - **Web Dashboard** — Next.js control panel. Character portrait with audio-reactive glow, real-time pipeline status, config, prompt editing, memory curation, session browser.
@@ -126,7 +127,7 @@ For headless mode, avatar setup, subtitles, tests, and more — see the [Usage G
 
 ```
 spindl/
-├── src/spindl/               # Backend (Python, ~37,400 lines, 143 files)
+├── src/spindl/               # Backend (Python, ~38,170 lines, 144 files)
 │   ├── audio/                #   Mic capture, speaker playback, Silero VAD
 │   ├── avatar/               #   Emotion classifier (DistilBERT/ONNX), tool mood mapping
 │   ├── characters/           #   SillyTavern V2 card models, import/export
@@ -149,16 +150,16 @@ spindl/
 │   ├── utils/                #   Shared utilities
 │   ├── vision/               #   Screen capture + VLM providers (local, cloud, unified)
 │   └── vts/                  #   VTubeStudio WebSocket driver
-├── gui/                      # Frontend (Next.js + React + TypeScript, ~32,800 lines, 157 files)
+├── gui/                      # Frontend (Next.js + React + TypeScript, ~34,150 lines, 158 files)
 │   └── src/
 │       ├── app/              #   9 pages (dashboard, launcher, characters, settings, etc.)
 │       ├── components/       #   100+ feature components + Radix UI design system
-│       └── lib/              #   11 Zustand stores, Socket.IO client, Zod schemas
+│       └── lib/              #   12 Zustand stores, Socket.IO client, Zod schemas
 ├── spindl-avatar/            # Standalone avatar renderer (Tauri 2 + Three.js + VRM)
 ├── spindl-subtitles/         # Stream subtitle overlay (Tauri 2, OBS-compositable)
 ├── spindl-stream-deck/       # Addressing-others button overlay (Tauri 2, hold-to-activate)
 ├── Cargo.toml                # Workspace root — shared target/ across all Tauri apps
-├── tests/                    # 116 unit test modules (~29,000 lines)
+├── tests/                    # 98 unit test modules (~30,400 lines)
 ├── tests_e2e/                # 8 E2E test modules (Playwright, 5-config matrix)
 ├── scripts/                  # Launcher, migration, standalone GUI
 ├── config/                   # spindl.yaml.example template

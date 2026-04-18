@@ -33,7 +33,7 @@ You are [PERSONA_NAME].
 
 [RAG_CONTEXT]
 
-[TWITCH_CONTEXT]
+[AUDIENCE_CHAT]
 
 ### Rules
 
@@ -92,9 +92,26 @@ VOICE_STATE_INJECTIONS: dict[str, str] = {
 
 # Modality context descriptions.
 # Injected to inform the model about the interaction mode.
+# NANO-115 item #1: Per-turn modality strings retired. Replaced with a tag
+# vocabulary spec — user-role messages are prefixed with `[Message Type - Subtype] `
+# tags (applied in orchestrator/callbacks.py::tag_user_input), so modality and
+# origin survive into conversation history rather than living only on the
+# current turn's system prompt. Voice vs text still drives MODALITY_RULES
+# (response style), but the context block documents the grammar once.
+_TAG_VOCABULARY_SPEC = (
+    "Each user-role message is prefixed with a `[Message Type - Subtype]` tag that "
+    "identifies how the message reached you: "
+    "`[Message Type - Voice]` means your User spoke it aloud and the STT layer transcribed it; "
+    "`[Message Type - Direct Keyboard]` means your User typed it into the Dashboard; "
+    "`[Message Type - Twitch Chat]` means the content came from live Twitch chat viewers; "
+    "`[Message Type - Stimuli]` means an automated prompt fired while no live input was present "
+    "(for example an idle-timer nudge). "
+    "When asked about the source of a past message, read the tag on that turn. "
+    "Respond to the content as you normally would - do not echo the tag."
+)
 MODALITY_CONTEXT: dict[str, str] = {
-    "voice": "This is a live voice conversation. Your response will be spoken aloud via TTS.",
-    "text": "This is a text conversation.",
+    "voice": _TAG_VOCABULARY_SPEC + " Your response will be spoken aloud via TTS.",
+    "text": _TAG_VOCABULARY_SPEC,
 }
 
 # Default addressing-others prompt (NANO-110).

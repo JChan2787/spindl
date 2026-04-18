@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Brain, Cloud, HardDrive } from "lucide-react";
+import { Brain, Cloud, GitBranch, HardDrive } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -389,7 +389,7 @@ function CloudLLMFields() {
 }
 
 export function LLMSection() {
-  const { llmProviderType, setLLMProviderType } = useLauncherStore();
+  const { llmProviderType, setLLMProviderType, historyMode, setHistoryMode } = useLauncherStore();
 
   return (
     <Card>
@@ -423,6 +423,31 @@ export function LLMSection() {
             <CloudLLMFields />
           </TabsContent>
         </Tabs>
+
+        <div className="border-t border-border pt-4 mt-4">
+          <p className="text-xs font-medium text-muted-foreground mb-3 flex items-center gap-2">
+            <GitBranch className="h-3 w-3" />
+            History Mode
+          </p>
+          <div className="flex gap-1 rounded-md bg-muted p-1">
+            {(["splice", "flatten"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setHistoryMode(mode)}
+                className={`flex-1 text-xs py-1.5 px-2 rounded transition-colors ${
+                  historyMode === mode
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {mode === "splice" ? "Splice" : "Flatten"}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            Splice sends real role-array turns (required for Gemma). Flatten embeds history as text in the system prompt. Applied on next launch.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

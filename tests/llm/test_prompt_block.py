@@ -145,9 +145,9 @@ class TestDefaultBlocks:
         expected = {
             "persona_name", "persona_appearance", "persona_personality",
             "scenario", "example_dialogue", "modality_context", "voice_state",
-            "codex_context", "rag_context", "twitch_context", "persona_rules",
-            "modality_rules", "conversation_summary", "recent_history",
-            "closing_instruction",
+            "codex_context", "rag_context", "audience_chat",
+            "persona_rules", "modality_rules", "conversation_summary",
+            "recent_history", "closing_instruction",
         }
         assert ids == expected
 
@@ -163,13 +163,13 @@ class TestDefaultBlocks:
         }
 
     def test_late_stage_blocks_are_static(self, default_blocks: list[PromptBlock]):
-        """Codex, RAG, Twitch, and history blocks are static with placeholder content."""
+        """Codex, RAG, Audience, and history blocks are static with placeholder content."""
         block_map = {b.id: b for b in default_blocks}
 
         for block_id, expected_content in [
             ("codex_context", "[CODEX_CONTEXT]"),
             ("rag_context", "[RAG_CONTEXT]"),
-            ("twitch_context", "[TWITCH_CONTEXT]"),
+            ("audience_chat", "[AUDIENCE_CHAT]"),
             ("recent_history", "[RECENT_HISTORY]"),
         ]:
             block = block_map[block_id]
@@ -477,13 +477,13 @@ class TestBlockAssembly:
         assert "asterisks" not in system
 
     def test_late_stage_placeholders_preserved(self, structured_persona: dict):
-        """Codex, RAG, Twitch, and history placeholders survive in assembled prompt."""
+        """Codex, RAG, Audience, and history placeholders survive in assembled prompt."""
         messages = self._build_with_blocks(structured_persona)
         system = messages[0]["content"]
 
         assert "[CODEX_CONTEXT]" in system
         assert "[RAG_CONTEXT]" in system
-        assert "[TWITCH_CONTEXT]" in system
+        assert "[AUDIENCE_CHAT]" in system
         assert "[RECENT_HISTORY]" in system
 
     def test_closing_instruction_dynamic(self, structured_persona: dict):
@@ -674,7 +674,7 @@ class TestBlockContentsCapture:
         """Only injection blocks are flagged as deferred."""
         ctx = self._build_and_get_context(structured_persona)
         deferred_ids = {e["id"] for e in ctx.block_contents if e["deferred"]}
-        assert deferred_ids == {"codex_context", "rag_context", "twitch_context", "recent_history"}
+        assert deferred_ids == {"codex_context", "rag_context", "audience_chat", "recent_history"}
 
     def test_provider_blocks_have_nonzero_chars(self, structured_persona: dict):
         """Provider-backed blocks with content have positive char counts."""

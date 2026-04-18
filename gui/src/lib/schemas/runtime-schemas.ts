@@ -19,6 +19,15 @@ export const LLMConfigUpdatedSchema = z.object({
   model: z.string().nullable().optional().default(null),
   context_size: z.number().nullable().optional().default(null),
   available_providers: z.array(z.string()).default([]),
+  // NANO-114: True when active provider's chat template benefits from
+  // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
+  supports_role_history: z.boolean().optional().default(false),
+  // Session 645: removed "auto"; legacy values are coerced to "flatten".
+  force_role_history: z
+    .enum(["splice", "flatten"])
+    .or(z.literal("auto").transform(() => "flatten" as const))
+    .optional()
+    .default("flatten"),
   persisted: z.boolean().optional(),
   success: z.boolean().optional(),
   error: z.string().optional(),
@@ -61,6 +70,8 @@ export const LocalLLMConfigEventSchema = z.object({
     temperature: z.number().optional(),
     max_tokens: z.number().optional(),
     top_p: z.number().optional(),
+    top_k: z.number().optional(),
+    min_p: z.number().optional(),
     repeat_penalty: z.number().optional(),
     repeat_last_n: z.number().optional(),
     frequency_penalty: z.number().optional(),
@@ -183,6 +194,8 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_buffer_size: z.number().int().min(1).max(50),
   twitch_max_message_length: z.number().int().min(50).max(1000),
   twitch_prompt_template: z.string(),
+  twitch_audience_window: z.number().int().min(25).max(300).default(25),
+  twitch_audience_char_cap: z.number().int().min(50).max(500).default(150),
   twitch_has_credentials: z.boolean(),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),

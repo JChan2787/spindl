@@ -1,7 +1,11 @@
 """Conversation history plugin for persistent multi-turn conversations."""
 
+import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from .base import PipelineContext, PreProcessor, PostProcessor
 from ...history.jsonl_store import (
@@ -13,6 +17,27 @@ from ...history.jsonl_store import (
     get_next_turn_id,
     save_last_session,
 )
+
+# NANO-114 Phase 3: Structural-token patterns that indicate Gemma-4-style
+# chat-template pollution in assistant output. When these appear in content
+# destined for history replay, the content is collapsed to an inert placeholder
+# to prevent compounding pollution across barge-in cycles.
+_STRUCTURAL_TOKEN_PATTERNS = (
+    re.compile(r"(?m)^\s*#{2,}\s+\w"),       # "### Rules", "## Context", etc.
+    re.compile(r"<\s*(start|end)_of_turn\s*>", re.IGNORECASE),
+    re.compile(r"<\|[^|>]+\|>"),              # <|im_start|>, <|endoftext|>, etc.
+)
+_SANITIZED_PLACEHOLDER = "[interrupted]"
+
+
+def _is_structurally_polluted(content: str) -> bool:
+    """
+    Return True if content contains chat-template structural tokens that
+    would compound if replayed through history (NANO-114 §Smoke Test Findings).
+    """
+    if not content:
+        return False
+    return any(pat.search(content) for pat in _STRUCTURAL_TOKEN_PATTERNS)
 
 
 class ConversationHistoryManager:
@@ -201,6 +226,24 @@ class ConversationHistoryManager:
         # Preserve raw response as display_content for JSONL inspection.
         history_content = tts_text if tts_text else response
 
+        # NANO-115 item #4: empty/whitespace assistant guard.
+        # R1 timeouts and similar silent failures produce a blank response that,
+        # if committed, pollutes history with a dangling `[assistant]:` turn.
+        # Write the user turn (they did say something), skip the assistant turn,
+        # log the failure so it's visible instead of silent. Next LLM turn sees
+        # user -> user and recovers naturally.
+        if not history_content or not history_content.strip():
+            logger.warning(
+                "Empty/whitespace assistant response; writing user turn only, "
+                "skipping assistant turn (turn_id=%d)",
+                self._next_turn_id,
+            )
+            append_turn(self._session_file, user_turn)
+            self._history.append(user_turn)
+            self._next_turn_id += 1
+            self._pending_user_input = None
+            return
+
         assistant_turn = {
             "turn_id": self._next_turn_id + 1,
             "uuid": generate_uuid(),
@@ -243,20 +286,33 @@ class ConversationHistoryManager:
         Updates both in-memory history and the JSONL file on disk.
         Called when barge-in truncates the response to only delivered sentences.
 
+        NANO-114 Phase 3: If truncated content contains structural tokens
+        (e.g. '### Rules', '<start_of_turn>', '<|im_start|>'), the replay
+        content is collapsed to '[interrupted]' to prevent compounding
+        pollution across barge-in cycles on strict chat-template models.
+        The original polluted generation is preserved on display_content.
+
         Args:
             truncated_content: The text that was actually spoken/delivered.
         """
         if not self._history:
             return
 
+        polluted = _is_structurally_polluted(truncated_content)
+        replay_content = _SANITIZED_PLACEHOLDER if polluted else truncated_content
+
         # Find the last assistant turn in memory
         for i in range(len(self._history) - 1, -1, -1):
             if self._history[i].get("role") == "assistant":
                 original = self._history[i].get("content", "")
-                self._history[i]["content"] = truncated_content
-                # Preserve the full generation as display_content for inspection
+                self._history[i]["content"] = replay_content
+                # Preserve the full generation as display_content for inspection.
+                # If pollution was detected, also preserve the pre-sanitization
+                # truncated form so the UI can show what the model emitted.
                 if "display_content" not in self._history[i]:
                     self._history[i]["display_content"] = original
+                if polluted:
+                    self._history[i]["sanitized_from"] = truncated_content
                 break
         else:
             return  # No assistant turn found
@@ -264,11 +320,14 @@ class ConversationHistoryManager:
         # Amend the JSONL file on disk
         if self._session_file and self._session_file.exists():
             from ...history.jsonl_store import patch_last_turn
-            patch_last_turn(self._session_file, {
-                "content": truncated_content,
+            patch = {
+                "content": replay_content,
                 "display_content": original,
                 "barge_in_truncated": True,
-            })
+            }
+            if polluted:
+                patch["sanitized_from"] = truncated_content
+            patch_last_turn(self._session_file, patch)
 
     @property
     def session_file(self) -> Path | None:
@@ -369,14 +428,21 @@ class ConversationHistoryManager:
 
 class HistoryInjector(PreProcessor):
     """
-    PreProcessor that injects conversation history into the system prompt.
+    PreProcessor that injects conversation history into the prompt.
 
-    Formats visible history turns as inline text and substitutes them into
-    the [RECENT_HISTORY] placeholder in the system message. This keeps
-    history inside the system prompt's ### Conversation section, preserving
-    the positional emphasis of "Respond as [PERSONA_NAME]." at the end.
+    Two paths, selected by the active provider's `supports_role_history`
+    capability (stashed on context.metadata by the pipeline):
 
-    Result: messages remain [system, user] — no message splicing.
+    - **Flattened (default, False):** formats visible history turns as inline
+      text and substitutes into the [RECENT_HISTORY] placeholder in the
+      system message. Preserves positional emphasis of
+      "Respond as [PERSONA_NAME]." at the end. Messages stay [system, user].
+
+    - **Spliced (NANO-114, True):** collapses [RECENT_HISTORY] placeholder to
+      empty string and splices real role-tagged messages into context.messages
+      between the system prompt and the current user turn. Required for
+      strict chat-template models (Gemma-3, Gemma-4) whose jinja templates
+      refuse to treat flattened bracket headers as turn boundaries.
     """
 
     PLACEHOLDER = "[RECENT_HISTORY]"
@@ -396,16 +462,15 @@ class HistoryInjector(PreProcessor):
 
     def process(self, context: PipelineContext) -> PipelineContext:
         """
-        Inject conversation history into the system prompt.
-
-        Formats history as inline text and replaces [RECENT_HISTORY]
-        in the system message. If no history, the placeholder collapses.
+        Inject conversation history via flatten or splice path based on
+        provider capability.
 
         Args:
             context: Current pipeline context
 
         Returns:
-            Modified context with history inlined in system prompt
+            Modified context. Flatten path: system message updated.
+            Splice path: context.messages extended with role-array history.
         """
         persona_id = context.persona.get("id", "unknown")
         persona_name = context.persona.get("name", "Assistant")
@@ -414,8 +479,11 @@ class HistoryInjector(PreProcessor):
 
         history_messages = self._manager.get_visible_history()
 
+        use_splice = bool(context.metadata.get("provider_supports_role_history", False))
+
         if self._manager._debug:
-            print(f"[DEBUG:HistoryInjector] ====== HISTORY INJECTION START ======")
+            mode = "SPLICE" if use_splice else "FLATTEN"
+            print(f"[DEBUG:HistoryInjector] ====== HISTORY INJECTION START [{mode}] ======")
             print(f"[DEBUG:HistoryInjector] In-memory _history count: {len(self._manager._history)}")
             print(f"[DEBUG:HistoryInjector] Visible history messages: {len(history_messages)}")
             print(f"[DEBUG:HistoryInjector] Current user input: {context.user_input[:50]}...")
@@ -426,7 +494,8 @@ class HistoryInjector(PreProcessor):
                 print(f"[DEBUG:HistoryInjector]   (no history to inject)")
             print(f"[DEBUG:HistoryInjector] ====== HISTORY INJECTION END ======")
 
-        # Format history as inline text for system prompt injection
+        # Always compute flattened text (used for flatten path AND for token
+        # counting on splice path — Workshop block counts stay honest).
         if history_messages:
             formatted = self._format_history(history_messages, persona_name)
         else:
@@ -435,7 +504,18 @@ class HistoryInjector(PreProcessor):
         # NANO-045b: Stash formatted history text for per-block token counting
         context.metadata["history_formatted"] = formatted
 
-        # Replace placeholder in system message
+        if use_splice:
+            self._splice_role_history(context, history_messages)
+        else:
+            self._inject_flattened(context, formatted)
+
+        return context
+
+    def _inject_flattened(self, context: PipelineContext, formatted: str) -> None:
+        """
+        Legacy path: substitute [RECENT_HISTORY] in the system message with
+        bracket-formatted history text.
+        """
         if context.messages and context.messages[0].get("role") == "system":
             system_content = context.messages[0]["content"]
             if self.PLACEHOLDER in system_content:
@@ -445,7 +525,55 @@ class HistoryInjector(PreProcessor):
                 system_content = re.sub(r"\n{3,}", "\n\n", system_content)
                 context.messages[0]["content"] = system_content
 
-        return context
+    def _splice_role_history(
+        self, context: PipelineContext, history_messages: list[dict]
+    ) -> None:
+        """
+        NANO-114: Collapse [RECENT_HISTORY] placeholder to empty string and
+        splice real role-tagged messages between the system prompt and the
+        current user turn.
+
+        Also strips the orphan "### Conversation" section header when both
+        [CONVERSATION_SUMMARY] and [RECENT_HISTORY] collapsed to empty (no
+        summary in history and no turns to inject).
+        """
+        if not context.messages or context.messages[0].get("role") != "system":
+            return
+
+        import re
+
+        system_content = context.messages[0]["content"]
+
+        # Collapse the history placeholder to empty
+        system_content = system_content.replace(self.PLACEHOLDER, "")
+
+        # Strip orphan "### Conversation" header when its content blocks are
+        # both empty. Matches the header followed by any amount of whitespace
+        # before the next "###" section or end of string.
+        system_content = re.sub(
+            r"\n### Conversation\s*(?=\n###|\Z)",
+            "",
+            system_content,
+        )
+
+        # Collapse 3+ consecutive newlines to 2
+        system_content = re.sub(r"\n{3,}", "\n\n", system_content)
+        context.messages[0]["content"] = system_content
+
+        if not history_messages:
+            return
+
+        # Splice history into context.messages between system (idx 0) and
+        # the current user turn (last message). Summary turns (role=system)
+        # are preserved as intermediate system messages — llama.cpp + jinja
+        # handles multi-system arrays; if a specific model regresses, fall
+        # back to coercing summaries onto the main system prompt.
+        current_user = context.messages[-1]
+        context.messages[:] = (
+            [context.messages[0]]
+            + list(history_messages)
+            + [current_user]
+        )
 
     def _format_history(
         self, messages: list[dict], persona_name: str

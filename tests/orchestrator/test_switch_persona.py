@@ -61,6 +61,9 @@ def _make_orchestrator(
     orch._history_manager.session_file = Path("/tmp/mryummers_20260306_0335.jsonl")
     orch._history_manager._pending_user_input = None
 
+    # NANO-115: Twitch transcript manager
+    orch._twitch_transcript = MagicMock()
+
     # Reflection system
     if has_reflection:
         orch._reflection_system = MagicMock()

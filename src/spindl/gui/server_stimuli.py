@@ -89,6 +89,8 @@ def build_stimuli_hydration(cfg) -> dict:
         "twitch_buffer_size": cfg.twitch_buffer_size,
         "twitch_max_message_length": cfg.twitch_max_message_length,
         "twitch_prompt_template": cfg.twitch_prompt_template,
+        "twitch_audience_window": cfg.twitch_audience_window,
+        "twitch_audience_char_cap": cfg.twitch_audience_char_cap,
         "twitch_has_credentials": bool(
             resolved_channel and resolved_app_id and resolved_app_secret
         ),
@@ -125,6 +127,8 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             twitch_buffer_size = data.get("twitch_buffer_size")
             twitch_max_message_length = data.get("twitch_max_message_length")
             twitch_prompt_template = data.get("twitch_prompt_template")
+            twitch_audience_window = data.get("twitch_audience_window")
+            twitch_audience_char_cap = data.get("twitch_audience_char_cap")
 
             # Type coerce
             if enabled is not None:
@@ -161,6 +165,27 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_prompt_template = str(twitch_prompt_template).strip()
                 if not twitch_prompt_template:
                     twitch_prompt_template = None
+                elif "{messages}" not in twitch_prompt_template:
+                    await sio.emit(
+                        "stimuli_config_error",
+                        {
+                            "field": "twitch_prompt_template",
+                            "message": (
+                                "twitch_prompt_template must contain the "
+                                "{messages} placeholder. Without it, buffered "
+                                "Twitch messages have nowhere to render and "
+                                "the model receives only the directive text."
+                            ),
+                        },
+                        to=sid,
+                    )
+                    return
+            if twitch_audience_window is not None:
+                twitch_audience_window = int(twitch_audience_window)
+                twitch_audience_window = max(25, min(300, twitch_audience_window))
+            if twitch_audience_char_cap is not None:
+                twitch_audience_char_cap = int(twitch_audience_char_cap)
+                twitch_audience_char_cap = max(50, min(500, twitch_audience_char_cap))
 
             # Addressing-others contexts (NANO-110)
             addressing_others_contexts = data.get("addressing_others_contexts")
@@ -195,6 +220,8 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_buffer_size=twitch_buffer_size,
                 twitch_max_message_length=twitch_max_message_length,
                 twitch_prompt_template=twitch_prompt_template,
+                twitch_audience_window=twitch_audience_window,
+                twitch_audience_char_cap=twitch_audience_char_cap,
                 addressing_others_contexts=addressing_others_contexts,
             )
 

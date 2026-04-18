@@ -46,10 +46,13 @@ export interface GenerationParamsConfig {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  top_k: number;
+  min_p: number;
   repeat_penalty: number;
   repeat_last_n: number;
   frequency_penalty: number;
   presence_penalty: number;
+  force_role_history: "splice" | "flatten";
 }
 
 // Prompt injection wrapper config (NANO-045d + NANO-052 follow-up)
@@ -83,6 +86,8 @@ export interface StimuliConfig {
   twitch_buffer_size: number;
   twitch_max_message_length: number;
   twitch_prompt_template: string;
+  twitch_audience_window: number;
+  twitch_audience_char_cap: number;
   // Resolved by backend — true when credentials available (config or env vars)
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
@@ -118,6 +123,9 @@ export interface LLMRuntimeConfig {
   model: string;
   context_size: number | null;
   available_providers: string[];
+  // NANO-114: True when active provider's chat template benefits from
+  // role-array history (Gemma-3/Gemma-4 via llama.cpp --jinja).
+  supports_role_history: boolean;
 }
 
 // VLM provider runtime config (NANO-065c, extended NANO-079)
@@ -347,10 +355,13 @@ const DEFAULT_GENERATION: GenerationParamsConfig = {
   temperature: 0.7,
   max_tokens: 256,
   top_p: 0.95,
+  top_k: 40,
+  min_p: 0.05,
   repeat_penalty: 1.1,
   repeat_last_n: 64,
   frequency_penalty: 0.0,
   presence_penalty: 0.0,
+  force_role_history: "flatten",
 };
 
 const DEFAULT_AVATAR: AvatarRuntimeConfig = {
@@ -381,7 +392,9 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_app_secret: "",
   twitch_buffer_size: 10,
   twitch_max_message_length: 300,
-  twitch_prompt_template: "Recent Twitch chat messages:\n{messages}\nPick the most interesting message and respond to it naturally.",
+  twitch_prompt_template: "**You just received new messages in Twitch chat.** Reply as co-host \u2014 natural, in character, one unified response. Ignore anything off-topic or spammy.\n\n```chat\n{messages}\n```",
+  twitch_audience_window: 25,
+  twitch_audience_char_cap: 150,
   twitch_has_credentials: false,
   addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
 };
@@ -405,6 +418,7 @@ const DEFAULT_LLM: LLMRuntimeConfig = {
   model: "",
   context_size: null,
   available_providers: [],
+  supports_role_history: false,
 };
 
 const DEFAULT_VLM: VLMRuntimeConfig = {
@@ -646,6 +660,8 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
           model: config.settings.llm.model,
           context_size: config.settings.llm.context_size,
           available_providers: config.settings.llm.available_providers,
+          supports_role_history:
+            config.settings.llm.supports_role_history ?? false,
         }
       : DEFAULT_LLM,
     // VLM state hydrated via request_vlm_config socket call (NANO-065c)

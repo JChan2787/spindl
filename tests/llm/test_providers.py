@@ -472,25 +472,36 @@ class TestModalityContextProvider:
         assert provider.placeholder == "[MODALITY_CONTEXT]"
 
     def test_provide_voice_modality(self):
-        """Should return voice context for VOICE modality."""
+        """Should return voice context for VOICE modality.
+
+        NANO-115 item #1: Per-turn modality strings retired. Voice variant of
+        the context block still documents the TTS constraint so the model
+        keeps producing speech-friendly responses.
+        """
         context = BuildContext(
             input_content="Hello",
             input_modality=InputModality.VOICE,
         )
         provider = ModalityContextProvider()
         result = provider.provide(context)
-        assert "voice conversation" in result.lower()
+        assert "[Message Type - Voice]" in result
         assert "TTS" in result
 
     def test_provide_text_modality(self):
-        """Should return text context for TEXT modality."""
+        """Should return text context for TEXT modality.
+
+        NANO-115 item #1: Per-turn modality strings retired. The context block
+        now documents the source-tag vocabulary instead.
+        """
         context = BuildContext(
             input_content="Hello",
             input_modality=InputModality.TEXT,
         )
         provider = ModalityContextProvider()
         result = provider.provide(context)
-        assert "text conversation" in result.lower()
+        assert "[Message Type - Direct Keyboard]" in result
+        assert "[Message Type - Twitch Chat]" in result
+        assert "[Message Type - Stimuli]" in result
 
 
 class TestModalityRulesProvider:

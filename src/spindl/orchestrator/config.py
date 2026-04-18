@@ -1,5 +1,6 @@
 """Configuration models for VoiceAgentOrchestrator (NANO-089: Pydantic validation layer)."""
 
+import logging
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -8,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ruamel.yaml import YAML as RuamelYAML
 
 from spindl.utils.paths import resolve_relative_path
+
+logger = logging.getLogger(__name__)
 
 
 def _make_ruamel_yaml() -> RuamelYAML:
@@ -477,10 +480,18 @@ class StimuliConfig(BaseModel):
     twitch_buffer_size: int = Field(default=10, ge=1, le=50)
     twitch_max_message_length: int = Field(default=300, ge=50, le=1000)
     twitch_prompt_template: str = (
-        "Recent Twitch chat messages:\n"
+        "**You just received new messages in Twitch chat.** "
+        "Reply as co-host \u2014 natural, in character, one unified response. "
+        "Ignore anything off-topic or spammy.\n"
+        "\n"
+        "```chat\n"
         "{messages}\n"
-        "Pick the most interesting message and respond to it naturally."
+        "```"
     )
+
+    # NANO-115: Audience transcript injection controls
+    twitch_audience_window: int = Field(default=25, ge=25, le=300)
+    twitch_audience_char_cap: int = Field(default=150, ge=50, le=500)
 
     # Addressing-others contexts (NANO-110)
     addressing_others_contexts: list[AddressingContext] = Field(
@@ -526,6 +537,12 @@ class StimuliConfig(BaseModel):
             ),
             twitch_prompt_template=twitch.get(
                 "prompt_template", defaults.twitch_prompt_template
+            ),
+            twitch_audience_window=twitch.get(
+                "audience_window", defaults.twitch_audience_window
+            ),
+            twitch_audience_char_cap=twitch.get(
+                "audience_char_cap", defaults.twitch_audience_char_cap
             ),
             addressing_others_contexts=contexts,
         )
@@ -719,6 +736,12 @@ class OrchestratorConfig(BaseModel):
     budget_strategy: Literal["truncate", "drop", "reject"] = "truncate"
     response_reserve: int = Field(default=300, ge=0)
 
+    # NANO-115: History mode — "splice" = role-array, "flatten" = bracket text.
+    # The prior "auto" option was removed (Session 645): it was always
+    # equivalent to "flatten" for every cloud provider, making it dishonest
+    # UX. YAML files carrying "auto" are silently coerced to "flatten" on load.
+    force_role_history: Literal["splice", "flatten"] = "flatten"
+
     # Character settings (NANO-034: ST V2 Character Cards)
     character_id: str = "spindle"
     characters_dir: str = "./characters"
@@ -802,6 +825,17 @@ class OrchestratorConfig(BaseModel):
         # LLM settings (NANO-018/019: provider-based, clean break)
         if "llm" in data:
             config.llm_config = LLMConfig.from_dict(data["llm"])
+            # NANO-115: History mode (splice or flatten). Session 645 removed
+            # "auto" — any YAML still carrying it is coerced to "flatten".
+            raw_history = data["llm"].get(
+                "force_role_history", config.force_role_history
+            )
+            if raw_history == "auto":
+                logger.info(
+                    "Migrating force_role_history 'auto' -> 'flatten' (Session 645)"
+                )
+                raw_history = "flatten"
+            config.force_role_history = raw_history
 
         # VLM settings (NANO-023/024: backend for vision tools)
         if "vlm" in data:
@@ -1044,10 +1078,15 @@ class OrchestratorConfig(BaseModel):
             prov["temperature"] = self.llm_config.provider_config.get("temperature", 0.7)
             prov["max_tokens"] = self.llm_config.provider_config.get("max_tokens", 256)
             prov["top_p"] = self.llm_config.provider_config.get("top_p", 0.95)
+            prov["top_k"] = self.llm_config.provider_config.get("top_k", 40)
+            prov["min_p"] = self.llm_config.provider_config.get("min_p", 0.05)
             prov["repeat_penalty"] = self.llm_config.provider_config.get("repeat_penalty", 1.1)
             prov["repeat_last_n"] = self.llm_config.provider_config.get("repeat_last_n", 64)
             prov["frequency_penalty"] = self.llm_config.provider_config.get("frequency_penalty", 0.0)
             prov["presence_penalty"] = self.llm_config.provider_config.get("presence_penalty", 0.0)
+
+        # NANO-115: History splice/flatten override
+        data["llm"]["force_role_history"] = self.force_role_history
 
         # --- VLM ---
         if "vlm" not in data:
@@ -1076,6 +1115,8 @@ class OrchestratorConfig(BaseModel):
         tw["buffer_size"] = self.stimuli_config.twitch_buffer_size
         tw["max_message_length"] = self.stimuli_config.twitch_max_message_length
         tw["prompt_template"] = self.stimuli_config.twitch_prompt_template
+        tw["audience_window"] = self.stimuli_config.twitch_audience_window
+        tw["audience_char_cap"] = self.stimuli_config.twitch_audience_char_cap
 
         # Addressing-others contexts (NANO-110, nested under stimuli)
         if "addressing_others" not in stim:
