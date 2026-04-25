@@ -94,6 +94,12 @@ def build_stimuli_hydration(cfg) -> dict:
         "twitch_has_credentials": bool(
             resolved_channel and resolved_app_id and resolved_app_secret
         ),
+        # NANO-116: Game-state bridge integration
+        "game_state_enabled": cfg.game_state_enabled,
+        "game_state_host": cfg.game_state_host,
+        "game_state_port": cfg.game_state_port,
+        "game_state_buffer_size": cfg.game_state_buffer_size,
+        "game_state_prompt_template": cfg.game_state_prompt_template,
         # NANO-110: Addressing-others contexts
         "addressing_others_contexts": [
             {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}

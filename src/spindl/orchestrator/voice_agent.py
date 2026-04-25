@@ -55,7 +55,7 @@ from ..memory.rag_injector import RAGInjector
 from ..memory.reflection import ReflectionSystem
 from ..memory.reflection_monitor import ReflectionMonitor
 from ..memory.session_summary import SessionSummaryGenerator
-from ..stimuli import StimuliEngine, PatienceModule, TwitchModule
+from ..stimuli import StimuliEngine, GameStateModule, PatienceModule, TwitchModule
 from ..avatar import AvatarToolMoodSubscriber, ONNXEmotionClassifier
 from ..vts import VTSDriver
 from .callbacks import OrchestratorCallbacks
@@ -594,6 +594,23 @@ class VoiceAgentOrchestrator:
                 "Twitch module registered (channel=%s, enabled=%s)",
                 stimuli_cfg.twitch_channel,
                 stimuli_cfg.twitch_enabled,
+            )
+
+        # Register game-state bridge module if configured (NANO-116)
+        if stimuli_cfg.game_state_host:
+            game_state = GameStateModule(
+                host=stimuli_cfg.game_state_host,
+                port=stimuli_cfg.game_state_port,
+                buffer_size=stimuli_cfg.game_state_buffer_size,
+                prompt_template=stimuli_cfg.game_state_prompt_template,
+                enabled=stimuli_cfg.game_state_enabled,
+            )
+            self._stimuli_engine.register_module(game_state)
+            logger.info(
+                "Game-state module registered (target=%s:%d, enabled=%s)",
+                stimuli_cfg.game_state_host,
+                stimuli_cfg.game_state_port,
+                stimuli_cfg.game_state_enabled,
             )
 
         logger.info(

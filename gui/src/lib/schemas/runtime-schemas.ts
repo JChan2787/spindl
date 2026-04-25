@@ -197,6 +197,12 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_audience_window: z.number().int().min(25).max(300).default(25),
   twitch_audience_char_cap: z.number().int().min(50).max(500).default(150),
   twitch_has_credentials: z.boolean(),
+  // NANO-116: Game-state bridge integration
+  game_state_enabled: z.boolean(),
+  game_state_host: z.string(),
+  game_state_port: z.number().int().min(1).max(65535),
+  game_state_buffer_size: z.number().int().min(1).max(100),
+  game_state_prompt_template: z.string(),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
   persisted: z.boolean().optional(),

@@ -13,6 +13,7 @@ Core components:
 
 from .base import StimulusModule
 from .engine import StimuliEngine
+from .game_state import GameStateModule
 from .models import StimulusData, StimulusSource
 from .patience import PatienceModule
 from .twitch import TwitchModule
@@ -22,6 +23,7 @@ __all__ = [
     "StimulusModule",
     "StimulusData",
     "StimulusSource",
+    "GameStateModule",
     "PatienceModule",
     "TwitchModule",
 ]

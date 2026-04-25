@@ -1,0 +1,519 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JChan2787/spindl-game-bridge/schema/stimulus_event.schema.json",
+  "title": "StimulusEvent",
+  "description": "Versioned IPC contract between spindl-game-bridge (REFramework plugin producer) and any consumer (NANO-116 GameStateModule, OBS overlays, debug loggers, etc.). Draft synthesized from Pragmata SDK reconnaissance in Session 649\u2013650. Producer-authoritative: bridge is responsible for accurate data; consumer handles context management, LLM latency, and downstream semantics.",
+  "protocol_version": "0.1.2",
+  "type": "object",
+  "required": ["protocol_version", "event_type", "event_source", "timestamp", "sequence", "payload"],
+  "properties": {
+    "protocol_version": {
+      "type": "string",
+      "description": "SemVer of the schema this event conforms to. Consumer rejects mismatched majors.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "event_type": {
+      "type": "string",
+      "description": "Discriminated union tag. One event type per producer-side source \u2014 see $defs for payload shapes.",
+      "enum": [
+        "bridge_ready",
+        "bridge_shutdown",
+        "catalog_loaded",
+
+        "dialogue_started",
+        "dialogue_ended",
+        "dialogue_line",
+
+        "cutscene_movie_started",
+        "cutscene_movie_ended",
+        "cutscene_timeline_started",
+        "cutscene_timeline_ended",
+        "cutscene_skipped",
+
+        "chapter_status_changed",
+        "scene_activated",
+        "scene_deactivated",
+
+        "character_spawned",
+        "character_despawned",
+
+        "enemy_entered_scene",
+        "enemy_exited_scene",
+        "enemy_engaged_player",
+        "enemy_disengaged_player",
+        "enemy_died",
+
+        "boss_battle_started",
+        "boss_battle_ended",
+
+        "player_status_changed",
+        "player_took_damage",
+        "player_hp_critical",
+        "player_hp_recovered",
+        "player_died",
+        "player_revived",
+
+        "weapon_swapped",
+        "inventory_changed",
+
+        "scan_started",
+        "scan_ended",
+        "hack_started",
+        "hack_ended",
+
+        "checkpoint_saved",
+
+        "snapshot"
+      ]
+    },
+    "event_source": {
+      "type": "string",
+      "description": "How the event was derived. Consumer may weigh accordingly.",
+      "enum": ["direct_hook", "inferred_from_hud", "snapshot_aggregate", "catalog", "bridge_internal"]
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO-8601 timestamp with millisecond precision. Bridge wall clock, not game time.",
+      "format": "date-time"
+    },
+    "sequence": {
+      "type": "integer",
+      "description": "Monotonically increasing per-bridge-session counter. Resets on bridge restart. Consumer uses this to detect dropped/reordered events.",
+      "minimum": 0
+    },
+    "game_id": {
+      "type": "string",
+      "description": "Per-game profile identifier. Present on every event after bridge_ready. Pragmata: 'pragmata'.",
+      "examples": ["pragmata"]
+    },
+    "save_slot_hint": {
+      "type": ["integer", "null"],
+      "description": "Save slot if derivable, else null. NANO-116 uses this to partition character-knowledge memory. Nullable because not all phases surface it.",
+      "minimum": 0
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-type-specific data. See $defs for per-event payload shapes."
+    }
+  },
+
+  "$defs": {
+    "bridge_ready_payload": {
+      "type": "object",
+      "required": ["protocol_version", "bridge_version", "reframework_version", "game_id"],
+      "properties": {
+        "protocol_version": { "type": "string" },
+        "bridge_version":   { "type": "string", "description": "Plugin package version (separate from protocol version)." },
+        "reframework_version": { "type": "string" },
+        "game_id":          { "type": "string" },
+        "profile_loaded":   { "type": "string", "description": "Which per-game profile was selected." }
+      }
+    },
+
+    "catalog_loaded_payload": {
+      "type": "object",
+      "description": "One-shot hash->name dictionary dump after game managers register their catalogs. Consumer caches this to resolve hashes on later events. Sidecar pattern \u2014 events carry hashes only; names resolve against this catalog.",
+      "required": ["chapters", "statuses", "characters", "talks"],
+      "properties": {
+        "chapters": {
+          "type": "object",
+          "description": "chapter_hash (uint32 as decimal string) -> { name, scene_hashes[] }. From app.ChapterManager._ChapterCatalog.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name":         { "type": "string" },
+              "scene_hashes": { "type": "array", "items": { "type": "integer" } }
+            }
+          }
+        },
+        "statuses": {
+          "type": "object",
+          "description": "status_hash -> name. Per-chapter status tokens (chXXXXX namespace)."
+        },
+        "characters": {
+          "type": "object",
+          "description": "owner_name_hash -> { role: 'player'|'partner'|'concierge'|'npc', name }. Bridge attempts resolution via app.CharacterManager + dialog speaker registry.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["role"],
+            "properties": {
+              "role":        { "type": "string", "enum": ["player", "partner", "concierge", "npc", "unknown"] },
+              "name":        { "type": "string" },
+              "context_id":  { "type": "integer" }
+            }
+          }
+        },
+        "talks": {
+          "type": "object",
+          "description": "talk_id -> metadata derived from app.ConversationManager._TalkIDDict_* partitions. Text is NOT inlined here \u2014 resolved at dialogue event time via MessageManager.getMessage(Guid).",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["category"],
+            "properties": {
+              "category":       { "type": "string", "enum": ["battle", "gimmick", "item", "shelter", "stage", "stage_chat", "stage_tips"] },
+              "is_serious":     { "type": "boolean" },
+              "is_anytime":     { "type": "boolean" },
+              "talk_priority":  { "type": "integer" },
+              "pre_talks":      { "type": "array", "items": { "type": "integer" } },
+              "deadline_talks": { "type": "array", "items": { "type": "integer" } }
+            }
+          }
+        }
+      }
+    },
+
+    "dialogue_started_payload": {
+      "type": "object",
+      "description": "Emitted from app.ConversationManager.OnPlayConversation. The complete pipeline: event fires -> args.MessageID -> MessageManager.getMessage(Guid) + getName(Guid).",
+      "required": ["message_guid", "talk_id", "owner_name_hash", "category"],
+      "properties": {
+        "message_guid":       { "type": "string", "description": "System.Guid as string. Key for MessageManager resolution." },
+        "talk_id":            { "type": "integer" },
+        "talk_variety":       { "type": ["integer", "null"], "description": "app.ConversationManager._PlayingTalkVariety at emit time." },
+        "owner_name_hash":    { "type": "integer", "description": "Speaker name hash. Resolves against catalog.characters." },
+        "speaker_name":       { "type": ["string", "null"], "description": "MessageManager.getName(message_guid) if resolvable at emit time, else null." },
+        "category":           { "type": "string", "enum": ["battle", "gimmick", "item", "shelter", "stage", "stage_chat", "stage_tips", "scan", "puzzle_success", "game_demo", "filament_removed", "filament_purification", "acquired_item", "hacking_success", "unknown"] },
+        "text":               { "type": ["string", "null"], "description": "MessageManager.getMessage(message_guid) if resolvable at emit time, else null." },
+        "is_serious":         { "type": ["boolean", "null"] }
+      }
+    },
+
+    "dialogue_ended_payload": {
+      "type": "object",
+      "description": "Emitted from app.ConversationManager.OnFinishConversation. Same args shape as dialogue_started \u2014 payload mirrors for symmetry.",
+      "required": ["message_guid", "talk_id", "owner_name_hash"],
+      "properties": {
+        "message_guid":    { "type": "string" },
+        "talk_id":         { "type": "integer" },
+        "owner_name_hash": { "type": "integer" },
+        "completed":       { "type": "boolean", "description": "True on natural end, false on interrupt." }
+      }
+    },
+
+    "dialogue_line_payload": {
+      "type": "object",
+      "description": "Per-utterance dialogue event (v0.1.1). One emit per in-game line across both cinematic and chatter capture paths. Producer-side body-claim dedupe ensures cinematic lines are not double-emitted through the chatter path. Unresolved speakers are dropped at the producer (see docs/design/phase-a3-dialogue-schema.md).",
+      "required": ["speaker", "text", "source"],
+      "properties": {
+        "speaker": {
+          "type": "string",
+          "description": "Resolved speaker name (e.g. 'Ken', 'Diana'). Non-null \u2014 lines with unresolved speakers never reach the wire."
+        },
+        "text": {
+          "type": "string",
+          "description": "Rendered dialogue body. Normalized: trailing CR/LF/whitespace stripped."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["cinematic", "chatter"],
+          "description": "Capture path. 'cinematic' = MessageInfo.setParam (cutscenes, scripted conversations). 'chatter' = app.gui.AppText.apply (ambient NPC, shelter conversations, Recorded Projections)."
+        }
+      }
+    },
+
+    "cutscene_movie_event_payload": {
+      "type": "object",
+      "description": "Covers cutscene_movie_started/ended. app.DemoMediator.OnPlayStartMovie / OnPlayEndMovie.",
+      "required": ["movie_id"],
+      "properties": { "movie_id": { "type": "integer" } }
+    },
+
+    "cutscene_timeline_event_payload": {
+      "type": "object",
+      "description": "Covers cutscene_timeline_started/ended/skipped. app.DemoMediator.OnPlayStartTimeline / OnPlayEndTimeline / OnSkipTimeline.",
+      "required": ["timeline_event_id"],
+      "properties": { "timeline_event_id": { "type": "integer" } }
+    },
+
+    "chapter_status_changed_payload": {
+      "type": "object",
+      "description": "app.ChapterManager.ChangedChapterStatusEvent(uint chapter_hash, uint status_hash). Names resolve against catalog.chapters / catalog.statuses.",
+      "required": ["chapter_hash", "status_hash"],
+      "properties": {
+        "chapter_hash": { "type": "integer" },
+        "status_hash":  { "type": "integer" }
+      }
+    },
+
+    "scene_event_payload": {
+      "type": "object",
+      "description": "scene_activated/deactivated. app.ChapterManager.OnActiveSceneEvent / OnDeactiveSceneEvent(uint chapter_hash, uint scene_hash).",
+      "required": ["chapter_hash", "scene_hash"],
+      "properties": {
+        "chapter_hash": { "type": "integer" },
+        "scene_hash":   { "type": "integer" }
+      }
+    },
+
+    "character_event_payload": {
+      "type": "object",
+      "description": "character_spawned/despawned. From app.CharacterSpawnManager + CharacterManager.PlayerHandleAction/PartnerHandleAction.",
+      "required": ["context_id"],
+      "properties": {
+        "context_id":      { "type": "integer" },
+        "owner_name_hash": { "type": ["integer", "null"] },
+        "role":            { "type": "string", "enum": ["player", "partner", "concierge", "npc", "unknown"] }
+      }
+    },
+
+    "enemy_event_payload": {
+      "type": "object",
+      "description": "Covers enemy_entered_scene / exited_scene / engaged_player / disengaged_player / died. Mapped from app.EnemyBattleSystem.OnEntryIngameMemberEvent (scene enter), OnExitIngameMemberEvent (scene exit), OnEntryEngageMemberEvent (engage start \u2014 the LOS/alert signal), OnExitEngageMemberEvent (engage end), OnDeadHandler. GameObject-identified; enemy_id is REFramework's GameObject hash for correlation.",
+      "required": ["enemy_id"],
+      "properties": {
+        "enemy_id":    { "type": "integer", "description": "Stable per-spawn identifier (GameObject hash)." },
+        "enemy_type":  { "type": ["string", "null"], "description": "Class name if derivable, e.g. 'app.ch14300'." },
+        "context_id":  { "type": ["integer", "null"] },
+        "is_boss":     { "type": ["boolean", "null"] }
+      }
+    },
+
+    "boss_battle_event_payload": {
+      "type": "object",
+      "description": "boss_battle_started/ended. app.EnemyBattleSystem.startBossBattle/endBossBattle. _BossObjectID gives the boss identity.",
+      "required": ["boss_object_id"],
+      "properties": {
+        "boss_object_id": { "type": "integer" },
+        "enemy_updater":  { "type": ["string", "null"], "description": "Class name of the app.EnemyUpdater, if resolvable." }
+      }
+    },
+
+    "player_status_changed_payload": {
+      "type": "object",
+      "description": "app.EnemyBattleSystem.onChangePlayerStatus(PlayerStatusType). Enum value from Enums_Internal.hpp.",
+      "required": ["status_value"],
+      "properties": {
+        "status_value": { "type": "integer" },
+        "status_name":  { "type": ["string", "null"], "description": "Resolved enum name if the Enums catalog was loaded." }
+      }
+    },
+
+    "player_took_damage_payload": {
+      "type": "object",
+      "description": "Filtered HitManager damage events where the target is the player. app.HitManager getDamagedDirectionFB/LR + _DamageHitList entries.",
+      "required": ["hp_before", "hp_after"],
+      "properties": {
+        "hp_before":    { "type": "number" },
+        "hp_after":     { "type": "number" },
+        "hp_max":       { "type": "number" },
+        "hp_ratio":     { "type": "number", "description": "PlayerHandle.get_HitPointRatio() post-damage." },
+        "direction_fb": { "type": ["number", "null"], "description": "Front/back component from getDamagedDirectionFB." },
+        "direction_lr": { "type": ["number", "null"], "description": "Left/right component from getDamagedDirectionLR." },
+        "attacker_id":  { "type": ["integer", "null"] }
+      }
+    },
+
+    "player_hp_band_payload": {
+      "type": "object",
+      "description": "player_hp_critical / player_hp_recovered. Inferred from HudManager.isNeedOpenDyingHP rather than raw HP \u2014 mirrors what the player sees on screen. event_source will be 'inferred_from_hud'.",
+      "required": ["hp_ratio"],
+      "properties": {
+        "hp_ratio": { "type": "number" }
+      }
+    },
+
+    "player_life_event_payload": {
+      "type": "object",
+      "description": "player_died / player_revived. app.GameOverManager death + app.PlayerHandle.requestRevive / canLiveRepair.",
+      "properties": {
+        "context": { "type": ["string", "null"], "description": "Cause if derivable from ConversationManager._PlayerDeadReasonData." }
+      }
+    },
+
+    "weapon_swapped_payload": {
+      "type": "object",
+      "description": "PlayerHandle.get_CurrentReadyWeaponHash() delta detected on snapshot or via onChangeStatusUpMenuWeapon.",
+      "required": ["weapon_hash"],
+      "properties": {
+        "weapon_hash":           { "type": "integer", "description": "uint64 weapon hash." },
+        "weapon_name":           { "type": ["string", "null"], "description": "WeaponManager.getNameData(id) if resolvable." },
+        "previous_weapon_hash":  { "type": ["integer", "null"] }
+      }
+    },
+
+    "inventory_changed_payload": {
+      "type": "object",
+      "description": "app.InventoryManager.ChangedItemSlotInfo(uint item_id, int quantity). Single subscription covers acquire/use/drop.",
+      "required": ["item_id", "quantity_delta"],
+      "properties": {
+        "item_id":        { "type": "integer" },
+        "quantity_delta": { "type": "integer", "description": "Signed delta. Positive = acquisition, negative = consumption." },
+        "item_name":      { "type": ["string", "null"] },
+        "new_total":      { "type": ["integer", "null"], "description": "InventoryManager.getItemQuantity(item_id) post-change." }
+      }
+    },
+
+    "scan_event_payload": {
+      "type": "object",
+      "description": "scan_started/ended. app.ScanManager mode entry/exit.",
+      "properties": {
+        "target_id":   { "type": ["integer", "null"] },
+        "target_name": { "type": ["string", "null"] }
+      }
+    },
+
+    "hack_event_payload": {
+      "type": "object",
+      "description": "hack_started/ended. app.HackingManager entry/exit + PlayerHandle.get_CurrentHackingStatus.",
+      "properties": {
+        "status_value": { "type": ["integer", "null"], "description": "PlayerPuzzleControlDriver.HackingStatus enum value." },
+        "target_id":    { "type": ["integer", "null"] }
+      }
+    },
+
+    "checkpoint_saved_payload": {
+      "type": "object",
+      "description": "app.CheckPointManager save event.",
+      "properties": {
+        "checkpoint_id":   { "type": ["integer", "null"] },
+        "checkpoint_name": { "type": ["string", "null"] }
+      }
+    },
+
+    "snapshot_payload": {
+      "type": "object",
+      "description": "Periodic (5s default) rollup. Emitted only when is_dirty — state changed since the last snapshot. If nothing changed, no emit. Null-state guard: not emitted when hp_max == 0 (loading screen). Consumer reads this as ground-truth current state; per-event deltas are for narrative momentum.",
+      "required": ["in_combat", "enemy_count_engage", "enemy_count_ingame", "hp_current", "hp_max", "hp_ratio", "is_dead"],
+      "properties": {
+        "hp_current":           { "type": "number", "description": "PlayerHandle.get_CurrentHitPoint()." },
+        "hp_max":               { "type": "number", "description": "PlayerHandle.get_DefaultHitPoint()." },
+        "hp_ratio":             { "type": "number", "description": "PlayerHandle.get_HitPointRatio()." },
+        "is_dead":              { "type": "boolean", "description": "PlayerHandle.get_IsDead()." },
+        "player_position":      { "$ref": "#/$defs/vec3", "description": "Player world-space position via Transform chain." },
+        "weapon_hash":          { "type": ["number", "null"], "description": "PlayerHandle.get_CurrentReadyWeaponHash() (uint64)." },
+        "weapon_name":          { "type": ["string", "null"], "description": "WeaponManager.getNameData → getMessage if resolvable." },
+        "in_combat":            { "type": "boolean", "description": "EnemyBattleSystem.get_isEngage()." },
+        "enemy_count_engage":   { "type": "integer", "description": "EnemyBattleSystem.getEngageMemberNum()." },
+        "enemy_count_ingame":   { "type": "integer", "description": "count(EnemyBattleSystem.getIngameMembers)." },
+        "is_boss_battle":       { "type": "boolean", "description": "EnemyBattleSystem._IsBossBattle field." },
+        "boss_id":              { "type": ["integer", "null"], "description": "EnemyBattleSystem._BossObjectID if in boss battle." },
+        "enemies": {
+          "type": "array",
+          "description": "Per-enemy roster from getIngameMembers(). One entry per enemy in scene.",
+          "items": { "$ref": "#/$defs/enemy_roster_entry" }
+        }
+      }
+    },
+
+    "vec3": {
+      "type": "object",
+      "description": "World-space position from GameObject → Transform → get_Position(). REFramework Vector3f usertype.",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      }
+    },
+
+    "enemy_roster_entry": {
+      "type": "object",
+      "description": "Per-enemy state within a snapshot. Identity from GameObject.get_Name(), HP from CharacterHandle, MemberType from EnemyUpdater.",
+      "required": ["hp_current", "hp_max", "hp_ratio", "is_dead"],
+      "properties": {
+        "name":             { "type": ["string", "null"], "description": "GameObject.get_Name() (e.g. 'ch16000')." },
+        "hp_current":       { "type": "number" },
+        "hp_max":           { "type": "number" },
+        "hp_ratio":         { "type": "number" },
+        "is_dead":          { "type": "boolean" },
+        "is_hackable":      { "type": "boolean", "description": "EnemyHandle.shouldShowJustHackUI()." },
+        "is_confused":      { "type": "boolean", "description": "EnemyHandle.isConfuse()." },
+        "position":         { "$ref": "#/$defs/vec3" },
+        "member_type_hash": { "type": ["integer", "null"], "description": "app.EnemyMemberType hash from EnemyUpdater.get_MemberType()." },
+        "member_type_name": { "type": ["string", "null"], "description": "Resolved name from static *Hash field lookup (e.g. 'BossMiddle', 'NearAttacker')." }
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "const": "bridge_ready" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/bridge_ready_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "catalog_loaded" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/catalog_loaded_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "dialogue_started" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/dialogue_started_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "dialogue_ended" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/dialogue_ended_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "dialogue_line" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/dialogue_line_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["cutscene_movie_started", "cutscene_movie_ended"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/cutscene_movie_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["cutscene_timeline_started", "cutscene_timeline_ended", "cutscene_skipped"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/cutscene_timeline_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "chapter_status_changed" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/chapter_status_changed_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["scene_activated", "scene_deactivated"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/scene_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["character_spawned", "character_despawned"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/character_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["enemy_entered_scene", "enemy_exited_scene", "enemy_engaged_player", "enemy_disengaged_player", "enemy_died"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/enemy_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["boss_battle_started", "boss_battle_ended"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/boss_battle_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "player_status_changed" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/player_status_changed_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "player_took_damage" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/player_took_damage_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["player_hp_critical", "player_hp_recovered"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/player_hp_band_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["player_died", "player_revived"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/player_life_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "weapon_swapped" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/weapon_swapped_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "inventory_changed" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/inventory_changed_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["scan_started", "scan_ended"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/scan_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "enum": ["hack_started", "hack_ended"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/hack_event_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "checkpoint_saved" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/checkpoint_saved_payload" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "snapshot" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/snapshot_payload" } } }
+    }
+  ]
+}

@@ -25,8 +25,11 @@ class TestStimulusSource:
     def test_twitch_value(self):
         assert StimulusSource.TWITCH.value == "twitch"
 
+    def test_game_state_value(self):
+        assert StimulusSource.GAME_STATE.value == "game_state"
+
     def test_enum_members(self):
-        assert len(StimulusSource) == 4
+        assert len(StimulusSource) == 5  # PATIENCE, TWITCH, GAME_STATE, CUSTOM, MODULE
 
 
 class TestStimulusData:

@@ -15,6 +15,7 @@ class StimulusSource(Enum):
 
     PATIENCE = "patience"
     TWITCH = "twitch"
+    GAME_STATE = "game_state"
     CUSTOM = "custom"
     MODULE = "module"
 

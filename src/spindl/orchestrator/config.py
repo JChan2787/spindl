@@ -493,6 +493,19 @@ class StimuliConfig(BaseModel):
     twitch_audience_window: int = Field(default=25, ge=25, le=300)
     twitch_audience_char_cap: int = Field(default=150, ge=50, le=500)
 
+    # Game-state bridge integration (NANO-116)
+    game_state_enabled: bool = False
+    game_state_host: str = "127.0.0.1"
+    game_state_port: int = Field(default=53817, ge=1, le=65535)
+    game_state_buffer_size: int = Field(default=20, ge=1, le=100)
+    game_state_prompt_template: str = (
+        "**New game events from the bridge.** "
+        "These are in-game events \u2014 commentate on what's happening, "
+        "don't address game characters directly.\n"
+        "\n"
+        "{events}\n"
+    )
+
     # Addressing-others contexts (NANO-110)
     addressing_others_contexts: list[AddressingContext] = Field(
         default_factory=_default_addressing_contexts,
@@ -504,6 +517,7 @@ class StimuliConfig(BaseModel):
         defaults = cls()
         patience = data.get("patience", {})
         twitch = data.get("twitch", {})
+        game_state = data.get("game_state", {})
 
         # Parse addressing-others contexts (NANO-110)
         addressing = data.get("addressing_others", {})
@@ -543,6 +557,21 @@ class StimuliConfig(BaseModel):
             ),
             twitch_audience_char_cap=twitch.get(
                 "audience_char_cap", defaults.twitch_audience_char_cap
+            ),
+            game_state_enabled=game_state.get(
+                "enabled", defaults.game_state_enabled
+            ),
+            game_state_host=game_state.get(
+                "host", defaults.game_state_host
+            ),
+            game_state_port=game_state.get(
+                "port", defaults.game_state_port
+            ),
+            game_state_buffer_size=game_state.get(
+                "buffer_size", defaults.game_state_buffer_size
+            ),
+            game_state_prompt_template=game_state.get(
+                "prompt_template", defaults.game_state_prompt_template
             ),
             addressing_others_contexts=contexts,
         )
