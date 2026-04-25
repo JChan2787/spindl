@@ -64,6 +64,9 @@ def _make_orchestrator(
     # NANO-115: Twitch transcript manager
     orch._twitch_transcript = MagicMock()
 
+    # NANO-116 B.2: Dialogue store
+    orch._dialogue_store = MagicMock()
+
     # Reflection system
     if has_reflection:
         orch._reflection_system = MagicMock()

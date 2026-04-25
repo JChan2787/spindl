@@ -22,6 +22,7 @@ from typing import Optional
 
 from ..base import StimulusModule
 from ..models import StimulusData, StimulusSource
+from .dialogue_buffer import DialogueBuffer
 from .models import GameEvent
 from .validator import check_protocol_version, load_vendored_version, validate_envelope
 
@@ -59,6 +60,7 @@ class GameStateModule(StimulusModule):
         buffer_size: int = 20,
         prompt_template: Optional[str] = None,
         enabled: bool = False,
+        dialogue_buffer_size: int = 30,
     ):
         self._host = host
         self._port = port
@@ -66,6 +68,9 @@ class GameStateModule(StimulusModule):
         self._buffer_size = max(1, buffer_size)
         self._prompt_template = prompt_template or _DEFAULT_PROMPT_TEMPLATE
         self._enabled = enabled
+
+        # Dialogue-specific buffer (NANO-116 Phase B.2)
+        self._dialogue_buffer = DialogueBuffer(max_size=dialogue_buffer_size)
 
         self._connected = False
         self._running = False
@@ -95,6 +100,7 @@ class GameStateModule(StimulusModule):
         self._enabled = value
         if not value:
             self._buffer.clear()
+            self._dialogue_buffer.clear()
 
     @property
     def connected(self) -> bool:
@@ -111,6 +117,11 @@ class GameStateModule(StimulusModule):
     @property
     def buffer_count(self) -> int:
         return len(self._buffer)
+
+    @property
+    def dialogue_buffer(self) -> DialogueBuffer:
+        """Dialogue-specific buffer with per-line dedup (NANO-116 B.2)."""
+        return self._dialogue_buffer
 
     @property
     def host(self) -> str:
@@ -184,6 +195,7 @@ class GameStateModule(StimulusModule):
         self._version_mismatch = False
         self._bridge_protocol_version = None
         self._buffer.clear()
+        self._dialogue_buffer.clear()
         self._last_sequence = -1
         self._thread = None
         logger.info("Game-state module stopped")
@@ -413,12 +425,43 @@ class GameStateModule(StimulusModule):
         self._buffer_event(event)
 
     def _buffer_event(self, event: dict) -> None:
-        """Convert validated event dict to GameEvent and append to buffer."""
+        """Convert validated event dict to GameEvent and append to buffer.
+
+        Also routes dialogue events to the dialogue-specific buffer
+        (NANO-116 B.2) and updates the gameplay snapshot from non-dialogue
+        events so dialogue lines capture situational context.
+        """
         if not self._enabled:
             return
 
+        event_type = event["event_type"]
+
+        # Update gameplay snapshot from non-dialogue events (B.2)
+        if event_type == "snapshot":
+            payload = event.get("payload", {})
+            player = payload.get("player", {})
+            self._dialogue_buffer.update_gameplay_snapshot(
+                chapter_hash=payload.get("chapter_hash"),
+                combat_active=payload.get("combat_active", False),
+                enemy_count=payload.get("enemy_count", 0),
+                hp_ratio=player.get("hp_ratio"),
+                timestamp=event.get("timestamp", ""),
+            )
+        elif event_type in ("enemy_engaged", "enemy_disengaged"):
+            payload = event.get("payload", {})
+            self._dialogue_buffer.update_gameplay_snapshot(
+                combat_active=event_type == "enemy_engaged",
+                enemy_count=payload.get("enemy_count", 0),
+                timestamp=event.get("timestamp", ""),
+            )
+
+        # Route dialogue events to dialogue buffer (B.2)
+        if DialogueBuffer.is_dialogue_event(event_type):
+            self._dialogue_buffer.accept_event(event)
+
+        # Generic buffer (B.1 — all events)
         game_event = GameEvent(
-            event_type=event["event_type"],
+            event_type=event_type,
             event_source=event["event_source"],
             timestamp=event["timestamp"],
             sequence=event["sequence"],
@@ -428,8 +471,9 @@ class GameStateModule(StimulusModule):
         )
         self._buffer.append(game_event)
         logger.debug(
-            "Buffered event: type=%s, seq=%d, buffer_len=%d",
+            "Buffered event: type=%s, seq=%d, buffer_len=%d, dialogue_len=%d",
             game_event.event_type,
             game_event.sequence,
             len(self._buffer),
+            self._dialogue_buffer.count,
         )

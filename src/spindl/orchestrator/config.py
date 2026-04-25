@@ -506,6 +506,21 @@ class StimuliConfig(BaseModel):
         "{events}\n"
     )
 
+    # Dialogue pipeline (NANO-116 Phase B.2)
+    game_state_dialogue_enabled: bool = False
+    game_state_dialogue_buffer_size: int = Field(default=30, ge=1, le=200)
+    game_state_dialogue_prompt_template: str = (
+        "**The following are in-game character dialogue lines from the game "
+        "you're co-hosting.** These characters are not talking to you \u2014 "
+        "commentate on what they're saying, don't reply to them directly.\n"
+        "\n"
+        "{dialogue}\n"
+    )
+    game_state_dialogue_token_budget: int = Field(default=2000, ge=500, le=10000)
+    game_state_dialogue_summarizer_model: str = "anthropic/claude-sonnet-4-20250514"
+    game_state_dialogue_summarizer_api_key: str = ""
+    game_state_dialogue_summarizer_persona: str = ""
+
     # Addressing-others contexts (NANO-110)
     addressing_others_contexts: list[AddressingContext] = Field(
         default_factory=_default_addressing_contexts,
@@ -518,6 +533,7 @@ class StimuliConfig(BaseModel):
         patience = data.get("patience", {})
         twitch = data.get("twitch", {})
         game_state = data.get("game_state", {})
+        dialogue = game_state.get("dialogue", {})
 
         # Parse addressing-others contexts (NANO-110)
         addressing = data.get("addressing_others", {})
@@ -573,6 +589,27 @@ class StimuliConfig(BaseModel):
             game_state_prompt_template=game_state.get(
                 "prompt_template", defaults.game_state_prompt_template
             ),
+            game_state_dialogue_enabled=dialogue.get(
+                "enabled", defaults.game_state_dialogue_enabled
+            ),
+            game_state_dialogue_buffer_size=dialogue.get(
+                "buffer_size", defaults.game_state_dialogue_buffer_size
+            ),
+            game_state_dialogue_prompt_template=dialogue.get(
+                "prompt_template", defaults.game_state_dialogue_prompt_template
+            ),
+            game_state_dialogue_token_budget=dialogue.get(
+                "token_budget", defaults.game_state_dialogue_token_budget
+            ),
+            game_state_dialogue_summarizer_model=dialogue.get(
+                "summarizer", {}
+            ).get("model", defaults.game_state_dialogue_summarizer_model),
+            game_state_dialogue_summarizer_api_key=dialogue.get(
+                "summarizer", {}
+            ).get("api_key", defaults.game_state_dialogue_summarizer_api_key),
+            game_state_dialogue_summarizer_persona=dialogue.get(
+                "summarizer", {}
+            ).get("persona_prompt", defaults.game_state_dialogue_summarizer_persona),
             addressing_others_contexts=contexts,
         )
 

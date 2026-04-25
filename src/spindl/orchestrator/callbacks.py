@@ -54,6 +54,7 @@ def tag_user_input(
     Voice                        -> [Message Type - Voice]
     Text (Dashboard typed)       -> [Message Type - Direct Keyboard]
     Stimulus (source="twitch")   -> [Message Type - Twitch Chat]
+    Stimulus (source="game_state") -> [Message Type - Game State]
     Stimulus (any other source)  -> [Message Type - Stimuli]  (catch-all)
 
     Tag uses ASCII hyphen for JSONL/YAML robustness. Preserves the original
@@ -61,6 +62,8 @@ def tag_user_input(
     """
     if stimulus_source == "twitch":
         tag = "[Message Type - Twitch Chat]"
+    elif stimulus_source == "game_state":
+        tag = "[Message Type - Game State]"
     elif stimulus_source or input_modality == InputModality.STIMULUS:
         tag = "[Message Type - Stimuli]"
     elif input_modality == InputModality.VOICE:
@@ -140,6 +143,10 @@ class OrchestratorCallbacks:
 
         # NANO-115: Twitch audience transcript dual-write callback
         self._on_twitch_response: Optional[Callable[[str, list[str]], None]] = None
+
+        # NANO-116 B.2: Game dialogue dual-write + summarization callbacks
+        self._on_game_state_response: Optional[Callable[[str, list[int]], None]] = None
+        self._on_game_state_check_summarize: Optional[Callable[[], None]] = None
 
         # Runtime generation parameter overrides (NANO-053)
         self._generation_params: Optional[dict] = None
@@ -1054,6 +1061,15 @@ class OrchestratorCallbacks:
                     reply_text = tts_response if tts_response else response
                     if reply_text:
                         self._on_twitch_response(reply_text, usernames)
+
+                # NANO-116 B.2: Dual-write assistant reply to dialogue store
+                # + trigger summarization if overflow
+                if stimulus_source == "game_state" and self._on_game_state_response:
+                    reply_text = tts_response if tts_response else response
+                    if reply_text:
+                        self._on_game_state_response(reply_text, [])
+                    if self._on_game_state_check_summarize:
+                        self._on_game_state_check_summarize()
 
                 # Classify emotion for avatar + chat display (NANO-094)
                 emotion, emotion_confidence = self._classify_emotion(response or "")

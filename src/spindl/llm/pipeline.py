@@ -362,7 +362,10 @@ class LLMPipeline:
         # 2d. Inject persistent audience chat transcript (NANO-115)
         self._inject_audience_chat(context)
 
-        # 2e. Patch deferred block char counts now that injections are done (NANO-045b)
+        # 2e. Inject character knowledge from game dialogue (NANO-116 B.2)
+        self._inject_character_knowledge(context)
+
+        # 2f. Patch deferred block char counts now that injections are done (NANO-045b)
         self._update_deferred_block_contents(context)
 
         # 3. Resolve generation parameters
@@ -523,6 +526,7 @@ class LLMPipeline:
         self._inject_codex_content(context)
         self._inject_rag_content(context)
         self._inject_audience_chat(context)
+        self._inject_character_knowledge(context)
         self._update_deferred_block_contents(context)
 
         # 3. Resolve generation parameters
@@ -695,6 +699,7 @@ class LLMPipeline:
         self._inject_codex_content(context)
         self._inject_rag_content(context)
         self._inject_audience_chat(context)
+        self._inject_character_knowledge(context)
         self._update_deferred_block_contents(context)
 
         # Estimate tokens via tiktoken
@@ -923,6 +928,26 @@ class LLMPipeline:
             system_prompt = context.messages[0]["content"]
 
             system_prompt = system_prompt.replace("[AUDIENCE_CHAT]", audience_content)
+
+            import re
+            system_prompt = re.sub(r"\n{3,}", "\n\n", system_prompt)
+
+            context.messages[0]["content"] = system_prompt
+
+    def _inject_character_knowledge(self, context: PipelineContext) -> None:
+        """
+        Inject game dialogue character knowledge into the system prompt (NANO-116 B.2).
+
+        Replaces [CHARACTER_KNOWLEDGE] placeholder with the formatted content
+        prepared by DialogueKnowledgeInjector preprocessor. If no content,
+        placeholder collapses to empty string.
+        """
+        knowledge_content = context.metadata.get("character_knowledge_formatted", "")
+
+        if context.messages and context.messages[0].get("role") == "system":
+            system_prompt = context.messages[0]["content"]
+
+            system_prompt = system_prompt.replace("[CHARACTER_KNOWLEDGE]", knowledge_content)
 
             import re
             system_prompt = re.sub(r"\n{3,}", "\n\n", system_prompt)

@@ -35,6 +35,8 @@ You are [PERSONA_NAME].
 
 [AUDIENCE_CHAT]
 
+[CHARACTER_KNOWLEDGE]
+
 ### Rules
 
 [PERSONA_RULES]
@@ -104,6 +106,7 @@ _TAG_VOCABULARY_SPEC = (
     "`[Message Type - Voice]` means your User spoke it aloud and the STT layer transcribed it; "
     "`[Message Type - Direct Keyboard]` means your User typed it into the Dashboard; "
     "`[Message Type - Twitch Chat]` means the content came from live Twitch chat viewers; "
+    "`[Message Type - Game State]` means the content came from in-game events via the game-state bridge; "
     "`[Message Type - Stimuli]` means an automated prompt fired while no live input was present "
     "(for example an idle-timer nudge). "
     "When asked about the source of a past message, read the tag on that turn. "

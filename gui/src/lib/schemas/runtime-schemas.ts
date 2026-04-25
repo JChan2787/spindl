@@ -203,6 +203,13 @@ export const StimuliConfigUpdatedSchema = z.object({
   game_state_port: z.number().int().min(1).max(65535),
   game_state_buffer_size: z.number().int().min(1).max(100),
   game_state_prompt_template: z.string(),
+  // NANO-116 Phase B.2: Dialogue pipeline
+  game_state_dialogue_enabled: z.boolean(),
+  game_state_dialogue_buffer_size: z.number().int().min(1).max(200),
+  game_state_dialogue_prompt_template: z.string(),
+  game_state_dialogue_token_budget: z.number().int().min(500).max(10000),
+  game_state_dialogue_summarizer_model: z.string(),
+  game_state_dialogue_summarizer_persona: z.string(),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
   persisted: z.boolean().optional(),

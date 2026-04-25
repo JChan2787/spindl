@@ -122,7 +122,7 @@ class TestDefaultBlocks:
 
     def test_returns_15_blocks(self, default_blocks: list[PromptBlock]):
         """Default registry has exactly 15 blocks."""
-        assert len(default_blocks) == 15
+        assert len(default_blocks) == 16
 
     def test_all_blocks_enabled(self, default_blocks: list[PromptBlock]):
         """All default blocks are enabled."""
@@ -132,7 +132,7 @@ class TestDefaultBlocks:
     def test_order_is_sequential(self, default_blocks: list[PromptBlock]):
         """Default blocks are ordered 0-14."""
         orders = [b.order for b in default_blocks]
-        assert orders == list(range(15))
+        assert orders == list(range(16))
 
     def test_block_ids_unique(self, default_blocks: list[PromptBlock]):
         """All block IDs are unique."""
@@ -145,7 +145,7 @@ class TestDefaultBlocks:
         expected = {
             "persona_name", "persona_appearance", "persona_personality",
             "scenario", "example_dialogue", "modality_context", "voice_state",
-            "codex_context", "rag_context", "audience_chat",
+            "codex_context", "rag_context", "audience_chat", "character_knowledge",
             "persona_rules", "modality_rules", "conversation_summary",
             "recent_history", "closing_instruction",
         }
@@ -200,8 +200,8 @@ class TestLoadBlockConfig:
     def test_empty_config_preserves_defaults(self, default_blocks: list[PromptBlock]):
         """Empty config dict returns defaults unchanged."""
         result = load_block_config({}, default_blocks)
-        assert len(result) == 15
-        assert [b.order for b in result] == list(range(15))
+        assert len(result) == 16
+        assert [b.order for b in result] == list(range(16))
 
     def test_reorder_blocks(self):
         """Config order reorders blocks."""
@@ -257,7 +257,7 @@ class TestLoadBlockConfig:
         # all other blocks appended after
         assert result[0].id == "persona_name"
         assert result[1].id == "persona_appearance"
-        assert len(result) == 15  # no extra blocks created
+        assert len(result) == 16  # no extra blocks created
 
     def test_unknown_block_in_disabled_ignored(self):
         """Unknown block ID in disabled list is silently ignored."""
@@ -272,7 +272,7 @@ class TestLoadBlockConfig:
         assert result[0].id == "persona_name"
         assert result[1].id == "closing_instruction"
         # Remaining 13 blocks appended after
-        assert len(result) == 15
+        assert len(result) == 16
         remaining_ids = [b.id for b in result[2:]]
         assert "persona_appearance" in remaining_ids
         assert "persona_rules" in remaining_ids
@@ -592,7 +592,7 @@ class TestPipelineBlockConfig:
         pipeline.set_block_config(config)
 
         assert pipeline._block_config is not None
-        assert len(pipeline._block_config) == 15
+        assert len(pipeline._block_config) == 16
         block_map = {b.id: b for b in pipeline._block_config}
         assert block_map["voice_state"].enabled is False
 
@@ -651,7 +651,7 @@ class TestBlockContentsCapture:
         """block_contents has one entry per enabled block."""
         ctx = self._build_and_get_context(structured_persona)
         # All 15 default blocks are enabled
-        assert len(ctx.block_contents) == 15
+        assert len(ctx.block_contents) == 16
 
     def test_block_ids_match_defaults(self, structured_persona: dict):
         """block_contents IDs match the default block IDs in order."""
@@ -704,7 +704,7 @@ class TestBlockContentsCapture:
         ctx = self._build_and_get_context(structured_persona, blocks=blocks)
         ids = {e["id"] for e in ctx.block_contents}
         assert "voice_state" not in ids
-        assert len(ctx.block_contents) == 14
+        assert len(ctx.block_contents) == 15
 
     def test_legacy_mode_no_block_contents(self, structured_persona: dict):
         """Legacy mode (no block_config) leaves block_contents as None."""

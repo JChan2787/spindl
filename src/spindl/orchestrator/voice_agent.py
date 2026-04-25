@@ -41,6 +41,7 @@ from ..llm.plugins import (
     TwitchHistoryInjector,
     create_codex_plugins,
 )
+from ..llm.plugins.dialogue_knowledge import DialogueKnowledgeInjector
 from ..llm.plugins.reasoning_extractor import ReasoningExtractor
 from ..llm.providers.registry import create_default_registry as create_prompt_provider_registry
 from ..characters import CharacterLoader
@@ -56,6 +57,7 @@ from ..memory.reflection import ReflectionSystem
 from ..memory.reflection_monitor import ReflectionMonitor
 from ..memory.session_summary import SessionSummaryGenerator
 from ..stimuli import StimuliEngine, GameStateModule, PatienceModule, TwitchModule
+from ..stimuli.game_state import DialogueStore, DialogueSummarizer
 from ..avatar import AvatarToolMoodSubscriber, ONNXEmotionClassifier
 from ..vts import VTSDriver
 from .callbacks import OrchestratorCallbacks
@@ -281,6 +283,23 @@ class VoiceAgentOrchestrator:
         )
         self._twitch_history_injector = twitch_history_injector
 
+        # NANO-116 B.2: Game dialogue persistence, summarization, and injection
+        stimuli_cfg = self._config.stimuli_config
+        self._dialogue_store = DialogueStore(
+            conversations_dir=self._config.conversations_dir,
+            debug=self._config.debug,
+        )
+        self._dialogue_summarizer = DialogueSummarizer(
+            api_key=stimuli_cfg.game_state_dialogue_summarizer_api_key,
+            model=stimuli_cfg.game_state_dialogue_summarizer_model,
+            persona_prompt=stimuli_cfg.game_state_dialogue_summarizer_persona,
+        )
+        dialogue_knowledge_injector = DialogueKnowledgeInjector(
+            token_budget_chars=stimuli_cfg.game_state_dialogue_token_budget,
+        )
+        dialogue_knowledge_injector.set_dialogue_store(self._dialogue_store)
+        self._dialogue_knowledge_injector = dialogue_knowledge_injector
+
         # Codex: Create activator and cooldown plugins (NANO-037)
         # Must be registered BEFORE budget_enforcer so codex tokens are counted
         # Store manager for hot-reload (NANO-036)
@@ -431,6 +450,7 @@ class VoiceAgentOrchestrator:
         # 4. BudgetEnforcer - enforces hard limits (includes codex + RAG tokens)
         # 5. HistoryInjector - injects remaining history into messages
         # 6. TwitchHistoryInjector - stages audience transcript for injection (NANO-115)
+        # 7. DialogueKnowledgeInjector - stages character knowledge for injection (NANO-116 B.2)
         self._pipeline.register_pre_processor(summarizer)
         self._pipeline.register_pre_processor(codex_activator)
         if rag_injector:
@@ -438,6 +458,7 @@ class VoiceAgentOrchestrator:
         self._pipeline.register_pre_processor(budget_enforcer)
         self._pipeline.register_pre_processor(history_injector)
         self._pipeline.register_pre_processor(twitch_history_injector)
+        self._pipeline.register_pre_processor(dialogue_knowledge_injector)
 
         # PostProcessors
         # 0. ReasoningExtractor - strip inline <think> blocks (NANO-042)
@@ -526,6 +547,10 @@ class VoiceAgentOrchestrator:
         # NANO-115: Wire Twitch transcript dual-write callback
         self._callbacks._on_twitch_response = self._twitch_transcript.record_assistant_reply
 
+        # NANO-116 B.2: Wire dialogue store dual-write + summarization check
+        self._callbacks._on_game_state_response = self._dialogue_store.record_assistant_reply
+        self._callbacks._on_game_state_check_summarize = self._check_dialogue_summarize
+
         # NANO-076: Wire session file getter for snapshot sidecar persistence
         self._callbacks.set_session_file_getter(lambda: self.session_file)
 
@@ -604,14 +629,20 @@ class VoiceAgentOrchestrator:
                 buffer_size=stimuli_cfg.game_state_buffer_size,
                 prompt_template=stimuli_cfg.game_state_prompt_template,
                 enabled=stimuli_cfg.game_state_enabled,
+                dialogue_buffer_size=stimuli_cfg.game_state_dialogue_buffer_size,
             )
             self._stimuli_engine.register_module(game_state)
+            self._game_state_module = game_state
             logger.info(
-                "Game-state module registered (target=%s:%d, enabled=%s)",
+                "Game-state module registered (target=%s:%d, enabled=%s, "
+                "dialogue_buffer=%d)",
                 stimuli_cfg.game_state_host,
                 stimuli_cfg.game_state_port,
                 stimuli_cfg.game_state_enabled,
+                stimuli_cfg.game_state_dialogue_buffer_size,
             )
+        else:
+            self._game_state_module = None
 
         logger.info(
             "Stimuli engine created (enabled=%s, patience=%.1fs)",
@@ -1029,6 +1060,47 @@ class VoiceAgentOrchestrator:
         if self._state_machine.state == AgentState.PROCESSING:
             self._state_machine._transition(AgentState.LISTENING, f"{stage}_error")
 
+    def _check_dialogue_summarize(self) -> None:
+        """Check if dialogue needs summarization and run if so (NANO-116 B.2).
+
+        Called as part of the atomic response cycle after the LLM responds
+        to a game_state stimulus. If accumulated raw dialogue exceeds the
+        token budget, the summarizer fires and persists the result.
+        """
+        if not self._dialogue_store or not self._dialogue_summarizer:
+            return
+
+        token_budget = self._config.stimuli_config.game_state_dialogue_token_budget
+        if not self._dialogue_store.needs_summarization(token_budget):
+            return
+
+        if not self._dialogue_summarizer.is_configured():
+            logger.warning(
+                "Dialogue overflow detected but summarizer not configured. "
+                "Raw lines will be truncated at injection time."
+            )
+            return
+
+        previous_summary, unsummarized = self._dialogue_store.get_summarizer_input()
+        if not unsummarized:
+            return
+
+        logger.info(
+            "Dialogue overflow — running summarizer (unsummarized_lines=%d, "
+            "previous_summary=%s)",
+            len(unsummarized),
+            "yes" if previous_summary else "no",
+        )
+
+        summary = self._dialogue_summarizer.summarize(previous_summary, unsummarized)
+        if summary:
+            self._dialogue_store.record_summary(summary)
+            logger.info(
+                "Dialogue summary persisted (v%d, %d chars)",
+                self._dialogue_store.summary_version,
+                len(summary),
+            )
+
     def start(self) -> None:
         """Start the voice agent."""
         if self._running:
@@ -1054,6 +1126,10 @@ class VoiceAgentOrchestrator:
         # NANO-115: Bind Twitch transcript to voice session file
         if self._twitch_transcript and self._history_manager:
             self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
+
+        # NANO-116 B.2: Bind dialogue store to voice session file
+        if self._dialogue_store and self._history_manager:
+            self._dialogue_store.ensure_store(self._history_manager.session_file)
 
         # Start reflection system background thread (NANO-043 Phase 3)
         if self._reflection_system:
@@ -2268,6 +2344,9 @@ class VoiceAgentOrchestrator:
         # NANO-115: Rebind Twitch transcript to new session file
         if self._twitch_transcript:
             self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
+        # NANO-116 B.2: Rebind dialogue store to new session file
+        if self._dialogue_store:
+            self._dialogue_store.ensure_store(self._history_manager.session_file)
         # NANO-107: update session-scoped retrieval filter
         if self._memory_store and self._history_manager.session_file:
             self._memory_store.set_session_id(self._history_manager.session_file.stem)
@@ -2394,6 +2473,10 @@ class VoiceAgentOrchestrator:
         # NANO-115: Rebind Twitch transcript to new persona session
         if self._twitch_transcript and self._history_manager:
             self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
+
+        # NANO-116 B.2: Rebind dialogue store to new persona session
+        if self._dialogue_store and self._history_manager:
+            self._dialogue_store.ensure_store(self._history_manager.session_file)
 
         # 11. Restart reflection system with new session_id
         if self._reflection_system:
