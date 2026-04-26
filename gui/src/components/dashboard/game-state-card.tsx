@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Gamepad2, Wifi, WifiOff, Layers, MessageSquare, Key, Brain, BookOpen } from "lucide-react";
+import { Gamepad2, Wifi, WifiOff, Layers, MessageSquare, Key, Brain, BookOpen, Timer, ListFilter } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,17 @@ interface SliderProps {
 }
 
 function Slider({ label, value, min, max, step, icon, onChange, disabled, unit = "" }: SliderProps) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+
+  const commitEdit = () => {
+    setEditing(false);
+    const parsed = parseFloat(editValue);
+    if (!isNaN(parsed)) {
+      onChange(Math.min(max, Math.max(min, parsed)));
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -30,9 +41,28 @@ function Slider({ label, value, min, max, step, icon, onChange, disabled, unit =
           {icon}
           {label}
         </Label>
-        <span className="text-sm font-mono text-muted-foreground">
-          {value.toFixed(step < 1 ? 1 : 0)}{unit}
-        </span>
+        {editing ? (
+          <input
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditing(false); }}
+            autoFocus
+            className="w-20 h-6 text-sm font-mono text-right bg-background border border-input rounded px-1"
+          />
+        ) : (
+          <button
+            onClick={() => { setEditValue(value.toFixed(step < 1 ? 1 : 0)); setEditing(true); }}
+            className="text-sm font-mono text-muted-foreground hover:text-foreground transition-colors cursor-text"
+            disabled={disabled}
+          >
+            {value.toFixed(step < 1 ? 1 : 0)}{unit}
+          </button>
+        )}
       </div>
       <input
         type="range"
@@ -184,6 +214,22 @@ export function GameStateCard() {
     (value: number) => {
       updatePendingStimuli({ game_state_dialogue_token_budget: value });
       emitChanges({ game_state_dialogue_token_budget: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleMinLinesChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_dialogue_min_lines: value });
+      emitChanges({ game_state_dialogue_min_lines: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleDrainDelayChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_dialogue_drain_delay: value });
+      emitChanges({ game_state_dialogue_drain_delay: value });
     },
     [updatePendingStimuli, emitChanges]
   );
@@ -348,6 +394,27 @@ export function GameStateCard() {
               step={100}
               icon={<BookOpen className="h-3 w-3" />}
               onChange={handleTokenBudgetChange}
+            />
+
+            <Slider
+              label="Min Lines Before Drain"
+              value={effectiveConfig.game_state_dialogue_min_lines}
+              min={1}
+              max={50}
+              step={1}
+              icon={<ListFilter className="h-3 w-3" />}
+              onChange={handleMinLinesChange}
+            />
+
+            <Slider
+              label="Drain Delay"
+              value={effectiveConfig.game_state_dialogue_drain_delay}
+              min={0}
+              max={30}
+              step={0.5}
+              icon={<Timer className="h-3 w-3" />}
+              onChange={handleDrainDelayChange}
+              unit="s"
             />
 
             {/* Live dialogue feed preview */}

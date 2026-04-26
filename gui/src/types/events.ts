@@ -612,6 +612,8 @@ export interface SetStimuliConfigPayload {
   game_state_dialogue_buffer_size?: number;
   game_state_dialogue_prompt_template?: string;
   game_state_dialogue_token_budget?: number;
+  game_state_dialogue_min_lines?: number;
+  game_state_dialogue_drain_delay?: number;
   game_state_dialogue_summarizer_model?: string;
   game_state_dialogue_summarizer_api_key?: string;
   game_state_dialogue_summarizer_persona?: string;

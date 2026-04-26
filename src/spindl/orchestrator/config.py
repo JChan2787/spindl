@@ -517,6 +517,8 @@ class StimuliConfig(BaseModel):
         "{dialogue}\n"
     )
     game_state_dialogue_token_budget: int = Field(default=2000, ge=500, le=10000)
+    game_state_dialogue_min_lines: int = Field(default=1, ge=1, le=50)
+    game_state_dialogue_drain_delay: float = Field(default=0.0, ge=0.0, le=30.0)
     game_state_dialogue_summarizer_model: str = "anthropic/claude-sonnet-4-20250514"
     game_state_dialogue_summarizer_api_key: str = ""
     game_state_dialogue_summarizer_persona: str = ""
@@ -600,6 +602,12 @@ class StimuliConfig(BaseModel):
             ),
             game_state_dialogue_token_budget=dialogue.get(
                 "token_budget", defaults.game_state_dialogue_token_budget
+            ),
+            game_state_dialogue_min_lines=dialogue.get(
+                "min_lines", defaults.game_state_dialogue_min_lines
+            ),
+            game_state_dialogue_drain_delay=dialogue.get(
+                "drain_delay", defaults.game_state_dialogue_drain_delay
             ),
             game_state_dialogue_summarizer_model=dialogue.get(
                 "summarizer", {}
@@ -1200,6 +1208,8 @@ class OrchestratorConfig(BaseModel):
         gsd["buffer_size"] = self.stimuli_config.game_state_dialogue_buffer_size
         gsd["prompt_template"] = self.stimuli_config.game_state_dialogue_prompt_template
         gsd["token_budget"] = self.stimuli_config.game_state_dialogue_token_budget
+        gsd["min_lines"] = self.stimuli_config.game_state_dialogue_min_lines
+        gsd["drain_delay"] = self.stimuli_config.game_state_dialogue_drain_delay
         gsd["summarizer_model"] = self.stimuli_config.game_state_dialogue_summarizer_model
         gsd["summarizer_api_key"] = self.stimuli_config.game_state_dialogue_summarizer_api_key
         gsd["summarizer_persona"] = self.stimuli_config.game_state_dialogue_summarizer_persona

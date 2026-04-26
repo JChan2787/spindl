@@ -107,6 +107,8 @@ def build_stimuli_hydration(cfg) -> dict:
         "game_state_dialogue_buffer_size": cfg.game_state_dialogue_buffer_size,
         "game_state_dialogue_prompt_template": cfg.game_state_dialogue_prompt_template,
         "game_state_dialogue_token_budget": cfg.game_state_dialogue_token_budget,
+        "game_state_dialogue_min_lines": cfg.game_state_dialogue_min_lines,
+        "game_state_dialogue_drain_delay": cfg.game_state_dialogue_drain_delay,
         "game_state_dialogue_summarizer_model": cfg.game_state_dialogue_summarizer_model,
         "game_state_dialogue_summarizer_api_key": cfg.game_state_dialogue_summarizer_api_key or "",
         "game_state_dialogue_summarizer_persona": cfg.game_state_dialogue_summarizer_persona or "",
@@ -236,6 +238,8 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             game_state_dialogue_buffer_size = data.get("game_state_dialogue_buffer_size")
             game_state_dialogue_prompt_template = data.get("game_state_dialogue_prompt_template")
             game_state_dialogue_token_budget = data.get("game_state_dialogue_token_budget")
+            game_state_dialogue_min_lines = data.get("game_state_dialogue_min_lines")
+            game_state_dialogue_drain_delay = data.get("game_state_dialogue_drain_delay")
             game_state_dialogue_summarizer_model = data.get("game_state_dialogue_summarizer_model")
             game_state_dialogue_summarizer_api_key = data.get("game_state_dialogue_summarizer_api_key")
             game_state_dialogue_summarizer_persona = data.get("game_state_dialogue_summarizer_persona")
@@ -296,6 +300,12 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             if game_state_dialogue_token_budget is not None:
                 game_state_dialogue_token_budget = int(game_state_dialogue_token_budget)
                 game_state_dialogue_token_budget = max(500, min(10000, game_state_dialogue_token_budget))
+            if game_state_dialogue_min_lines is not None:
+                game_state_dialogue_min_lines = int(game_state_dialogue_min_lines)
+                game_state_dialogue_min_lines = max(1, min(50, game_state_dialogue_min_lines))
+            if game_state_dialogue_drain_delay is not None:
+                game_state_dialogue_drain_delay = float(game_state_dialogue_drain_delay)
+                game_state_dialogue_drain_delay = max(0.0, min(30.0, game_state_dialogue_drain_delay))
             if game_state_dialogue_summarizer_model is not None:
                 game_state_dialogue_summarizer_model = str(game_state_dialogue_summarizer_model).strip()
             if game_state_dialogue_summarizer_api_key is not None:
@@ -327,6 +337,8 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_dialogue_buffer_size=game_state_dialogue_buffer_size,
                 game_state_dialogue_prompt_template=game_state_dialogue_prompt_template,
                 game_state_dialogue_token_budget=game_state_dialogue_token_budget,
+                game_state_dialogue_min_lines=game_state_dialogue_min_lines,
+                game_state_dialogue_drain_delay=game_state_dialogue_drain_delay,
                 game_state_dialogue_summarizer_model=game_state_dialogue_summarizer_model,
                 game_state_dialogue_summarizer_api_key=game_state_dialogue_summarizer_api_key,
                 game_state_dialogue_summarizer_persona=game_state_dialogue_summarizer_persona,

@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from collections import deque
 from typing import Optional
 
@@ -61,6 +62,8 @@ class GameStateModule(StimulusModule):
         prompt_template: Optional[str] = None,
         enabled: bool = False,
         dialogue_buffer_size: int = 30,
+        dialogue_min_lines: int = 1,
+        dialogue_drain_delay: float = 0.0,
     ):
         self._host = host
         self._port = port
@@ -71,6 +74,11 @@ class GameStateModule(StimulusModule):
 
         # Dialogue-specific buffer (NANO-116 Phase B.2)
         self._dialogue_buffer = DialogueBuffer(max_size=dialogue_buffer_size)
+
+        # Drain cadence controls (NANO-116 B.5)
+        self._dialogue_min_lines = max(1, dialogue_min_lines)
+        self._dialogue_drain_delay = max(0.0, dialogue_drain_delay)
+        self._first_line_time: float | None = None
 
         self._connected = False
         self._running = False
@@ -101,6 +109,7 @@ class GameStateModule(StimulusModule):
         if not value:
             self._buffer.clear()
             self._dialogue_buffer.clear()
+            self._first_line_time = None
 
     @property
     def connected(self) -> bool:
@@ -157,6 +166,22 @@ class GameStateModule(StimulusModule):
     def prompt_template(self, value: str) -> None:
         self._prompt_template = value
 
+    @property
+    def dialogue_min_lines(self) -> int:
+        return self._dialogue_min_lines
+
+    @dialogue_min_lines.setter
+    def dialogue_min_lines(self, value: int) -> None:
+        self._dialogue_min_lines = max(1, value)
+
+    @property
+    def dialogue_drain_delay(self) -> float:
+        return self._dialogue_drain_delay
+
+    @dialogue_drain_delay.setter
+    def dialogue_drain_delay(self, value: float) -> None:
+        self._dialogue_drain_delay = max(0.0, value)
+
     def start(self) -> None:
         if self._running:
             print("[GameState] start() called but already running", flush=True)
@@ -196,23 +221,28 @@ class GameStateModule(StimulusModule):
         self._bridge_protocol_version = None
         self._buffer.clear()
         self._dialogue_buffer.clear()
+        self._first_line_time = None
         self._last_sequence = -1
         self._thread = None
         logger.info("Game-state module stopped")
 
     def has_stimulus(self) -> bool:
-        return (
-            self._enabled
-            and self._running
-            and not self._version_mismatch
-            and self._dialogue_buffer.count > 0
-        )
+        if not (self._enabled and self._running and not self._version_mismatch):
+            return False
+        count = self._dialogue_buffer.count
+        if count < self._dialogue_min_lines:
+            return False
+        if self._dialogue_drain_delay > 0.0 and self._first_line_time is not None:
+            if (time.monotonic() - self._first_line_time) < self._dialogue_drain_delay:
+                return False
+        return True
 
     def get_stimulus(self) -> Optional[StimulusData]:
         if not self.has_stimulus():
             return None
 
         lines = self._dialogue_buffer.drain()
+        self._first_line_time = None
         if not lines:
             return None
 
@@ -411,6 +441,8 @@ class GameStateModule(StimulusModule):
 
         # Route dialogue events to dialogue buffer (B.2)
         if DialogueBuffer.is_dialogue_event(event_type):
+            if self._first_line_time is None and event_type == "dialogue_line":
+                self._first_line_time = time.monotonic()
             self._dialogue_buffer.accept_event(event)
 
         # Generic buffer (B.1 — all events)

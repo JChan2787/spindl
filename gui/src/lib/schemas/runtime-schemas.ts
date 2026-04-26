@@ -208,6 +208,8 @@ export const StimuliConfigUpdatedSchema = z.object({
   game_state_dialogue_buffer_size: z.number().int().min(1).max(200),
   game_state_dialogue_prompt_template: z.string(),
   game_state_dialogue_token_budget: z.number().int().min(500).max(10000),
+  game_state_dialogue_min_lines: z.number().int().min(1).max(50),
+  game_state_dialogue_drain_delay: z.number().min(0).max(30),
   game_state_dialogue_summarizer_model: z.string(),
   game_state_dialogue_summarizer_api_key: z.string(),
   game_state_dialogue_summarizer_persona: z.string(),

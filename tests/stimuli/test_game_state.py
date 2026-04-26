@@ -208,6 +208,7 @@ class TestGameStateModuleBufferDrain:
         from spindl.stimuli.game_state.dialogue_buffer import DialogueLine
         module._dialogue_buffer._buffer.append(
             DialogueLine(speaker="Diana", text="Watch out!", source="chatter",
+                         event_source="direct_hook",
                          timestamp="2026-04-25T04:00:00Z", sequence=0)
         )
         assert module.has_stimulus() is True
@@ -218,6 +219,7 @@ class TestGameStateModuleBufferDrain:
         from spindl.stimuli.game_state.dialogue_buffer import DialogueLine
         module._dialogue_buffer._buffer.append(
             DialogueLine(speaker="Diana", text="Watch out!", source="chatter",
+                         event_source="direct_hook",
                          timestamp="2026-04-25T04:00:00Z", sequence=0)
         )
         stimulus = module.get_stimulus()

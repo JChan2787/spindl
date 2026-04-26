@@ -2003,6 +2003,8 @@ class VoiceAgentOrchestrator:
         game_state_dialogue_buffer_size: Optional[int] = None,
         game_state_dialogue_prompt_template: Optional[str] = None,
         game_state_dialogue_token_budget: Optional[int] = None,
+        game_state_dialogue_min_lines: Optional[int] = None,
+        game_state_dialogue_drain_delay: Optional[float] = None,
         game_state_dialogue_summarizer_model: Optional[str] = None,
         game_state_dialogue_summarizer_api_key: Optional[str] = None,
         game_state_dialogue_summarizer_persona: Optional[str] = None,
@@ -2169,6 +2171,12 @@ class VoiceAgentOrchestrator:
                         cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
                     if game_state_dialogue_token_budget is not None:
                         cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
+                    if game_state_dialogue_min_lines is not None:
+                        module.dialogue_min_lines = game_state_dialogue_min_lines
+                        cfg.game_state_dialogue_min_lines = game_state_dialogue_min_lines
+                    if game_state_dialogue_drain_delay is not None:
+                        module.dialogue_drain_delay = game_state_dialogue_drain_delay
+                        cfg.game_state_dialogue_drain_delay = game_state_dialogue_drain_delay
                     break
 
         # Update config even if game_state module isn't registered yet
@@ -2190,6 +2198,10 @@ class VoiceAgentOrchestrator:
             cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
         if game_state_dialogue_token_budget is not None:
             cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
+        if game_state_dialogue_min_lines is not None:
+            cfg.game_state_dialogue_min_lines = game_state_dialogue_min_lines
+        if game_state_dialogue_drain_delay is not None:
+            cfg.game_state_dialogue_drain_delay = game_state_dialogue_drain_delay
         if game_state_dialogue_summarizer_model is not None:
             cfg.game_state_dialogue_summarizer_model = game_state_dialogue_summarizer_model
             if self._dialogue_summarizer:
