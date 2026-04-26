@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useSettingsStore, selectEffectiveStimuliConfig } from "@/lib/stores";
 import { getSocket } from "@/lib/socket";
+import { ModelCombobox, type ModelOption } from "@/components/ui/model-combobox";
 import type { GameStateStatus } from "@/lib/stores/settings-store";
 
 interface SliderProps {
@@ -135,11 +136,14 @@ export function GameStateCard() {
   const [localSummarizerPersona, setLocalSummarizerPersona] = useState(effectiveConfig.game_state_dialogue_summarizer_persona);
   const summarizerPersonaSyncedRef = useRef(effectiveConfig.game_state_dialogue_summarizer_persona);
 
-  const [localSummarizerModel, setLocalSummarizerModel] = useState(effectiveConfig.game_state_dialogue_summarizer_model);
-  const summarizerModelSyncedRef = useRef(effectiveConfig.game_state_dialogue_summarizer_model);
-
   const [localSummarizerApiKey, setLocalSummarizerApiKey] = useState(effectiveConfig.game_state_dialogue_summarizer_api_key);
   const summarizerApiKeySyncedRef = useRef(effectiveConfig.game_state_dialogue_summarizer_api_key);
+
+  // Model combobox state
+  const [summarizerModels, setSummarizerModels] = useState<ModelOption[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const hasFetchedModelsRef = useRef(false);
 
   // Sync local state when backend config changes
   useEffect(() => {
@@ -151,10 +155,6 @@ export function GameStateCard() {
       setLocalSummarizerPersona(effectiveConfig.game_state_dialogue_summarizer_persona);
       summarizerPersonaSyncedRef.current = effectiveConfig.game_state_dialogue_summarizer_persona;
     }
-    if (effectiveConfig.game_state_dialogue_summarizer_model !== summarizerModelSyncedRef.current) {
-      setLocalSummarizerModel(effectiveConfig.game_state_dialogue_summarizer_model);
-      summarizerModelSyncedRef.current = effectiveConfig.game_state_dialogue_summarizer_model;
-    }
     if (effectiveConfig.game_state_dialogue_summarizer_api_key !== summarizerApiKeySyncedRef.current) {
       setLocalSummarizerApiKey(effectiveConfig.game_state_dialogue_summarizer_api_key);
       summarizerApiKeySyncedRef.current = effectiveConfig.game_state_dialogue_summarizer_api_key;
@@ -162,7 +162,6 @@ export function GameStateCard() {
   }, [
     effectiveConfig.game_state_dialogue_prompt_template,
     effectiveConfig.game_state_dialogue_summarizer_persona,
-    effectiveConfig.game_state_dialogue_summarizer_model,
     effectiveConfig.game_state_dialogue_summarizer_api_key,
   ]);
 
@@ -186,13 +185,52 @@ export function GameStateCard() {
     }
   }, [localSummarizerPersona, updatePendingStimuli, emitChanges]);
 
-  const handleSummarizerModelBlur = useCallback(() => {
-    if (localSummarizerModel !== summarizerModelSyncedRef.current) {
-      updatePendingStimuli({ game_state_dialogue_summarizer_model: localSummarizerModel });
-      emitChanges({ game_state_dialogue_summarizer_model: localSummarizerModel });
-      summarizerModelSyncedRef.current = localSummarizerModel;
+  const effectiveSummarizerApiKey = localSummarizerApiKey || effectiveConfig.game_state_dialogue_summarizer_api_key;
+
+  const fetchSummarizerModels = useCallback(async () => {
+    const key = effectiveSummarizerApiKey;
+    if (!key) return;
+
+    setIsLoadingModels(true);
+    setModelsError(null);
+
+    try {
+      const response = await fetch("/api/launcher/fetch-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "openrouter", apiKey: key }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        setModelsError(data.error || "Failed to fetch models");
+        setSummarizerModels([]);
+      } else {
+        setSummarizerModels(data.models);
+      }
+    } catch (err) {
+      setModelsError(err instanceof Error ? err.message : "Network error");
+      setSummarizerModels([]);
+    } finally {
+      setIsLoadingModels(false);
     }
-  }, [localSummarizerModel, updatePendingStimuli, emitChanges]);
+  }, [effectiveSummarizerApiKey]);
+
+  useEffect(() => {
+    if (effectiveSummarizerApiKey && !hasFetchedModelsRef.current) {
+      hasFetchedModelsRef.current = true;
+      fetchSummarizerModels();
+    }
+  }, [effectiveSummarizerApiKey, fetchSummarizerModels]);
+
+  const handleSummarizerModelChange = useCallback(
+    (value: string) => {
+      updatePendingStimuli({ game_state_dialogue_summarizer_model: value });
+      emitChanges({ game_state_dialogue_summarizer_model: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
 
   const handleSummarizerApiKeyBlur = useCallback(() => {
     if (localSummarizerApiKey !== summarizerApiKeySyncedRef.current) {
@@ -350,12 +388,15 @@ export function GameStateCard() {
                 <BookOpen className="h-3 w-3" />
                 Summarizer Model (OpenRouter)
               </Label>
-              <Input
-                value={localSummarizerModel}
-                onChange={(e) => setLocalSummarizerModel(e.target.value)}
-                onBlur={handleSummarizerModelBlur}
-                placeholder="anthropic/claude-sonnet-4-20250514"
-                className="text-xs h-8"
+              <ModelCombobox
+                value={effectiveConfig.game_state_dialogue_summarizer_model}
+                onValueChange={handleSummarizerModelChange}
+                models={summarizerModels}
+                isLoading={isLoadingModels}
+                error={modelsError}
+                onRefresh={fetchSummarizerModels}
+                placeholder={effectiveSummarizerApiKey ? "Select a model..." : "Enter API key first"}
+                disabled={!effectiveSummarizerApiKey}
               />
             </div>
 
