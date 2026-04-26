@@ -357,7 +357,7 @@ class GameStateModule(StimulusModule):
                     logger.warning("Bridge returned empty read — connection closed by remote")
                     raise ConnectionError("Bridge closed connection")
 
-                print(f"[GameState] RAW LINE: {line[:200]}", flush=True)
+                logger.debug("RAW LINE: %s", line[:200])
                 self._process_line(line)
 
         finally:
