@@ -5,13 +5,12 @@ import { User, Clock, Subtitles, Pin, Gamepad2, Loader2, Download } from "lucide
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
-import { useSettingsStore, useConnectionStore, useAgentStore } from "@/lib/stores";
+import { useSettingsStore, useConnectionStore, useServiceDisabled } from "@/lib/stores";
 
 export function AvatarSettings() {
   const avatarConfig = useSettingsStore((s) => s.avatarConfig);
   const connected = useConnectionStore((s) => s.connected);
-  const health = useAgentStore((s) => s.health);
-  const sttDisabled = health?.stt === "disabled";
+  const sttDisabled = useServiceDisabled("stt");
 
   // Check install status on mount
   useEffect(() => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAgentStore, useConnectionStore } from "@/lib/stores";
+import { useAgentStore, useConnectionStore, useServiceStatus, serviceBadgeVariant, serviceBadgeLabel, useServiceDisabled } from "@/lib/stores";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +78,11 @@ export default function DashboardPage() {
 
   const [configChecked, setConfigChecked] = useState(false);
   const [shutdownDialogOpen, setShutdownDialogOpen] = useState(false);
+
+  // NANO-116 B.4a: Service status hooks replace scattered health?.stt === "disabled" checks
+  const sttStatus = useServiceStatus("stt");
+  const ttsStatus = useServiceStatus("tts");
+  const sttDisabled = sttStatus === "disabled";
 
   // NANO-027 Phase 4: Check if config needs setup, redirect to launcher
   useEffect(() => {
@@ -189,17 +194,11 @@ export default function DashboardPage() {
             <div className="hidden md:flex items-center gap-1.5">
               {connected && health ? (
                 <>
-                  <Badge
-                    variant={health.stt === "disabled" ? "secondary" : health.stt ? "default" : "destructive"}
-                    className="text-xs"
-                  >
-                    STT {health.stt === "disabled" ? "OFF" : health.stt ? "OK" : "DOWN"}
+                  <Badge variant={serviceBadgeVariant(sttStatus)} className="text-xs">
+                    STT {serviceBadgeLabel(sttStatus)}
                   </Badge>
-                  <Badge
-                    variant={health.tts === "disabled" ? "secondary" : health.tts ? "default" : "destructive"}
-                    className="text-xs"
-                  >
-                    TTS {health.tts === "disabled" ? "OFF" : health.tts ? "OK" : "DOWN"}
+                  <Badge variant={serviceBadgeVariant(ttsStatus)} className="text-xs">
+                    TTS {serviceBadgeLabel(ttsStatus)}
                   </Badge>
                   <Badge variant={health.llm ? "default" : "destructive"} className="text-xs">
                     LLM {health.llm ? "OK" : "DOWN"}
@@ -214,7 +213,7 @@ export default function DashboardPage() {
                       EMB {health.embedding ? "OK" : "OFF"}
                     </Badge>
                   )}
-                  {health.mic !== undefined && health.stt !== "disabled" && (
+                  {health.mic !== undefined && !sttDisabled && (
                     <Badge
                       variant={health.mic === "ok" ? "default" : health.mic === "restarting" ? "outline" : "destructive"}
                       className="text-xs"
@@ -255,10 +254,10 @@ export default function DashboardPage() {
               size="icon"
               className="size-9 rounded-full"
               onClick={handleToggleListening}
-              disabled={!connected || health?.stt === "disabled"}
-              title={health?.stt === "disabled" ? "STT Disabled" : isListeningPaused ? "Resume Listening" : "Pause Listening"}
+              disabled={!connected || sttDisabled}
+              title={sttDisabled ? "STT Disabled" : isListeningPaused ? "Resume Listening" : "Pause Listening"}
             >
-              {isListeningPaused || health?.stt === "disabled" ? (
+              {isListeningPaused || sttDisabled ? (
                 <Mic className="size-4" />
               ) : (
                 <MicOff className="size-4" />

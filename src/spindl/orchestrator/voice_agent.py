@@ -28,6 +28,7 @@ from ..core.events import (
     TTSInterruptedEvent,
 )
 from ..llm import LLMPipeline, PromptBuilder, LLMProviderRegistry, LLMProvider
+from .service_capabilities import ServiceCapabilities
 from ..llm.provider_holder import ProviderHolder
 from ..llm.registry import ProviderNotFoundError as LLMProviderNotFoundError
 from ..llm.plugins import (
@@ -101,8 +102,14 @@ class VoiceAgentOrchestrator:
         # Service clients (initialized in _setup)
         self._stt: Optional[STTProvider] = None  # NANO-061a: provider-based
         self._tts_provider: Optional[TTSProvider] = None  # NANO-015: provider-based
-        self._stt_enabled: bool = config.stt_config.enabled  # NANO-112
-        self._tts_enabled: bool = config.tts_config.enabled  # NANO-112
+
+        # NANO-116 B.4a: Central service capabilities registry
+        self._service_capabilities = ServiceCapabilities.from_config(
+            stt_enabled=config.stt_config.enabled,
+            tts_enabled=config.tts_config.enabled,
+            twitch_enabled=config.stimuli_config.twitch_enabled,
+            game_state_enabled=config.stimuli_config.game_state_enabled,
+        )
         self._llm_provider: Optional[LLMProvider] = None  # NANO-018/019: provider-based
         self._pipeline: Optional[LLMPipeline] = None
 
@@ -1019,6 +1026,11 @@ class VoiceAgentOrchestrator:
         )
 
     @property
+    def service_capabilities(self) -> ServiceCapabilities:
+        """Central service enable/disable registry (NANO-116 B.4a)."""
+        return self._service_capabilities
+
+    @property
     def addressing_others(self) -> bool:
         """Whether addressing-others mode is active (NANO-110)."""
         return self._addressing_others
@@ -1278,16 +1290,17 @@ class VoiceAgentOrchestrator:
         """
         self._setup()
 
-        # NANO-112: Distinguish disabled vs unhealthy
-        if not self._stt_enabled:
-            stt_status = "disabled"
-        else:
-            stt_status = self._stt.health_check() if self._stt else False
+        # NANO-116 B.4a: Read from service capabilities registry
+        caps = self._service_capabilities
+        stt_disabled = caps.health_status("stt")
+        stt_status = stt_disabled if stt_disabled else (
+            self._stt.health_check() if self._stt else False
+        )
 
-        if not self._tts_enabled:
-            tts_status = "disabled"
-        else:
-            tts_status = self._tts_provider.health_check() if self._tts_provider else False
+        tts_disabled = caps.health_status("tts")
+        tts_status = tts_disabled if tts_disabled else (
+            self._tts_provider.health_check() if self._tts_provider else False
+        )
 
         return {
             "stt": stt_status,
@@ -2021,6 +2034,7 @@ class VoiceAgentOrchestrator:
                     if twitch_enabled is not None:
                         module.enabled = twitch_enabled
                         cfg.twitch_enabled = twitch_enabled
+                        self._service_capabilities.set("twitch", twitch_enabled, reason="runtime_toggle")
                         if twitch_enabled:
                             module.start()
                         else:

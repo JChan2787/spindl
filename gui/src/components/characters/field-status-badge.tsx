@@ -1,4 +1,4 @@
-import { useAgentStore } from "@/lib/stores";
+import { useServiceDisabled } from "@/lib/stores";
 
 interface FieldStatusBadgeProps {
   variant: "live" | "pending" | "tts" | "summarizer" | "metadata";
@@ -38,10 +38,10 @@ const TTS_DISABLED_CONFIG = {
 };
 
 export function FieldStatusBadge({ variant, description }: FieldStatusBadgeProps) {
-  const health = useAgentStore((s) => s.health);
+  const ttsDisabled = useServiceDisabled("tts");
 
   // NANO-112: Show disabled state for TTS fields when TTS is off
-  if (variant === "tts" && health?.tts === "disabled") {
+  if (variant === "tts" && ttsDisabled) {
     return (
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
         <span className={TTS_DISABLED_CONFIG.dotClass} />

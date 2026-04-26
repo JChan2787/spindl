@@ -39,4 +39,5 @@ export { useMemoryStore } from "./memory-store";
 export { useBlockEditorStore } from "./block-editor-store";
 export { useVTSStore } from "./vts-store";
 export { useChatStore } from "./chat-store";
+export { useServiceDisabled, useServiceStatus, serviceBadgeVariant, serviceBadgeLabel } from "./use-service-status";
 export type { LLMProviderType, CloudProvider, VLMModelType, EnvironmentType, STTPlatform, TTSProvider, STTProviderType, STTConfig, HydrateConfig, EmbeddingConfig } from "./launcher-store";
