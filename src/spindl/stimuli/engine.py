@@ -249,7 +249,7 @@ class StimuliEngine:
         self._sub_ids.append(sub)
 
         sub = self._event_bus.subscribe(
-            EventType.TTS_COMPLETED, self._on_activity_event
+            EventType.TTS_COMPLETED, self._on_tts_completed
         )
         self._sub_ids.append(sub)
 
@@ -268,6 +268,11 @@ class StimuliEngine:
         for sub_id in self._sub_ids:
             self._event_bus.unsubscribe(sub_id)
         self._sub_ids.clear()
+
+    def _on_tts_completed(self, event: Event) -> None:
+        """TTS finished — audience heard the response. Start cooldown now."""
+        self._last_fire_time = time.monotonic()
+        self.reset_activity()
 
     def _on_activity_event(self, event: Event) -> None:
         """Any activity resets PATIENCE timers."""
@@ -421,7 +426,6 @@ class StimuliEngine:
         Emits a STIMULUS_FIRED event and calls process_text_input()
         on the orchestrator callbacks.
         """
-        self._last_fire_time = time.monotonic()
         elapsed = stimulus.metadata.get("elapsed_seconds", 0.0)
         print(
             f"[Stimuli] {stimulus.source.value.upper()} fired "

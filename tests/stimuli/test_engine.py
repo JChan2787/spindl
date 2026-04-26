@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from spindl.core.event_bus import EventBus
-from spindl.core.events import EventType, StateChangedEvent, StimulusFiredEvent
+from spindl.core.events import EventType, StateChangedEvent, StimulusFiredEvent, TTSCompletedEvent
 from spindl.core.state_machine import AgentState
 from spindl.stimuli.engine import StimuliEngine
 from spindl.stimuli.base import StimulusModule
@@ -496,7 +496,7 @@ class TestEngineFire:
         assert received[0].source == "custom"
         assert received[0].prompt_text == "Custom prompt text"
 
-    def test_fire_updates_cooldown(self, engine, engine_components):
+    def test_fire_does_not_update_cooldown(self, engine, engine_components):
         sm, cb, bus = engine_components
         before = engine._last_fire_time
 
@@ -505,6 +505,14 @@ class TestEngineFire:
             user_input="test",
         )
         engine._fire(stimulus)
+
+        assert engine._last_fire_time == before
+
+    def test_tts_completed_updates_cooldown(self, engine, engine_components):
+        sm, cb, bus = engine_components
+        before = engine._last_fire_time
+
+        engine._on_tts_completed(TTSCompletedEvent())
 
         assert engine._last_fire_time > before
 
