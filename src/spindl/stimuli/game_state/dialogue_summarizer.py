@@ -76,12 +76,23 @@ class DialogueSummarizer:
         model: str = "anthropic/claude-sonnet-4-20250514",
         base_url: str = DEFAULT_BASE_URL,
         persona_prompt: str = "",
+        character_name: str = "",
         timeout: float = 30.0,
     ):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
-        self._persona_prompt = persona_prompt or DEFAULT_SUMMARIZER_SYSTEM_PROMPT
+        self._character_name = character_name
+        if persona_prompt:
+            self._persona_prompt = persona_prompt
+        else:
+            default = DEFAULT_SUMMARIZER_SYSTEM_PROMPT
+            if character_name:
+                default = default.replace(
+                    "a livestream AI co-host",
+                    f"a livestream AI co-host named {character_name}",
+                )
+            self._persona_prompt = default
         self._timeout = timeout
 
     @property

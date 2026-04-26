@@ -296,10 +296,16 @@ class VoiceAgentOrchestrator:
             conversations_dir=self._config.conversations_dir,
             debug=self._config.debug,
         )
+        summarizer_api_key = stimuli_cfg.game_state_dialogue_summarizer_api_key
+        if not summarizer_api_key:
+            llm_cfg = self._config.llm_config
+            if llm_cfg.provider == "openrouter":
+                summarizer_api_key = llm_cfg.provider_config.get("api_key", "")
         self._dialogue_summarizer = DialogueSummarizer(
-            api_key=stimuli_cfg.game_state_dialogue_summarizer_api_key,
+            api_key=summarizer_api_key,
             model=stimuli_cfg.game_state_dialogue_summarizer_model,
             persona_prompt=stimuli_cfg.game_state_dialogue_summarizer_persona,
+            character_name=self._persona.get("name", "") if self._persona else "",
         )
         dialogue_knowledge_injector = DialogueKnowledgeInjector(
             token_budget_chars=stimuli_cfg.game_state_dialogue_token_budget,
@@ -638,6 +644,7 @@ class VoiceAgentOrchestrator:
                 enabled=stimuli_cfg.game_state_enabled,
                 dialogue_buffer_size=stimuli_cfg.game_state_dialogue_buffer_size,
             )
+            game_state._dialogue_store = self._dialogue_store
             self._stimuli_engine.register_module(game_state)
             self._game_state_module = game_state
             logger.info(
@@ -1080,13 +1087,22 @@ class VoiceAgentOrchestrator:
         token budget, the summarizer fires and persists the result.
         """
         if not self._dialogue_store or not self._dialogue_summarizer:
+            print("[Summarizer] SKIP: no store or no summarizer instance", flush=True)
             return
 
         token_budget = self._config.stimuli_config.game_state_dialogue_token_budget
+        all_lines = self._dialogue_store.get_all_dialogue_lines()
+        raw_len = len(self._dialogue_store._format_lines(all_lines)) if all_lines else 0
+        print(f"[Summarizer] CHECK: raw_len={raw_len}, budget={token_budget}, needs={raw_len > token_budget}", flush=True)
         if not self._dialogue_store.needs_summarization(token_budget):
             return
 
         if not self._dialogue_summarizer.is_configured():
+            print(
+                f"[Summarizer] NOT CONFIGURED: api_key={'SET' if self._dialogue_summarizer._api_key else 'EMPTY'}, "
+                f"model={self._dialogue_summarizer._model or 'EMPTY'}",
+                flush=True,
+            )
             logger.warning(
                 "Dialogue overflow detected but summarizer not configured. "
                 "Raw lines will be truncated at injection time."

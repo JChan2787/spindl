@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useSettingsStore, selectEffectiveStimuliConfig } from "@/lib/stores";
+import { useLauncherStore } from "@/lib/stores/launcher-store";
 import { getSocket } from "@/lib/socket";
 import { ModelCombobox, type ModelOption } from "@/components/ui/model-combobox";
 import type { GameStateStatus } from "@/lib/stores/settings-store";
@@ -90,15 +91,18 @@ export function GameStateCard() {
   const socket = getSocket();
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingEmitRef = useRef<Partial<import("@/types/events").SetStimuliConfigPayload>>({});
 
   const emitChanges = useCallback(
     (changes: Partial<import("@/types/events").SetStimuliConfigPayload>) => {
+      pendingEmitRef.current = { ...pendingEmitRef.current, ...changes };
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
       debounceRef.current = setTimeout(() => {
         setSavingStimuli(true);
-        socket.emit("set_stimuli_config", changes);
+        socket.emit("set_stimuli_config", pendingEmitRef.current);
+        pendingEmitRef.current = {};
       }, 300);
     },
     [socket, setSavingStimuli]
@@ -185,7 +189,11 @@ export function GameStateCard() {
     }
   }, [localSummarizerPersona, updatePendingStimuli, emitChanges]);
 
-  const effectiveSummarizerApiKey = localSummarizerApiKey || effectiveConfig.game_state_dialogue_summarizer_api_key;
+  const launcherCloud = useLauncherStore((s) => s.llmCloud);
+  const fallbackKey = launcherCloud.provider === "openrouter" && launcherCloud.apiKey
+    ? launcherCloud.apiKey
+    : null;
+  const effectiveSummarizerApiKey = localSummarizerApiKey || effectiveConfig.game_state_dialogue_summarizer_api_key || fallbackKey;
 
   const fetchSummarizerModels = useCallback(async () => {
     const key = effectiveSummarizerApiKey;
@@ -226,8 +234,14 @@ export function GameStateCard() {
 
   const handleSummarizerModelChange = useCallback(
     (value: string) => {
-      updatePendingStimuli({ game_state_dialogue_summarizer_model: value });
-      emitChanges({ game_state_dialogue_summarizer_model: value });
+      const changes: Partial<import("@/types/events").SetStimuliConfigPayload> = {
+        game_state_dialogue_summarizer_model: value,
+      };
+      if (!localSummarizerApiKey && fallbackKey) {
+        changes.game_state_dialogue_summarizer_api_key = fallbackKey;
+      }
+      updatePendingStimuli(changes);
+      emitChanges(changes);
     },
     [updatePendingStimuli, emitChanges]
   );
@@ -411,7 +425,7 @@ export function GameStateCard() {
                 value={localSummarizerApiKey}
                 onChange={(e) => setLocalSummarizerApiKey(e.target.value)}
                 onBlur={handleSummarizerApiKeyBlur}
-                placeholder="sk-or-... or ${OPENROUTER_API_KEY}"
+                placeholder={fallbackKey ? "Using LLM provider key (override optional)" : "sk-or-v1-..."}
                 className="text-xs h-8"
               />
             </div>

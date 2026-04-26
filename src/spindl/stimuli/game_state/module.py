@@ -80,6 +80,8 @@ class GameStateModule(StimulusModule):
         self._dialogue_drain_delay = max(0.0, dialogue_drain_delay)
         self._first_line_time: float | None = None
 
+        self._dialogue_store = None
+
         self._connected = False
         self._running = False
         self._version_mismatch = False
@@ -245,6 +247,10 @@ class GameStateModule(StimulusModule):
         self._first_line_time = None
         if not lines:
             return None
+
+        if self._dialogue_store:
+            for dl in lines:
+                self._dialogue_store.record_dialogue_line(dl)
 
         formatted_lines = []
         for dl in lines:
