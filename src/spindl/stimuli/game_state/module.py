@@ -159,15 +159,15 @@ class GameStateModule(StimulusModule):
 
     def start(self) -> None:
         if self._running:
+            print("[GameState] start() called but already running", flush=True)
             return
 
         self._schema_version = load_vendored_version()
         if not self._schema_version:
-            logger.error(
-                "Game-state module cannot start: failed to load vendored schema version"
-            )
+            print("[GameState] FATAL: failed to load vendored schema version", flush=True)
             return
 
+        print(f"[GameState] Starting module (target={self._host}:{self._port}, schema={self._schema_version})", flush=True)
         self._running = True
         self._stop_event.clear()
         self._thread = threading.Thread(
@@ -205,46 +205,44 @@ class GameStateModule(StimulusModule):
             self._enabled
             and self._running
             and not self._version_mismatch
-            and len(self._buffer) > 0
+            and self._dialogue_buffer.count > 0
         )
 
     def get_stimulus(self) -> Optional[StimulusData]:
         if not self.has_stimulus():
             return None
 
-        events = list(self._buffer)
-        self._buffer.clear()
+        lines = self._dialogue_buffer.drain()
+        if not lines:
+            return None
 
-        lines: list[str] = []
-        for ev in events:
-            line = f"[{ev.event_type}] {json.dumps(ev.payload, default=str)}"
-            lines.append(line)
+        formatted_lines = []
+        for dl in lines:
+            if dl.repeat_count > 1:
+                formatted_lines.append(f"[{dl.speaker}]: {dl.text} (x{dl.repeat_count})")
+            else:
+                formatted_lines.append(f"[{dl.speaker}]: {dl.text}")
 
-        formatted = "\n".join(lines)
+        dialogue_block = "\n".join(formatted_lines)
 
-        template = self._prompt_template or _DEFAULT_PROMPT_TEMPLATE
-        if "{events}" not in template:
-            logger.warning(
-                "game_state_prompt_template missing {events} placeholder; "
-                "falling back to default. Buffered events would otherwise be lost."
-            )
-            template = _DEFAULT_PROMPT_TEMPLATE
-
-        user_input = template.format(events=formatted)
-
-        logger.info(
-            "[GameState] Buffer drained: %d events, user_input_len=%d",
-            len(events),
-            len(user_input),
+        template = getattr(self, "_dialogue_prompt_template", None) or (
+            "**The following are in-game character dialogue lines from the game "
+            "you're co-hosting.** These characters are not talking to you — "
+            "commentate on what they're saying, don't reply to them directly.\n\n"
+            "{dialogue}\n"
         )
+
+        user_input = template.format(dialogue=dialogue_block)
+
+        print(f"[GameState] Dialogue drain: {len(lines)} lines, input_len={len(user_input)}", flush=True)
 
         return StimulusData(
             source=StimulusSource.GAME_STATE,
             user_input=user_input,
             metadata={
-                "event_count": len(events),
-                "event_types": [ev.event_type for ev in events],
-                "game_id": events[0].game_id if events else None,
+                "event_count": len(lines),
+                "dialogue_lines": len(lines),
+                "game_id": "pragmata",
             },
         )
 
@@ -267,22 +265,26 @@ class GameStateModule(StimulusModule):
 
     async def _run_async(self) -> None:
         """Async main — connect to bridge TCP and listen for events."""
+        print(f"[GameState] TCP consumer thread alive, connecting to {self._host}:{self._port}", flush=True)
         while self._running and not self._stop_event.is_set():
             try:
                 await self._connect_and_consume()
             except (OSError, ConnectionError) as e:
                 if self._running:
                     logger.warning(
-                        "Game-state bridge connection lost (%s), "
+                        "Game-state bridge connection lost (type=%s, msg=%s), "
                         "reconnecting in %.1fs",
+                        type(e).__name__,
                         e,
                         _RECONNECT_DELAY,
                     )
-            except Exception:
+            except Exception as e:
                 if self._running:
-                    logger.exception(
-                        "Unexpected error in game-state consumer, "
+                    logger.warning(
+                        "Unexpected error in game-state consumer (type=%s, msg=%s), "
                         "reconnecting in %.1fs",
+                        type(e).__name__,
+                        e,
                         _RECONNECT_DELAY,
                     )
             finally:
@@ -308,74 +310,13 @@ class GameStateModule(StimulusModule):
         logger.info(
             "Connecting to game-state bridge at %s:%d", self._host, self._port
         )
+        print(f"[GameState] Attempting TCP connect to {self._host}:{self._port}...", flush=True)
         reader, writer = await asyncio.open_connection(self._host, self._port)
         self._connected = True
-        logger.info("Connected to game-state bridge at %s:%d", self._host, self._port)
+        print(f"[GameState] CONNECTED to bridge at {self._host}:{self._port}", flush=True)
 
         try:
-            # First event must be bridge_ready with protocol version
-            first_line = await asyncio.wait_for(reader.readline(), timeout=10.0)
-            if not first_line:
-                raise ConnectionError("Bridge closed connection before sending bridge_ready")
-
-            first_event = json.loads(first_line.decode("utf-8").strip())
-            ok, reason = validate_envelope(first_event)
-            if not ok:
-                logger.error("Invalid bridge_ready envelope: %s", reason)
-                return
-
-            if first_event.get("event_type") != "bridge_ready":
-                logger.error(
-                    "Expected bridge_ready as first event, got: %s",
-                    first_event.get("event_type"),
-                )
-                return
-
-            # Protocol version check
-            payload = first_event.get("payload", {})
-            bridge_version = payload.get("protocol_version", first_event.get("protocol_version"))
-            self._bridge_protocol_version = bridge_version
-
-            version_ok, level = check_protocol_version(
-                bridge_version, self._schema_version
-            )
-            if level == "major":
-                logger.error(
-                    "MAJOR protocol version mismatch: bridge=%s, vendored=%s. "
-                    "Refusing to consume events. Update vendored schema.",
-                    bridge_version,
-                    self._schema_version,
-                )
-                self._version_mismatch = True
-                return
-            elif level == "minor":
-                logger.warning(
-                    "Minor protocol version drift: bridge=%s, vendored=%s. "
-                    "Continuing with forward-compatible consumption.",
-                    bridge_version,
-                    self._schema_version,
-                )
-            elif level == "parse_error":
-                logger.error(
-                    "Could not parse protocol versions: bridge=%s, vendored=%s",
-                    bridge_version,
-                    self._schema_version,
-                )
-                self._version_mismatch = True
-                return
-            else:
-                logger.info(
-                    "Protocol version %s (%s): bridge=%s, vendored=%s",
-                    level,
-                    "ok" if version_ok else "mismatch",
-                    bridge_version,
-                    self._schema_version,
-                )
-
-            # Buffer the bridge_ready event itself
-            self._buffer_event(first_event)
-
-            # Steady-state consumption
+            # No handshake — just read whatever the bridge sends, whenever it sends it.
             while self._running and not self._stop_event.is_set():
                 try:
                     line = await asyncio.wait_for(reader.readline(), timeout=1.0)
@@ -383,8 +324,10 @@ class GameStateModule(StimulusModule):
                     continue
 
                 if not line:
+                    logger.warning("Bridge returned empty read — connection closed by remote")
                     raise ConnectionError("Bridge closed connection")
 
+                print(f"[GameState] RAW LINE: {line[:200]}", flush=True)
                 self._process_line(line)
 
         finally:
@@ -410,6 +353,17 @@ class GameStateModule(StimulusModule):
         if not ok:
             logger.warning("Dropping invalid event: %s", reason)
             return
+
+        # Capture protocol version from bridge_ready if we see one
+        if event.get("event_type") == "bridge_ready":
+            payload = event.get("payload", {})
+            self._bridge_protocol_version = payload.get(
+                "protocol_version", event.get("protocol_version")
+            )
+            logger.info(
+                "Received bridge_ready (protocol_version=%s)",
+                self._bridge_protocol_version,
+            )
 
         # Sequence monotonicity check (detect dropped/reordered events)
         seq = event["sequence"]

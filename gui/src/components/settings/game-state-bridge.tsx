@@ -16,6 +16,7 @@ export function GameStateBridge() {
   const store = useSettingsStore();
   const effectiveConfig = selectEffectiveStimuliConfig(store);
   const { updatePendingStimuli, setSavingStimuli } = store;
+  const setGameStateStatus = useSettingsStore((s) => s.setGameStateStatus);
   const socket = getSocket();
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -90,15 +91,27 @@ export function GameStateBridge() {
     });
   }, [socket, localHost, localPort]);
 
-  // Listen for test result
+  // Listen for test result — persist success to store so Dashboard toggle unlocks
   useEffect(() => {
     const handler = (data: GameStateConnectionResult) => {
       setTesting(false);
       setTestResult(data);
+      if (data.success) {
+        setGameStateStatus({
+          connected: true,
+          protocol_version: data.protocol_version ?? null,
+          buffer_count: 0,
+          recent_lines: [],
+          enabled: false,
+          dialogue_enabled: false,
+          current_summary: "",
+        });
+        try { localStorage.setItem("game_bridge_verified", "true"); } catch {}
+      }
     };
     socket.on("game_state_connection_result", handler);
     return () => { socket.off("game_state_connection_result", handler); };
-  }, [socket]);
+  }, [socket, setGameStateStatus]);
 
   // Clear test result when connection params change
   useEffect(() => {

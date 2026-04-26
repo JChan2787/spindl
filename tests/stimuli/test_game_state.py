@@ -189,12 +189,7 @@ class TestGameStateModuleProperties:
 
 
 class TestGameStateModuleBufferDrain:
-    """Tests for buffer/drain cycle (Twitch pattern)."""
-
-    def _make_module(self) -> GameStateModule:
-        module = GameStateModule(enabled=True, buffer_size=10)
-        module._running = True
-        return module
+    """Tests for buffer/drain — B.3 deferred, general buffer does not produce stimuli."""
 
     def _make_event(self, event_type: str = "dialogue_line", seq: int = 0) -> GameEvent:
         return GameEvent(
@@ -206,70 +201,29 @@ class TestGameStateModuleBufferDrain:
             game_id="pragmata",
         )
 
-    def test_has_stimulus_requires_enabled_running_buffer(self):
-        module = GameStateModule(enabled=False)
+    def test_has_stimulus_from_dialogue_buffer(self):
+        module = GameStateModule(enabled=True, buffer_size=10)
         module._running = True
-        module._buffer.append(self._make_event())
         assert module.has_stimulus() is False
-
-        module.enabled = True
-        module._buffer.append(self._make_event())
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(speaker="Diana", text="Watch out!", source="chatter",
+                         timestamp="2026-04-25T04:00:00Z", sequence=0)
+        )
         assert module.has_stimulus() is True
 
-    def test_has_stimulus_blocked_by_version_mismatch(self):
-        module = self._make_module()
-        module._buffer.append(self._make_event())
-        module._version_mismatch = True
-        assert module.has_stimulus() is False
-
-    @patch(
-        "spindl.stimuli.game_state.module.load_vendored_version",
-        return_value="0.1.2",
-    )
-    def test_get_stimulus_drains_buffer(self, _mock):
-        module = self._make_module()
-        for i in range(3):
-            module._buffer.append(self._make_event(seq=i))
-
+    def test_get_stimulus_drains_dialogue_buffer(self):
+        module = GameStateModule(enabled=True, buffer_size=10)
+        module._running = True
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(speaker="Diana", text="Watch out!", source="chatter",
+                         timestamp="2026-04-25T04:00:00Z", sequence=0)
+        )
         stimulus = module.get_stimulus()
         assert stimulus is not None
-        assert stimulus.source == StimulusSource.GAME_STATE
-        assert module.buffer_count == 0
-        assert stimulus.metadata["event_count"] == 3
-        assert stimulus.metadata["game_id"] == "pragmata"
-
-    @patch(
-        "spindl.stimuli.game_state.module.load_vendored_version",
-        return_value="0.1.2",
-    )
-    def test_get_stimulus_returns_none_when_empty(self, _mock):
-        module = self._make_module()
-        assert module.get_stimulus() is None
-
-    @patch(
-        "spindl.stimuli.game_state.module.load_vendored_version",
-        return_value="0.1.2",
-    )
-    def test_get_stimulus_uses_template(self, _mock):
-        module = self._make_module()
-        module.prompt_template = "GAME: {events}"
-        module._buffer.append(self._make_event())
-
-        stimulus = module.get_stimulus()
-        assert stimulus.user_input.startswith("GAME: ")
-
-    @patch(
-        "spindl.stimuli.game_state.module.load_vendored_version",
-        return_value="0.1.2",
-    )
-    def test_get_stimulus_falls_back_on_bad_template(self, _mock):
-        module = self._make_module()
-        module._prompt_template = "no placeholder here"
-        module._buffer.append(self._make_event())
-
-        stimulus = module.get_stimulus()
-        assert stimulus is not None
-        assert "{events}" not in stimulus.user_input
+        assert "[Diana]: Watch out!" in stimulus.user_input
+        assert module._dialogue_buffer.count == 0
 
     def test_buffer_fifo_eviction(self):
         module = GameStateModule(enabled=True, buffer_size=3)

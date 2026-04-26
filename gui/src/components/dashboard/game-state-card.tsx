@@ -81,16 +81,19 @@ export function GameStateCard() {
     };
   }, []);
 
-  // Connection gate — bridge must be reachable
+  // Connection gate — has Test Connection ever succeeded this session?
   const gameStateStatus = useSettingsStore((s) => s.gameStateStatus);
   const setGameStateStatus = useSettingsStore((s) => s.setGameStateStatus);
-  const bridgeConnected = gameStateStatus?.connected ?? false;
 
-  // Toggle handlers
+  const [bridgeVerified, setBridgeVerified] = useState(() => {
+    try { return localStorage.getItem("game_bridge_verified") === "true"; } catch { return false; }
+  });
+
+  // Toggle handlers — one switch controls both module start and dialogue pipeline
   const handleDialogueEnabledChange = useCallback(
     (checked: boolean) => {
-      updatePendingStimuli({ game_state_dialogue_enabled: checked });
-      emitChanges({ game_state_dialogue_enabled: checked });
+      updatePendingStimuli({ game_state_enabled: checked, game_state_dialogue_enabled: checked });
+      emitChanges({ game_state_enabled: checked, game_state_dialogue_enabled: checked });
     },
     [updatePendingStimuli, emitChanges]
   );
@@ -185,17 +188,14 @@ export function GameStateCard() {
     [updatePendingStimuli, emitChanges]
   );
 
-  // Poll game-state status every 2 seconds when dialogue enabled
+  // Poll game-state status only when dialogue is enabled (toggle is on)
   useEffect(() => {
-    if (!effectiveConfig.game_state_dialogue_enabled) {
-      setGameStateStatus(null);
-      return;
-    }
+    if (!effectiveConfig.game_state_dialogue_enabled) return;
     const poll = () => socket.emit("request_game_state_status", {});
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
-  }, [effectiveConfig.game_state_dialogue_enabled, socket, setGameStateStatus]);
+  }, [effectiveConfig.game_state_dialogue_enabled, socket]);
 
   useEffect(() => {
     const handler = (data: GameStateStatus) => setGameStateStatus(data);
@@ -229,16 +229,16 @@ export function GameStateCard() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Dialogue Enable/Disable — gated on bridge connection */}
+        {/* Dialogue Enable/Disable — gated on successful Test Connection from Settings */}
         <div className="flex items-center justify-between">
           <Label className="flex items-center gap-2 text-sm">
             Enable Dialogue Commentary
           </Label>
           <button
-            onClick={() => bridgeConnected && handleDialogueEnabledChange(!effectiveConfig.game_state_dialogue_enabled)}
-            disabled={!bridgeConnected}
+            onClick={() => bridgeVerified && handleDialogueEnabledChange(!effectiveConfig.game_state_dialogue_enabled)}
+            disabled={!bridgeVerified}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              !bridgeConnected
+              !bridgeVerified
                 ? "bg-muted opacity-50 cursor-not-allowed"
                 : effectiveConfig.game_state_dialogue_enabled
                   ? "bg-primary"
@@ -247,20 +247,19 @@ export function GameStateCard() {
           >
             <span
               className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                effectiveConfig.game_state_dialogue_enabled && bridgeConnected ? "translate-x-4" : "translate-x-0.5"
+                effectiveConfig.game_state_dialogue_enabled && bridgeVerified ? "translate-x-4" : "translate-x-0.5"
               }`}
             />
           </button>
         </div>
 
-        {!bridgeConnected && (
+        {!bridgeVerified && (
           <p className="text-xs text-muted-foreground">
             Configure Game Bridge connection in Settings to enable.
           </p>
         )}
 
-        {effectiveConfig.game_state_dialogue_enabled && bridgeConnected && (
-          <div className="space-y-3">
+        <div className="space-y-3">
             {/* Dialogue stimulus template */}
             <div className="space-y-1">
               <Label className="flex items-center gap-2 text-xs">
@@ -378,7 +377,6 @@ export function GameStateCard() {
               </div>
             )}
           </div>
-        )}
       </CardContent>
     </Card>
   );

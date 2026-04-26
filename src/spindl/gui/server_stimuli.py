@@ -243,6 +243,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             # Game-state type coercion (NANO-116)
             if game_state_enabled is not None:
                 game_state_enabled = bool(game_state_enabled)
+                print(f"[GUI] game_state_enabled={game_state_enabled}", flush=True)
             if game_state_host is not None:
                 game_state_host = str(game_state_host).strip()
             if game_state_port is not None:
@@ -667,19 +668,10 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 timeout=3.0,
             )
 
-            # Read the protocol version banner (first line from bridge)
+            # Don't read anything — just verify the port is listening.
+            # Reading would consume bridge_ready from the ring buffer,
+            # leaving the module with no banner on connect.
             protocol_version = None
-            try:
-                banner_data = await asyncio.wait_for(
-                    reader.readline(),
-                    timeout=2.0,
-                )
-                if banner_data:
-                    import json as _json
-                    banner = _json.loads(banner_data.decode("utf-8").strip())
-                    protocol_version = banner.get("protocol_version")
-            except Exception:
-                pass
 
             writer.close()
             try:

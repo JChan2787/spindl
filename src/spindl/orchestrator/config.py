@@ -1188,7 +1188,6 @@ class OrchestratorConfig(BaseModel):
         if "game_state" not in stim:
             stim["game_state"] = {}
         gs = stim["game_state"]
-        gs["enabled"] = self.stimuli_config.game_state_enabled
         gs["host"] = self.stimuli_config.game_state_host
         gs["port"] = self.stimuli_config.game_state_port
         gs["buffer_size"] = self.stimuli_config.game_state_buffer_size
@@ -1198,7 +1197,6 @@ class OrchestratorConfig(BaseModel):
         if "dialogue" not in gs:
             gs["dialogue"] = {}
         gsd = gs["dialogue"]
-        gsd["enabled"] = self.stimuli_config.game_state_dialogue_enabled
         gsd["buffer_size"] = self.stimuli_config.game_state_dialogue_buffer_size
         gsd["prompt_template"] = self.stimuli_config.game_state_dialogue_prompt_template
         gsd["token_budget"] = self.stimuli_config.game_state_dialogue_token_budget
