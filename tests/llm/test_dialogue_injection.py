@@ -48,7 +48,7 @@ class TestDialogueKnowledgeInjectorBasics:
         assert result.metadata["character_knowledge_formatted"] == ""
 
     def test_content_injected_with_preamble(self):
-        injector = DialogueKnowledgeInjector(token_budget_chars=5000)
+        injector = DialogueKnowledgeInjector(token_budget=5000)
         mock_store = MagicMock()
         mock_store.get_injection_content.return_value = "Diana: Watch out!\nKen: Stay close."
         injector.set_dialogue_store(mock_store)
@@ -62,7 +62,7 @@ class TestDialogueKnowledgeInjectorBasics:
         assert "Ken: Stay close." in formatted
 
     def test_token_budget_passed_to_store(self):
-        injector = DialogueKnowledgeInjector(token_budget_chars=3000)
+        injector = DialogueKnowledgeInjector(token_budget=3000)
         mock_store = MagicMock()
         mock_store.get_injection_content.return_value = "content"
         injector.set_dialogue_store(mock_store)
@@ -76,21 +76,21 @@ class TestDialogueKnowledgeInjectorBudget:
 
     def test_default_budget(self):
         injector = DialogueKnowledgeInjector()
-        assert injector.token_budget_chars == 2000
+        assert injector.token_budget == 500
 
     def test_custom_budget(self):
-        injector = DialogueKnowledgeInjector(token_budget_chars=5000)
-        assert injector.token_budget_chars == 5000
+        injector = DialogueKnowledgeInjector(token_budget=5000)
+        assert injector.token_budget == 5000
 
     def test_budget_setter_clamps(self):
         injector = DialogueKnowledgeInjector()
-        injector.token_budget_chars = 100  # Below minimum
-        assert injector.token_budget_chars == 500
+        injector.token_budget = 100  # Below minimum
+        assert injector.token_budget == 200
 
     def test_budget_setter_normal(self):
         injector = DialogueKnowledgeInjector()
-        injector.token_budget_chars = 8000
-        assert injector.token_budget_chars == 8000
+        injector.token_budget = 8000
+        assert injector.token_budget == 8000
 
 
 class TestSourceLabeling:

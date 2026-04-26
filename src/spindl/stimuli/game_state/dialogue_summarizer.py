@@ -77,23 +77,46 @@ class DialogueSummarizer:
         base_url: str = DEFAULT_BASE_URL,
         persona_prompt: str = "",
         character_name: str = "",
+        character_description: str = "",
+        character_personality: str = "",
+        character_scenario: str = "",
+        max_tokens: int = 512,
         timeout: float = 30.0,
     ):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._character_name = character_name
+        self._max_tokens = max_tokens
         if persona_prompt:
             self._persona_prompt = persona_prompt
         else:
-            default = DEFAULT_SUMMARIZER_SYSTEM_PROMPT
-            if character_name:
-                default = default.replace(
-                    "a livestream AI co-host",
-                    f"a livestream AI co-host named {character_name}",
-                )
-            self._persona_prompt = default
+            self._persona_prompt = self._build_default_prompt(
+                character_name, character_description,
+                character_personality, character_scenario,
+            )
         self._timeout = timeout
+
+    @staticmethod
+    def _build_default_prompt(
+        name: str, description: str, personality: str, scenario: str,
+    ) -> str:
+        prompt = DEFAULT_SUMMARIZER_SYSTEM_PROMPT
+        if name:
+            prompt = prompt.replace(
+                "a livestream AI co-host",
+                f"a livestream AI co-host named {name}",
+            )
+        persona_block = ""
+        if description:
+            persona_block += f"\n\nCo-host appearance: {description}"
+        if personality:
+            persona_block += f"\n\nCo-host personality: {personality}"
+        if scenario:
+            persona_block += f"\n\nScenario context: {scenario}"
+        if persona_block:
+            prompt += persona_block
+        return prompt
 
     @property
     def api_key(self) -> str:
@@ -118,6 +141,14 @@ class DialogueSummarizer:
     @persona_prompt.setter
     def persona_prompt(self, value: str) -> None:
         self._persona_prompt = value
+
+    @property
+    def max_tokens(self) -> int:
+        return self._max_tokens
+
+    @max_tokens.setter
+    def max_tokens(self, value: int) -> None:
+        self._max_tokens = max(64, value)
 
     def is_configured(self) -> bool:
         """Check if the summarizer has the minimum config to make a call."""
@@ -204,7 +235,7 @@ class DialogueSummarizer:
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.3,
-                    "max_tokens": 1024,
+                    "max_tokens": self._max_tokens,
                 },
                 timeout=self._timeout,
             )

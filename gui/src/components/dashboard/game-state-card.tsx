@@ -129,8 +129,13 @@ export function GameStateCard() {
     (checked: boolean) => {
       updatePendingStimuli({ game_state_enabled: checked, game_state_dialogue_enabled: checked });
       emitChanges({ game_state_enabled: checked, game_state_dialogue_enabled: checked });
+      if (checked) {
+        socket.emit("request_game_state_status", {});
+      } else {
+        setGameStateStatus(null);
+      }
     },
-    [updatePendingStimuli, emitChanges]
+    [updatePendingStimuli, emitChanges, socket, setGameStateStatus]
   );
 
   // Local state for textareas — emit on blur
@@ -266,6 +271,14 @@ export function GameStateCard() {
     (value: number) => {
       updatePendingStimuli({ game_state_dialogue_token_budget: value });
       emitChanges({ game_state_dialogue_token_budget: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleSummaryMaxTokensChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_dialogue_summary_max_tokens: value });
+      emitChanges({ game_state_dialogue_summary_max_tokens: value });
     },
     [updatePendingStimuli, emitChanges]
   );
@@ -444,11 +457,21 @@ export function GameStateCard() {
             <Slider
               label="Token Budget"
               value={effectiveConfig.game_state_dialogue_token_budget}
-              min={500}
-              max={10000}
-              step={100}
+              min={Math.max(200, effectiveConfig.game_state_dialogue_summary_max_tokens + 500)}
+              max={4000}
+              step={50}
               icon={<BookOpen className="h-3 w-3" />}
               onChange={handleTokenBudgetChange}
+            />
+
+            <Slider
+              label="Summary Max Tokens"
+              value={effectiveConfig.game_state_dialogue_summary_max_tokens}
+              min={64}
+              max={Math.min(2048, effectiveConfig.game_state_dialogue_token_budget - 500)}
+              step={32}
+              icon={<Brain className="h-3 w-3" />}
+              onChange={handleSummaryMaxTokensChange}
             />
 
             <Slider

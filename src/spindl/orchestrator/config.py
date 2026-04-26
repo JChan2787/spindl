@@ -516,7 +516,8 @@ class StimuliConfig(BaseModel):
         "\n"
         "{dialogue}\n"
     )
-    game_state_dialogue_token_budget: int = Field(default=2000, ge=500, le=10000)
+    game_state_dialogue_token_budget: int = Field(default=500, ge=200, le=4000)
+    game_state_dialogue_summary_max_tokens: int = Field(default=512, ge=64, le=2048)
     game_state_dialogue_min_lines: int = Field(default=1, ge=1, le=50)
     game_state_dialogue_drain_delay: float = Field(default=0.0, ge=0.0, le=30.0)
     game_state_dialogue_summarizer_model: str = "anthropic/claude-sonnet-4-20250514"
@@ -609,15 +610,24 @@ class StimuliConfig(BaseModel):
             game_state_dialogue_drain_delay=dialogue.get(
                 "drain_delay", defaults.game_state_dialogue_drain_delay
             ),
+            game_state_dialogue_summary_max_tokens=dialogue.get(
+                "summary_max_tokens", defaults.game_state_dialogue_summary_max_tokens
+            ),
             game_state_dialogue_summarizer_model=dialogue.get(
                 "summarizer", {}
-            ).get("model", defaults.game_state_dialogue_summarizer_model),
+            ).get("model", None) or dialogue.get(
+                "summarizer_model", defaults.game_state_dialogue_summarizer_model
+            ),
             game_state_dialogue_summarizer_api_key=dialogue.get(
                 "summarizer", {}
-            ).get("api_key", defaults.game_state_dialogue_summarizer_api_key),
+            ).get("api_key", None) or dialogue.get(
+                "summarizer_api_key", defaults.game_state_dialogue_summarizer_api_key
+            ),
             game_state_dialogue_summarizer_persona=dialogue.get(
                 "summarizer", {}
-            ).get("persona_prompt", defaults.game_state_dialogue_summarizer_persona),
+            ).get("persona_prompt", None) or dialogue.get(
+                "summarizer_persona", defaults.game_state_dialogue_summarizer_persona
+            ),
             addressing_others_contexts=contexts,
         )
 
@@ -1208,11 +1218,17 @@ class OrchestratorConfig(BaseModel):
         gsd["buffer_size"] = self.stimuli_config.game_state_dialogue_buffer_size
         gsd["prompt_template"] = self.stimuli_config.game_state_dialogue_prompt_template
         gsd["token_budget"] = self.stimuli_config.game_state_dialogue_token_budget
+        gsd["summary_max_tokens"] = self.stimuli_config.game_state_dialogue_summary_max_tokens
         gsd["min_lines"] = self.stimuli_config.game_state_dialogue_min_lines
         gsd["drain_delay"] = self.stimuli_config.game_state_dialogue_drain_delay
-        gsd["summarizer_model"] = self.stimuli_config.game_state_dialogue_summarizer_model
-        gsd["summarizer_api_key"] = self.stimuli_config.game_state_dialogue_summarizer_api_key
-        gsd["summarizer_persona"] = self.stimuli_config.game_state_dialogue_summarizer_persona
+        # Clean up stale flat keys from pre-117A write path
+        for stale_key in ("summarizer_model", "summarizer_api_key", "summarizer_persona"):
+            gsd.pop(stale_key, None)
+        if "summarizer" not in gsd:
+            gsd["summarizer"] = {}
+        gsd["summarizer"]["model"] = self.stimuli_config.game_state_dialogue_summarizer_model
+        gsd["summarizer"]["api_key"] = self.stimuli_config.game_state_dialogue_summarizer_api_key
+        gsd["summarizer"]["persona_prompt"] = self.stimuli_config.game_state_dialogue_summarizer_persona
 
         # Addressing-others contexts (NANO-110, nested under stimuli)
         if "addressing_others" not in stim:

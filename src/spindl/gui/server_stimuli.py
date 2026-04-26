@@ -107,6 +107,7 @@ def build_stimuli_hydration(cfg) -> dict:
         "game_state_dialogue_buffer_size": cfg.game_state_dialogue_buffer_size,
         "game_state_dialogue_prompt_template": cfg.game_state_dialogue_prompt_template,
         "game_state_dialogue_token_budget": cfg.game_state_dialogue_token_budget,
+        "game_state_dialogue_summary_max_tokens": cfg.game_state_dialogue_summary_max_tokens,
         "game_state_dialogue_min_lines": cfg.game_state_dialogue_min_lines,
         "game_state_dialogue_drain_delay": cfg.game_state_dialogue_drain_delay,
         "game_state_dialogue_summarizer_model": cfg.game_state_dialogue_summarizer_model,
@@ -238,6 +239,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             game_state_dialogue_buffer_size = data.get("game_state_dialogue_buffer_size")
             game_state_dialogue_prompt_template = data.get("game_state_dialogue_prompt_template")
             game_state_dialogue_token_budget = data.get("game_state_dialogue_token_budget")
+            game_state_dialogue_summary_max_tokens = data.get("game_state_dialogue_summary_max_tokens")
             game_state_dialogue_min_lines = data.get("game_state_dialogue_min_lines")
             game_state_dialogue_drain_delay = data.get("game_state_dialogue_drain_delay")
             game_state_dialogue_summarizer_model = data.get("game_state_dialogue_summarizer_model")
@@ -299,7 +301,10 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                     return
             if game_state_dialogue_token_budget is not None:
                 game_state_dialogue_token_budget = int(game_state_dialogue_token_budget)
-                game_state_dialogue_token_budget = max(500, min(10000, game_state_dialogue_token_budget))
+                game_state_dialogue_token_budget = max(200, min(4000, game_state_dialogue_token_budget))
+            if game_state_dialogue_summary_max_tokens is not None:
+                game_state_dialogue_summary_max_tokens = int(game_state_dialogue_summary_max_tokens)
+                game_state_dialogue_summary_max_tokens = max(64, min(2048, game_state_dialogue_summary_max_tokens))
             if game_state_dialogue_min_lines is not None:
                 game_state_dialogue_min_lines = int(game_state_dialogue_min_lines)
                 game_state_dialogue_min_lines = max(1, min(50, game_state_dialogue_min_lines))
@@ -337,6 +342,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_dialogue_buffer_size=game_state_dialogue_buffer_size,
                 game_state_dialogue_prompt_template=game_state_dialogue_prompt_template,
                 game_state_dialogue_token_budget=game_state_dialogue_token_budget,
+                game_state_dialogue_summary_max_tokens=game_state_dialogue_summary_max_tokens,
                 game_state_dialogue_min_lines=game_state_dialogue_min_lines,
                 game_state_dialogue_drain_delay=game_state_dialogue_drain_delay,
                 game_state_dialogue_summarizer_model=game_state_dialogue_summarizer_model,

@@ -31,8 +31,8 @@ class DialogueKnowledgeInjector(PreProcessor):
         "note what they've said or done, and track narrative progression."
     )
 
-    def __init__(self, token_budget_chars: int = 2000):
-        self._token_budget_chars = token_budget_chars
+    def __init__(self, token_budget: int = 500):
+        self._token_budget = token_budget
         self._dialogue_store = None  # Set by orchestrator wiring
 
     @property
@@ -40,12 +40,12 @@ class DialogueKnowledgeInjector(PreProcessor):
         return "dialogue_knowledge_injector"
 
     @property
-    def token_budget_chars(self) -> int:
-        return self._token_budget_chars
+    def token_budget(self) -> int:
+        return self._token_budget
 
-    @token_budget_chars.setter
-    def token_budget_chars(self, value: int) -> None:
-        self._token_budget_chars = max(500, value)
+    @token_budget.setter
+    def token_budget(self, value: int) -> None:
+        self._token_budget = max(200, value)
 
     def set_dialogue_store(self, store: "Optional[object]") -> None:
         """Bind the DialogueStore instance. Called during orchestrator startup."""
@@ -60,7 +60,7 @@ class DialogueKnowledgeInjector(PreProcessor):
             from ...stimuli.game_state.dialogue_store import DialogueStore
 
             store: DialogueStore = self._dialogue_store  # type: ignore[assignment]
-            raw_content = store.get_injection_content(self._token_budget_chars)
+            raw_content = store.get_injection_content(self._token_budget)
             if raw_content:
                 content = f"{self.PROTOCOL_PREAMBLE}\n\n{raw_content}"
 

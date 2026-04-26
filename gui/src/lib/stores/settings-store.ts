@@ -103,6 +103,7 @@ export interface StimuliConfig {
   game_state_dialogue_buffer_size: number;
   game_state_dialogue_prompt_template: string;
   game_state_dialogue_token_budget: number;
+  game_state_dialogue_summary_max_tokens: number;
   game_state_dialogue_min_lines: number;
   game_state_dialogue_drain_delay: number;
   game_state_dialogue_summarizer_model: string;
@@ -435,7 +436,8 @@ const DEFAULT_STIMULI: StimuliConfig = {
   game_state_dialogue_enabled: false,
   game_state_dialogue_buffer_size: 30,
   game_state_dialogue_prompt_template: "**The following are in-game character dialogue lines from the game you're co-hosting.** These characters are not talking to you — commentate on what they're saying, don't reply to them directly.\n\n{dialogue}\n",
-  game_state_dialogue_token_budget: 2000,
+  game_state_dialogue_token_budget: 500,
+  game_state_dialogue_summary_max_tokens: 512,
   game_state_dialogue_min_lines: 1,
   game_state_dialogue_drain_delay: 0.0,
   game_state_dialogue_summarizer_model: "anthropic/claude-sonnet-4-20250514",

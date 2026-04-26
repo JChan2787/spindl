@@ -193,7 +193,7 @@ class TestDialogueStoreInjection:
         store.record_dialogue_line(_make_line(speaker="Diana", text="Watch out!", seq=1))
         store.record_dialogue_line(_make_line(speaker="Ken", text="Stay close.", seq=2))
 
-        content = store.get_injection_content(token_budget_chars=5000)
+        content = store.get_injection_content(token_budget=5000)
         assert "Diana: Watch out!" in content
         assert "Ken: Stay close." in content
 
@@ -211,7 +211,7 @@ class TestDialogueStoreInjection:
         store.record_summary("Summary of 20 NPC conversations.")
         store.record_dialogue_line(_make_line(speaker="Diana", text="New line after summary", seq=20))
 
-        content = store.get_injection_content(token_budget_chars=200)
+        content = store.get_injection_content(token_budget=200)
         assert "Pixl's read on the characters" in content
         assert "Summary of 20 NPC conversations." in content
         assert "New line after summary" in content
@@ -230,15 +230,15 @@ class TestDialogueStoreInjection:
         voice_file.touch()
         store.ensure_store(voice_file)
 
-        assert store.needs_summarization(token_budget_chars=100) is False
+        assert store.needs_summarization(token_budget=100) is False
 
         for i in range(10):
             store.record_dialogue_line(
                 _make_line(speaker=f"NPC_{i}", text=f"Long line {i} " * 10, seq=i)
             )
 
-        assert store.needs_summarization(token_budget_chars=100) is True
-        assert store.needs_summarization(token_budget_chars=100000) is False
+        assert store.needs_summarization(token_budget=100) is True
+        assert store.needs_summarization(token_budget=100000) is False
 
 
 class TestDialogueStoreGlobSafety:

@@ -17,14 +17,23 @@ Follows the TwitchTranscriptManager pattern from NANO-115.
 
 import json
 import logging
+import threading
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import tiktoken
+
 from .dialogue_buffer import DialogueLine
 
 logger = logging.getLogger(__name__)
+
+_tiktoken_enc = tiktoken.get_encoding("cl100k_base")
+
+
+def _count_tokens(text: str) -> int:
+    return len(_tiktoken_enc.encode(text))
 
 
 class DialogueStore:
@@ -53,6 +62,7 @@ class DialogueStore:
         self._conversations_dir = Path(conversations_dir)
         self._lru_size = lru_size
         self._debug = debug
+        self._lock = threading.Lock()
 
         self._store_file: Optional[Path] = None
         self._lru: deque[dict] = deque(maxlen=lru_size)
@@ -165,26 +175,27 @@ class DialogueStore:
         if self._store_file is None:
             return -1
 
-        turn = {
-            "turn_id": self._next_turn_id,
-            "role": "dialogue",
-            "speaker": line.speaker,
-            "text": line.text,
-            "source": line.source,
-            "event_source": line.event_source,
-            "timestamp": line.timestamp or datetime.now(timezone.utc).isoformat(),
-            "gameplay_context": line.gameplay_context.to_dict(),
-        }
-        if line.repeat_count > 1:
-            turn["repeat_count"] = line.repeat_count
-        if line.game_id:
-            turn["game_id"] = line.game_id
+        with self._lock:
+            turn = {
+                "turn_id": self._next_turn_id,
+                "role": "dialogue",
+                "speaker": line.speaker,
+                "text": line.text,
+                "source": line.source,
+                "event_source": line.event_source,
+                "timestamp": line.timestamp or datetime.now(timezone.utc).isoformat(),
+                "gameplay_context": line.gameplay_context.to_dict(),
+            }
+            if line.repeat_count > 1:
+                turn["repeat_count"] = line.repeat_count
+            if line.game_id:
+                turn["game_id"] = line.game_id
 
-        self._append_to_disk(turn)
-        self._lru.append(turn)
-        turn_id = self._next_turn_id
-        self._next_turn_id += 1
-        return turn_id
+            self._append_to_disk(turn)
+            self._lru.append(turn)
+            turn_id = self._next_turn_id
+            self._next_turn_id += 1
+            return turn_id
 
     def record_assistant_reply(
         self, text: str, responding_to_turn_ids: list[int]
@@ -193,19 +204,20 @@ class DialogueStore:
         if self._store_file is None:
             return -1
 
-        turn = {
-            "turn_id": self._next_turn_id,
-            "role": "assistant",
-            "text": text,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "responding_to_lines": responding_to_turn_ids,
-        }
+        with self._lock:
+            turn = {
+                "turn_id": self._next_turn_id,
+                "role": "assistant",
+                "text": text,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "responding_to_lines": responding_to_turn_ids,
+            }
 
-        self._append_to_disk(turn)
-        self._lru.append(turn)
-        turn_id = self._next_turn_id
-        self._next_turn_id += 1
-        return turn_id
+            self._append_to_disk(turn)
+            self._lru.append(turn)
+            turn_id = self._next_turn_id
+            self._next_turn_id += 1
+            return turn_id
 
     def record_summary(self, summary_text: str) -> int:
         """Persist a new summary blob. Returns the turn_id.
@@ -216,26 +228,24 @@ class DialogueStore:
         if self._store_file is None:
             return -1
 
-        self._summary_version += 1
-        self._summary_blob = summary_text
-        # All dialogue turns up to now are considered summarized
-        self._summarized_through_turn_id = self._next_turn_id - 1
+        with self._lock:
+            self._summary_version += 1
+            self._summary_blob = summary_text
+            self._summarized_through_turn_id = self._next_turn_id - 1
 
-        turn = {
-            "turn_id": self._next_turn_id,
-            "role": "summary",
-            "version": self._summary_version,
-            "summary_text": summary_text,
-            "summarized_through_turn_id": self._summarized_through_turn_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+            turn = {
+                "turn_id": self._next_turn_id,
+                "role": "summary",
+                "version": self._summary_version,
+                "summary_text": summary_text,
+                "summarized_through_turn_id": self._summarized_through_turn_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
-        self._append_to_disk(turn)
-        # Summary entries don't go into LRU — they're reconstructed from
-        # the dedicated summary fields on load.
-        turn_id = self._next_turn_id
-        self._next_turn_id += 1
-        return turn_id
+            self._append_to_disk(turn)
+            turn_id = self._next_turn_id
+            self._next_turn_id += 1
+            return turn_id
 
     def get_unsummarized_lines(self) -> list[dict]:
         """Get dialogue lines that haven't been covered by a summary yet.
@@ -243,22 +253,26 @@ class DialogueStore:
         Returns lines from the LRU whose turn_id > summarized_through_turn_id
         and whose role is 'dialogue'.
         """
-        return [
-            t
-            for t in self._lru
-            if t.get("role") == "dialogue"
-            and t.get("turn_id", 0) > self._summarized_through_turn_id
-        ]
+        with self._lock:
+            return [
+                t
+                for t in self._lru
+                if t.get("role") == "dialogue"
+                and t.get("turn_id", 0) > self._summarized_through_turn_id
+            ]
 
     def get_all_dialogue_lines(self) -> list[dict]:
         """Get all dialogue lines from the LRU (regardless of summary state)."""
-        return [t for t in self._lru if t.get("role") == "dialogue"]
+        with self._lock:
+            return [t for t in self._lru if t.get("role") == "dialogue"]
 
-    def get_injection_content(self, token_budget_chars: int = 2000) -> str:
+    def get_injection_content(self, token_budget: int = 500) -> str:
         """Build the character knowledge injection content.
 
-        Below budget: all raw dialogue lines.
-        Above budget: summary blob + unsummarized raw tail.
+        If a summary exists: summary blob + unsummarized raw tail.
+        If no summary and under budget: all raw dialogue lines.
+        If no summary and over budget: truncated recent lines.
+        Token counting via tiktoken cl100k_base.
 
         Returns empty string if no content.
         """
@@ -269,20 +283,13 @@ class DialogueStore:
         if not all_dialogue:
             return ""
 
-        # Format all raw lines
-        raw_block = self._format_lines(all_dialogue)
-
-        # If within budget, inject all raw
-        if len(raw_block) <= token_budget_chars:
-            return raw_block
-
-        # Over budget: summary + unsummarized tail
+        # Once a summary exists, always use summary + unsummarized tail
         if self._summary_blob:
             unsummarized = self.get_unsummarized_lines()
             tail_block = self._format_lines(unsummarized) if unsummarized else ""
 
             parts = [
-                "Pixl's read on the characters based on accumulated dialogue:",
+                "Accumulated character knowledge from dialogue:",
                 self._summary_blob,
             ]
             if tail_block:
@@ -291,28 +298,38 @@ class DialogueStore:
                 parts.append(tail_block)
             return "\n".join(parts)
 
-        # Over budget but no summary yet — truncate from front
-        # Keep as many recent lines as fit
+        # No summary yet — inject raw if under budget
+        raw_block = self._format_lines(all_dialogue)
+        if _count_tokens(raw_block) <= token_budget:
+            return raw_block
+
+        # Over budget, no summary — truncate from front, keep recent
         lines_reversed = list(reversed(all_dialogue))
         kept: list[dict] = []
-        running_len = 0
+        running_tokens = 0
         for line_dict in lines_reversed:
             line_str = self._format_single_line(line_dict)
-            if running_len + len(line_str) + 1 > token_budget_chars:
+            line_tokens = _count_tokens(line_str)
+            if running_tokens + line_tokens > token_budget:
                 break
             kept.append(line_dict)
-            running_len += len(line_str) + 1
+            running_tokens += line_tokens
 
         kept.reverse()
         return self._format_lines(kept) if kept else ""
 
-    def needs_summarization(self, token_budget_chars: int = 2000) -> bool:
-        """Check if accumulated raw dialogue exceeds the token budget."""
-        all_dialogue = self.get_all_dialogue_lines()
-        if not all_dialogue:
+    def needs_summarization(self, token_budget: int = 500) -> bool:
+        """Check if unsummarized dialogue + existing summary exceeds the token budget.
+
+        Measures unsummarized raw lines + summary blob (if any) against budget.
+        Token counting via tiktoken cl100k_base.
+        """
+        unsummarized = self.get_unsummarized_lines()
+        if not unsummarized:
             return False
-        raw_block = self._format_lines(all_dialogue)
-        return len(raw_block) > token_budget_chars
+        raw_tokens = _count_tokens(self._format_lines(unsummarized))
+        summary_tokens = _count_tokens(self._summary_blob) if self._summary_blob else 0
+        return (raw_tokens + summary_tokens) > token_budget
 
     def get_summarizer_input(self) -> tuple[str, list[dict]]:
         """Get inputs for the summarizer: previous summary + unsummarized lines.

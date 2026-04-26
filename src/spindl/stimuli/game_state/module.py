@@ -81,6 +81,8 @@ class GameStateModule(StimulusModule):
         self._first_line_time: float | None = None
 
         self._dialogue_store = None
+        self._summarizing = False
+        self._dialogue_dropped_during_summary = 0
 
         self._connected = False
         self._running = False
@@ -446,10 +448,18 @@ class GameStateModule(StimulusModule):
             )
 
         # Route dialogue events to dialogue buffer (B.2)
+        # KD-4: Drop dialogue events while summarizer is running
         if DialogueBuffer.is_dialogue_event(event_type):
-            if self._first_line_time is None and event_type == "dialogue_line":
-                self._first_line_time = time.monotonic()
-            self._dialogue_buffer.accept_event(event)
+            if self._summarizing:
+                self._dialogue_dropped_during_summary += 1
+                logger.debug(
+                    "Dropping dialogue event during summarization (total dropped: %d)",
+                    self._dialogue_dropped_during_summary,
+                )
+            else:
+                if self._first_line_time is None and event_type == "dialogue_line":
+                    self._first_line_time = time.monotonic()
+                self._dialogue_buffer.accept_event(event)
 
         # Generic buffer (B.1 — all events)
         game_event = GameEvent(

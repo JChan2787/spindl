@@ -306,9 +306,13 @@ class VoiceAgentOrchestrator:
             model=stimuli_cfg.game_state_dialogue_summarizer_model,
             persona_prompt=stimuli_cfg.game_state_dialogue_summarizer_persona,
             character_name=self._persona.get("name", "") if self._persona else "",
+            character_description=self._persona.get("description", "") if self._persona else "",
+            character_personality=self._persona.get("personality", "") if self._persona else "",
+            character_scenario=self._persona.get("scenario", "") if self._persona else "",
+            max_tokens=stimuli_cfg.game_state_dialogue_summary_max_tokens,
         )
         dialogue_knowledge_injector = DialogueKnowledgeInjector(
-            token_budget_chars=stimuli_cfg.game_state_dialogue_token_budget,
+            token_budget=stimuli_cfg.game_state_dialogue_token_budget,
         )
         dialogue_knowledge_injector.set_dialogue_store(self._dialogue_store)
         self._dialogue_knowledge_injector = dialogue_knowledge_injector
@@ -645,6 +649,7 @@ class VoiceAgentOrchestrator:
                 dialogue_buffer_size=stimuli_cfg.game_state_dialogue_buffer_size,
             )
             game_state._dialogue_store = self._dialogue_store
+            game_state._dialogue_prompt_template = stimuli_cfg.game_state_dialogue_prompt_template
             self._stimuli_engine.register_module(game_state)
             self._game_state_module = game_state
             logger.info(
@@ -1080,40 +1085,46 @@ class VoiceAgentOrchestrator:
             self._state_machine._transition(AgentState.LISTENING, f"{stage}_error")
 
     def _check_dialogue_summarize(self) -> None:
-        """Check if dialogue needs summarization and run if so (NANO-116 B.2).
+        """Check if dialogue needs summarization and launch background thread if so.
 
-        Called as part of the atomic response cycle after the LLM responds
-        to a game_state stimulus. If accumulated raw dialogue exceeds the
-        token budget, the summarizer fires and persists the result.
+        Called after the LLM responds to a game_state stimulus. Threshold check
+        is synchronous; the actual OpenRouter call runs in a daemon thread.
+        While summarizing, GameStateModule drops incoming dialogue events (KD-4).
         """
         if not self._dialogue_store or not self._dialogue_summarizer:
-            print("[Summarizer] SKIP: no store or no summarizer instance", flush=True)
             return
 
+        from ..stimuli.game_state.dialogue_store import _count_tokens
+
         token_budget = self._config.stimuli_config.game_state_dialogue_token_budget
-        all_lines = self._dialogue_store.get_all_dialogue_lines()
-        raw_len = len(self._dialogue_store._format_lines(all_lines)) if all_lines else 0
-        print(f"[Summarizer] CHECK: raw_len={raw_len}, budget={token_budget}, needs={raw_len > token_budget}", flush=True)
+        unsummarized_lines = self._dialogue_store.get_unsummarized_lines()
+        raw_tokens = _count_tokens(self._dialogue_store._format_lines(unsummarized_lines)) if unsummarized_lines else 0
+        summary_tokens = _count_tokens(self._dialogue_store.summary_blob) if self._dialogue_store.summary_blob else 0
+        total = raw_tokens + summary_tokens
+        pct = int(total / token_budget * 100) if token_budget else 0
+        print(
+            f"[Summarizer] tokens: {raw_tokens} unsummarized + {summary_tokens} summary = {total} / {token_budget} budget ({pct}% full)",
+            flush=True,
+        )
         if not self._dialogue_store.needs_summarization(token_budget):
             return
 
         if not self._dialogue_summarizer.is_configured():
-            print(
-                f"[Summarizer] NOT CONFIGURED: api_key={'SET' if self._dialogue_summarizer._api_key else 'EMPTY'}, "
-                f"model={self._dialogue_summarizer._model or 'EMPTY'}",
-                flush=True,
-            )
             logger.warning(
                 "Dialogue overflow detected but summarizer not configured. "
                 "Raw lines will be truncated at injection time."
             )
             return
 
+        # Gate: don't launch if already summarizing
+        if self._game_state_module and self._game_state_module._summarizing:
+            logger.debug("Summarizer already running, skipping duplicate launch.")
+            return
+
         previous_summary, unsummarized = self._dialogue_store.get_summarizer_input()
         if not unsummarized:
             return
 
-        # Pull Codex entries activated by the dialogue content
         codex_context = ""
         if self._codex_manager and unsummarized:
             combined_text = " ".join(
@@ -1125,23 +1136,46 @@ class VoiceAgentOrchestrator:
                 codex_context = self._codex_manager.get_activated_content(results)
 
         logger.info(
-            "Dialogue overflow — running summarizer (unsummarized_lines=%d, "
+            "Dialogue overflow — launching async summarizer (unsummarized_lines=%d, "
             "previous_summary=%s, codex_entries=%d)",
             len(unsummarized),
             "yes" if previous_summary else "no",
             len(codex_context.split("\n\n")) if codex_context else 0,
         )
 
-        summary = self._dialogue_summarizer.summarize(
-            previous_summary, unsummarized, codex_context=codex_context
+        if self._game_state_module:
+            self._game_state_module._summarizing = True
+            self._game_state_module._dialogue_dropped_during_summary = 0
+
+        def _run_summarizer() -> None:
+            try:
+                summary = self._dialogue_summarizer.summarize(
+                    previous_summary, unsummarized, codex_context=codex_context
+                )
+                if summary:
+                    self._dialogue_store.record_summary(summary)
+                    logger.info(
+                        "Dialogue summary persisted (v%d, %d chars)",
+                        self._dialogue_store.summary_version,
+                        len(summary),
+                    )
+            except Exception:
+                logger.exception("Background summarizer failed")
+            finally:
+                if self._game_state_module:
+                    dropped = self._game_state_module._dialogue_dropped_during_summary
+                    self._game_state_module._summarizing = False
+                    self._game_state_module._dialogue_buffer.clear()
+                    if dropped:
+                        logger.info(
+                            "Summarizer complete — dropped %d dialogue events during compression",
+                            dropped,
+                        )
+
+        thread = threading.Thread(
+            target=_run_summarizer, name="DialogueSummarizer", daemon=True
         )
-        if summary:
-            self._dialogue_store.record_summary(summary)
-            logger.info(
-                "Dialogue summary persisted (v%d, %d chars)",
-                self._dialogue_store.summary_version,
-                len(summary),
-            )
+        thread.start()
 
     def start(self) -> None:
         """Start the voice agent."""
@@ -2019,6 +2053,7 @@ class VoiceAgentOrchestrator:
         game_state_dialogue_buffer_size: Optional[int] = None,
         game_state_dialogue_prompt_template: Optional[str] = None,
         game_state_dialogue_token_budget: Optional[int] = None,
+        game_state_dialogue_summary_max_tokens: Optional[int] = None,
         game_state_dialogue_min_lines: Optional[int] = None,
         game_state_dialogue_drain_delay: Optional[float] = None,
         game_state_dialogue_summarizer_model: Optional[str] = None,
@@ -2049,7 +2084,8 @@ class VoiceAgentOrchestrator:
             game_state_dialogue_enabled: Enable/disable dialogue pipeline.
             game_state_dialogue_buffer_size: Max buffered dialogue lines.
             game_state_dialogue_prompt_template: Prompt template for dialogue stimulus.
-            game_state_dialogue_token_budget: Token budget for CHARACTER_KNOWLEDGE block.
+            game_state_dialogue_token_budget: Token budget for CHARACTER_KNOWLEDGE block (tiktoken tokens).
+            game_state_dialogue_summary_max_tokens: Max tokens for summarizer output.
             game_state_dialogue_summarizer_model: OpenRouter model for summarizer.
             game_state_dialogue_summarizer_api_key: OpenRouter API key for summarizer.
             game_state_dialogue_summarizer_persona: Persona prompt for summarizer.
@@ -2184,6 +2220,7 @@ class VoiceAgentOrchestrator:
                             module.dialogue_buffer.maxlen = game_state_dialogue_buffer_size
                         cfg.game_state_dialogue_buffer_size = game_state_dialogue_buffer_size
                     if game_state_dialogue_prompt_template is not None:
+                        module._dialogue_prompt_template = game_state_dialogue_prompt_template
                         cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
                     if game_state_dialogue_token_budget is not None:
                         cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
@@ -2214,6 +2251,10 @@ class VoiceAgentOrchestrator:
             cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
         if game_state_dialogue_token_budget is not None:
             cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
+        if game_state_dialogue_summary_max_tokens is not None:
+            cfg.game_state_dialogue_summary_max_tokens = game_state_dialogue_summary_max_tokens
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.max_tokens = game_state_dialogue_summary_max_tokens
         if game_state_dialogue_min_lines is not None:
             cfg.game_state_dialogue_min_lines = game_state_dialogue_min_lines
         if game_state_dialogue_drain_delay is not None:
