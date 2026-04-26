@@ -4,4 +4,5 @@ export { PipelineSettings } from "./pipeline-settings";
 export { AvatarSettings } from "./avatar-settings";
 export { EmotionClassifierSettings } from "./emotion-classifier-settings";
 export { TwitchCredentials } from "./twitch-credentials";
+export { GameStateBridge } from "./game-state-bridge";
 export { BaseAnimationsSettings } from "./base-animations-settings";

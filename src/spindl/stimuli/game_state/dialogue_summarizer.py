@@ -117,12 +117,15 @@ class DialogueSummarizer:
         self,
         previous_summary: str,
         dialogue_lines: list[dict],
+        codex_context: str = "",
     ) -> Optional[str]:
         """Run a summarization pass. Returns the updated summary blob or None on failure.
 
         Args:
             previous_summary: The previous summary blob (empty string if first pass).
             dialogue_lines: List of dialogue line dicts from DialogueStore.get_unsummarized_lines().
+            codex_context: Pre-formatted Codex entries activated against the dialogue
+                lines. Gives the summarizer character context from the user's lorebook.
         """
         if not dialogue_lines:
             logger.debug("Summarizer called with no dialogue lines, skipping.")
@@ -142,6 +145,11 @@ class DialogueSummarizer:
         if previous_summary:
             user_parts.append("## Previous Summary")
             user_parts.append(previous_summary)
+            user_parts.append("")
+
+        if codex_context:
+            user_parts.append("## Codex Context")
+            user_parts.append(codex_context)
             user_parts.append("")
 
         user_parts.append("## New Dialogue Lines")

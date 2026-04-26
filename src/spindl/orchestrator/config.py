@@ -1184,6 +1184,28 @@ class OrchestratorConfig(BaseModel):
         tw["audience_window"] = self.stimuli_config.twitch_audience_window
         tw["audience_char_cap"] = self.stimuli_config.twitch_audience_char_cap
 
+        # Game-state bridge (NANO-116, nested under stimuli)
+        if "game_state" not in stim:
+            stim["game_state"] = {}
+        gs = stim["game_state"]
+        gs["enabled"] = self.stimuli_config.game_state_enabled
+        gs["host"] = self.stimuli_config.game_state_host
+        gs["port"] = self.stimuli_config.game_state_port
+        gs["buffer_size"] = self.stimuli_config.game_state_buffer_size
+        gs["prompt_template"] = self.stimuli_config.game_state_prompt_template
+
+        # Game-state dialogue pipeline (NANO-116 B.2, nested under game_state)
+        if "dialogue" not in gs:
+            gs["dialogue"] = {}
+        gsd = gs["dialogue"]
+        gsd["enabled"] = self.stimuli_config.game_state_dialogue_enabled
+        gsd["buffer_size"] = self.stimuli_config.game_state_dialogue_buffer_size
+        gsd["prompt_template"] = self.stimuli_config.game_state_dialogue_prompt_template
+        gsd["token_budget"] = self.stimuli_config.game_state_dialogue_token_budget
+        gsd["summarizer_model"] = self.stimuli_config.game_state_dialogue_summarizer_model
+        gsd["summarizer_api_key"] = self.stimuli_config.game_state_dialogue_summarizer_api_key
+        gsd["summarizer_persona"] = self.stimuli_config.game_state_dialogue_summarizer_persona
+
         # Addressing-others contexts (NANO-110, nested under stimuli)
         if "addressing_others" not in stim:
             stim["addressing_others"] = {}

@@ -8,6 +8,7 @@ import {
   BaseAnimationsSettings,
   EmotionClassifierSettings,
   TwitchCredentials,
+  GameStateBridge,
 } from "@/components/settings";
 
 export default function SettingsPage() {
@@ -27,6 +28,7 @@ export default function SettingsPage() {
       <BaseAnimationsSettings />
       <EmotionClassifierSettings />
       <TwitchCredentials />
+      <GameStateBridge />
     </div>
   );
 }

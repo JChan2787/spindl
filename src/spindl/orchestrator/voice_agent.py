@@ -1097,14 +1097,28 @@ class VoiceAgentOrchestrator:
         if not unsummarized:
             return
 
+        # Pull Codex entries activated by the dialogue content
+        codex_context = ""
+        if self._codex_manager and unsummarized:
+            combined_text = " ".join(
+                f"{line.get('speaker', '')} {line.get('text', '')}"
+                for line in unsummarized
+            )
+            results = self._codex_manager.activate(combined_text)
+            if results:
+                codex_context = self._codex_manager.get_activated_content(results)
+
         logger.info(
             "Dialogue overflow — running summarizer (unsummarized_lines=%d, "
-            "previous_summary=%s)",
+            "previous_summary=%s, codex_entries=%d)",
             len(unsummarized),
             "yes" if previous_summary else "no",
+            len(codex_context.split("\n\n")) if codex_context else 0,
         )
 
-        summary = self._dialogue_summarizer.summarize(previous_summary, unsummarized)
+        summary = self._dialogue_summarizer.summarize(
+            previous_summary, unsummarized, codex_context=codex_context
+        )
         if summary:
             self._dialogue_store.record_summary(summary)
             logger.info(
@@ -1980,6 +1994,18 @@ class VoiceAgentOrchestrator:
         twitch_audience_window: Optional[int] = None,
         twitch_audience_char_cap: Optional[int] = None,
         addressing_others_contexts: Optional[list] = None,
+        game_state_enabled: Optional[bool] = None,
+        game_state_host: Optional[str] = None,
+        game_state_port: Optional[int] = None,
+        game_state_buffer_size: Optional[int] = None,
+        game_state_prompt_template: Optional[str] = None,
+        game_state_dialogue_enabled: Optional[bool] = None,
+        game_state_dialogue_buffer_size: Optional[int] = None,
+        game_state_dialogue_prompt_template: Optional[str] = None,
+        game_state_dialogue_token_budget: Optional[int] = None,
+        game_state_dialogue_summarizer_model: Optional[str] = None,
+        game_state_dialogue_summarizer_api_key: Optional[str] = None,
+        game_state_dialogue_summarizer_persona: Optional[str] = None,
     ) -> None:
         """
         Update stimuli config at runtime (NANO-056).
@@ -1997,6 +2023,18 @@ class VoiceAgentOrchestrator:
             twitch_max_message_length: Max message length filter.
             twitch_prompt_template: Prompt template for Twitch stimulus.
             addressing_others_contexts: List of AddressingContext dicts (NANO-110).
+            game_state_enabled: Enable/disable game-state bridge module (NANO-116).
+            game_state_host: TCP host for game-state bridge.
+            game_state_port: TCP port for game-state bridge.
+            game_state_buffer_size: Max buffered game events.
+            game_state_prompt_template: Prompt template for game events.
+            game_state_dialogue_enabled: Enable/disable dialogue pipeline.
+            game_state_dialogue_buffer_size: Max buffered dialogue lines.
+            game_state_dialogue_prompt_template: Prompt template for dialogue stimulus.
+            game_state_dialogue_token_budget: Token budget for CHARACTER_KNOWLEDGE block.
+            game_state_dialogue_summarizer_model: OpenRouter model for summarizer.
+            game_state_dialogue_summarizer_api_key: OpenRouter API key for summarizer.
+            game_state_dialogue_summarizer_persona: Persona prompt for summarizer.
         """
         cfg = self._config.stimuli_config
 
@@ -2096,6 +2134,74 @@ class VoiceAgentOrchestrator:
                 )
                 for i, ctx in enumerate(addressing_others_contexts)
             ]
+
+        # Game-state bridge module (NANO-116)
+        if self._stimuli_engine:
+            for module in self._stimuli_engine.modules:
+                if module.name == "game_state":
+                    if game_state_enabled is not None:
+                        module.enabled = game_state_enabled
+                        cfg.game_state_enabled = game_state_enabled
+                        self._service_capabilities.set("game_state", game_state_enabled, reason="runtime_toggle")
+                        if game_state_enabled:
+                            module.start()
+                        else:
+                            module.stop()
+                    if game_state_host is not None:
+                        module.host = game_state_host
+                        cfg.game_state_host = game_state_host
+                    if game_state_port is not None:
+                        module.port = game_state_port
+                        cfg.game_state_port = game_state_port
+                    if game_state_buffer_size is not None:
+                        module.buffer_size = game_state_buffer_size
+                        cfg.game_state_buffer_size = game_state_buffer_size
+                    if game_state_prompt_template is not None:
+                        module.prompt_template = game_state_prompt_template
+                        cfg.game_state_prompt_template = game_state_prompt_template
+                    if game_state_dialogue_enabled is not None:
+                        cfg.game_state_dialogue_enabled = game_state_dialogue_enabled
+                    if game_state_dialogue_buffer_size is not None:
+                        if hasattr(module, "dialogue_buffer") and module.dialogue_buffer:
+                            module.dialogue_buffer.maxlen = game_state_dialogue_buffer_size
+                        cfg.game_state_dialogue_buffer_size = game_state_dialogue_buffer_size
+                    if game_state_dialogue_prompt_template is not None:
+                        cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
+                    if game_state_dialogue_token_budget is not None:
+                        cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
+                    break
+
+        # Update config even if game_state module isn't registered yet
+        if game_state_enabled is not None:
+            cfg.game_state_enabled = game_state_enabled
+        if game_state_host is not None:
+            cfg.game_state_host = game_state_host
+        if game_state_port is not None:
+            cfg.game_state_port = game_state_port
+        if game_state_buffer_size is not None:
+            cfg.game_state_buffer_size = game_state_buffer_size
+        if game_state_prompt_template is not None:
+            cfg.game_state_prompt_template = game_state_prompt_template
+        if game_state_dialogue_enabled is not None:
+            cfg.game_state_dialogue_enabled = game_state_dialogue_enabled
+        if game_state_dialogue_buffer_size is not None:
+            cfg.game_state_dialogue_buffer_size = game_state_dialogue_buffer_size
+        if game_state_dialogue_prompt_template is not None:
+            cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
+        if game_state_dialogue_token_budget is not None:
+            cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
+        if game_state_dialogue_summarizer_model is not None:
+            cfg.game_state_dialogue_summarizer_model = game_state_dialogue_summarizer_model
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.model = game_state_dialogue_summarizer_model
+        if game_state_dialogue_summarizer_api_key is not None:
+            cfg.game_state_dialogue_summarizer_api_key = game_state_dialogue_summarizer_api_key
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.api_key = game_state_dialogue_summarizer_api_key
+        if game_state_dialogue_summarizer_persona is not None:
+            cfg.game_state_dialogue_summarizer_persona = game_state_dialogue_summarizer_persona
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.persona_prompt = game_state_dialogue_summarizer_persona
 
     def update_vts_config(
         self,

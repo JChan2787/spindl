@@ -209,6 +209,7 @@ export const StimuliConfigUpdatedSchema = z.object({
   game_state_dialogue_prompt_template: z.string(),
   game_state_dialogue_token_budget: z.number().int().min(500).max(10000),
   game_state_dialogue_summarizer_model: z.string(),
+  game_state_dialogue_summarizer_api_key: z.string(),
   game_state_dialogue_summarizer_persona: z.string(),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),

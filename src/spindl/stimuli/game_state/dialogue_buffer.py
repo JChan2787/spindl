@@ -242,6 +242,11 @@ class DialogueBuffer:
         """Peek at buffered lines without draining."""
         return list(self._buffer)
 
+    def get_recent_lines(self, n: int = 10) -> list[str]:
+        """Return the last N lines formatted as 'Speaker: text' for UI display."""
+        lines = list(self._buffer)[-n:]
+        return [f"{line.speaker}: {line.text}" for line in lines]
+
     def clear(self) -> None:
         """Clear the buffer."""
         self._buffer.clear()

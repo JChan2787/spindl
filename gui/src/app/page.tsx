@@ -50,6 +50,7 @@ import { VLMConfig } from "@/components/dashboard/vlm-config";
 import { PatienceBar } from "@/components/dashboard/patience-bar";
 import { StimuliSettings } from "@/components/dashboard/stimuli-settings";
 import { TwitchChatCard } from "@/components/dashboard/twitch-chat-card";
+import { GameStateCard } from "@/components/dashboard/game-state-card";
 import { VTubeStudioCard } from "@/components/dashboard/vtubestudio-card";
 import { StatusOverlay } from "@/components/dashboard/status-overlay";
 
@@ -344,6 +345,9 @@ export default function DashboardPage() {
 
       {/* Twitch Chat (NANO-056b) — standalone card, credential-gated toggle */}
       <TwitchChatCard />
+
+      {/* Game Bridge (NANO-116) — standalone card, connection-gated toggle */}
+      <GameStateCard />
 
       {/* Generation Parameters (NANO-053) — always visible */}
       <GenerationSettings />

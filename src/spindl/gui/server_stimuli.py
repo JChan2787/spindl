@@ -7,6 +7,8 @@ Extracted from server.py (NANO-113). Handles:
 - Patience progress (request_patience_progress)
 - Twitch status (request_twitch_status)
 - Twitch credential testing (test_twitch_credentials)
+- Game-state bridge status (request_game_state_status) (NANO-116)
+- Game-state bridge connection testing (test_game_state_connection) (NANO-116)
 
 Also exposes persist_twitch_credentials() and build_stimuli_hydration()
 as standalone helpers.
@@ -100,6 +102,14 @@ def build_stimuli_hydration(cfg) -> dict:
         "game_state_port": cfg.game_state_port,
         "game_state_buffer_size": cfg.game_state_buffer_size,
         "game_state_prompt_template": cfg.game_state_prompt_template,
+        # NANO-116 B.2: Dialogue pipeline
+        "game_state_dialogue_enabled": cfg.game_state_dialogue_enabled,
+        "game_state_dialogue_buffer_size": cfg.game_state_dialogue_buffer_size,
+        "game_state_dialogue_prompt_template": cfg.game_state_dialogue_prompt_template,
+        "game_state_dialogue_token_budget": cfg.game_state_dialogue_token_budget,
+        "game_state_dialogue_summarizer_model": cfg.game_state_dialogue_summarizer_model,
+        "game_state_dialogue_summarizer_api_key": cfg.game_state_dialogue_summarizer_api_key or "",
+        "game_state_dialogue_summarizer_persona": cfg.game_state_dialogue_summarizer_persona or "",
         # NANO-110: Addressing-others contexts
         "addressing_others_contexts": [
             {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
@@ -214,6 +224,84 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 else:
                     addressing_others_contexts = None
 
+            # Game-state bridge fields (NANO-116)
+            game_state_enabled = data.get("game_state_enabled")
+            game_state_host = data.get("game_state_host")
+            game_state_port = data.get("game_state_port")
+            game_state_buffer_size = data.get("game_state_buffer_size")
+            game_state_prompt_template = data.get("game_state_prompt_template")
+
+            # Game-state dialogue pipeline fields (NANO-116 B.2)
+            game_state_dialogue_enabled = data.get("game_state_dialogue_enabled")
+            game_state_dialogue_buffer_size = data.get("game_state_dialogue_buffer_size")
+            game_state_dialogue_prompt_template = data.get("game_state_dialogue_prompt_template")
+            game_state_dialogue_token_budget = data.get("game_state_dialogue_token_budget")
+            game_state_dialogue_summarizer_model = data.get("game_state_dialogue_summarizer_model")
+            game_state_dialogue_summarizer_api_key = data.get("game_state_dialogue_summarizer_api_key")
+            game_state_dialogue_summarizer_persona = data.get("game_state_dialogue_summarizer_persona")
+
+            # Game-state type coercion (NANO-116)
+            if game_state_enabled is not None:
+                game_state_enabled = bool(game_state_enabled)
+            if game_state_host is not None:
+                game_state_host = str(game_state_host).strip()
+            if game_state_port is not None:
+                game_state_port = int(game_state_port)
+                game_state_port = max(1, min(65535, game_state_port))
+            if game_state_buffer_size is not None:
+                game_state_buffer_size = int(game_state_buffer_size)
+                game_state_buffer_size = max(1, min(100, game_state_buffer_size))
+            if game_state_prompt_template is not None:
+                game_state_prompt_template = str(game_state_prompt_template).strip()
+                if not game_state_prompt_template:
+                    game_state_prompt_template = None
+                elif "{events}" not in game_state_prompt_template:
+                    await sio.emit(
+                        "stimuli_config_error",
+                        {
+                            "field": "game_state_prompt_template",
+                            "message": (
+                                "game_state_prompt_template must contain the "
+                                "{events} placeholder."
+                            ),
+                        },
+                        to=sid,
+                    )
+                    return
+
+            # Game-state dialogue type coercion (NANO-116 B.2)
+            if game_state_dialogue_enabled is not None:
+                game_state_dialogue_enabled = bool(game_state_dialogue_enabled)
+            if game_state_dialogue_buffer_size is not None:
+                game_state_dialogue_buffer_size = int(game_state_dialogue_buffer_size)
+                game_state_dialogue_buffer_size = max(1, min(200, game_state_dialogue_buffer_size))
+            if game_state_dialogue_prompt_template is not None:
+                game_state_dialogue_prompt_template = str(game_state_dialogue_prompt_template).strip()
+                if not game_state_dialogue_prompt_template:
+                    game_state_dialogue_prompt_template = None
+                elif "{dialogue}" not in game_state_dialogue_prompt_template:
+                    await sio.emit(
+                        "stimuli_config_error",
+                        {
+                            "field": "game_state_dialogue_prompt_template",
+                            "message": (
+                                "game_state_dialogue_prompt_template must contain "
+                                "the {dialogue} placeholder."
+                            ),
+                        },
+                        to=sid,
+                    )
+                    return
+            if game_state_dialogue_token_budget is not None:
+                game_state_dialogue_token_budget = int(game_state_dialogue_token_budget)
+                game_state_dialogue_token_budget = max(500, min(10000, game_state_dialogue_token_budget))
+            if game_state_dialogue_summarizer_model is not None:
+                game_state_dialogue_summarizer_model = str(game_state_dialogue_summarizer_model).strip()
+            if game_state_dialogue_summarizer_api_key is not None:
+                game_state_dialogue_summarizer_api_key = str(game_state_dialogue_summarizer_api_key).strip()
+            if game_state_dialogue_summarizer_persona is not None:
+                game_state_dialogue_summarizer_persona = str(game_state_dialogue_summarizer_persona).strip()
+
             server._orchestrator.update_stimuli_config(
                 enabled=enabled,
                 patience_enabled=patience_enabled,
@@ -229,6 +317,18 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_audience_window=twitch_audience_window,
                 twitch_audience_char_cap=twitch_audience_char_cap,
                 addressing_others_contexts=addressing_others_contexts,
+                game_state_enabled=game_state_enabled,
+                game_state_host=game_state_host,
+                game_state_port=game_state_port,
+                game_state_buffer_size=game_state_buffer_size,
+                game_state_prompt_template=game_state_prompt_template,
+                game_state_dialogue_enabled=game_state_dialogue_enabled,
+                game_state_dialogue_buffer_size=game_state_dialogue_buffer_size,
+                game_state_dialogue_prompt_template=game_state_dialogue_prompt_template,
+                game_state_dialogue_token_budget=game_state_dialogue_token_budget,
+                game_state_dialogue_summarizer_model=game_state_dialogue_summarizer_model,
+                game_state_dialogue_summarizer_api_key=game_state_dialogue_summarizer_api_key,
+                game_state_dialogue_summarizer_persona=game_state_dialogue_summarizer_persona,
             )
 
             cfg = server._orchestrator._config.stimuli_config
@@ -492,3 +592,134 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 to=sid,
             )
             print(f"[GUI] Twitch credential test failed: {e}", flush=True)
+
+    # ============================================================
+    # NANO-116: Game-State Bridge — Socket Handlers
+    # ============================================================
+
+    @sio.event
+    async def request_game_state_status(sid: str, data: dict) -> None:
+        """Client requests current game-state bridge status (NANO-116)."""
+        default_status = {
+            "connected": False,
+            "protocol_version": None,
+            "buffer_count": 0,
+            "recent_lines": [],
+            "enabled": False,
+            "dialogue_enabled": False,
+            "current_summary": "",
+        }
+
+        if (
+            not server._orchestrator
+            or not server._orchestrator.stimuli_engine
+        ):
+            await sio.emit("game_state_status", default_status, to=sid)
+            return
+
+        engine = server._orchestrator.stimuli_engine
+        for module in engine.modules:
+            if module.name == "game_state":
+                recent_lines = []
+                if hasattr(module, "dialogue_buffer") and module.dialogue_buffer:
+                    recent_lines = module.dialogue_buffer.get_recent_lines(10)
+
+                current_summary = ""
+                if hasattr(server._orchestrator, "_dialogue_store") and server._orchestrator._dialogue_store:
+                    current_summary = server._orchestrator._dialogue_store.summary_blob or ""
+
+                await sio.emit(
+                    "game_state_status",
+                    {
+                        "connected": module.connected,
+                        "protocol_version": module.bridge_protocol_version,
+                        "buffer_count": module.buffer_count,
+                        "recent_lines": recent_lines,
+                        "enabled": module.enabled,
+                        "dialogue_enabled": server._orchestrator._config.stimuli_config.game_state_dialogue_enabled,
+                        "current_summary": current_summary,
+                    },
+                    to=sid,
+                )
+                return
+
+        await sio.emit("game_state_status", default_status, to=sid)
+
+    @sio.event
+    async def test_game_state_connection(sid: str, data: dict) -> None:
+        """Test TCP connection to game-state bridge without launching module (NANO-116)."""
+        import asyncio
+
+        host = str(data.get("host", "127.0.0.1")).strip()
+        port = int(data.get("port", 53817))
+
+        if not host:
+            await sio.emit(
+                "game_state_connection_result",
+                {"success": False, "error": "Host is required."},
+                to=sid,
+            )
+            return
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=3.0,
+            )
+
+            # Read the protocol version banner (first line from bridge)
+            protocol_version = None
+            try:
+                banner_data = await asyncio.wait_for(
+                    reader.readline(),
+                    timeout=2.0,
+                )
+                if banner_data:
+                    import json as _json
+                    banner = _json.loads(banner_data.decode("utf-8").strip())
+                    protocol_version = banner.get("protocol_version")
+            except Exception:
+                pass
+
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+            await sio.emit(
+                "game_state_connection_result",
+                {
+                    "success": True,
+                    "error": None,
+                    "protocol_version": protocol_version,
+                },
+                to=sid,
+            )
+            print(
+                f"[GUI] Game-state bridge connection test succeeded "
+                f"(host={host}, port={port}, version={protocol_version})",
+                flush=True,
+            )
+
+        except asyncio.TimeoutError:
+            await sio.emit(
+                "game_state_connection_result",
+                {
+                    "success": False,
+                    "error": f"Connection timed out ({host}:{port}). Is the bridge running?",
+                },
+                to=sid,
+            )
+            print(f"[GUI] Game-state bridge connection test timed out ({host}:{port})", flush=True)
+
+        except OSError as e:
+            await sio.emit(
+                "game_state_connection_result",
+                {
+                    "success": False,
+                    "error": f"Connection refused ({host}:{port}): {e}",
+                },
+                to=sid,
+            )
+            print(f"[GUI] Game-state bridge connection test failed: {e}", flush=True)

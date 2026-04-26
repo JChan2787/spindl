@@ -601,6 +601,38 @@ export interface SetStimuliConfigPayload {
   twitch_audience_char_cap?: number;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts?: AddressingContext[];
+  // NANO-116: Game-state bridge
+  game_state_enabled?: boolean;
+  game_state_host?: string;
+  game_state_port?: number;
+  game_state_buffer_size?: number;
+  game_state_prompt_template?: string;
+  // NANO-116 B.2: Dialogue pipeline
+  game_state_dialogue_enabled?: boolean;
+  game_state_dialogue_buffer_size?: number;
+  game_state_dialogue_prompt_template?: string;
+  game_state_dialogue_token_budget?: number;
+  game_state_dialogue_summarizer_model?: string;
+  game_state_dialogue_summarizer_api_key?: string;
+  game_state_dialogue_summarizer_persona?: string;
+}
+
+// NANO-116: Game-state bridge status
+export interface GameStateStatus {
+  connected: boolean;
+  protocol_version: string | null;
+  buffer_count: number;
+  recent_lines: string[];
+  enabled: boolean;
+  dialogue_enabled: boolean;
+  current_summary: string;
+}
+
+// NANO-116: Game-state connection test result
+export interface GameStateConnectionResult {
+  success: boolean;
+  error: string | null;
+  protocol_version?: string | null;
 }
 
 // NANO-060b: VTubeStudio events
@@ -1369,6 +1401,9 @@ export interface ServerToClientEvents {
   patience_progress: (event: PatienceProgressEvent) => void;
   twitch_status: (event: TwitchStatusEvent) => void;
   twitch_credentials_result: (event: { success: boolean; error: string | null }) => void;
+  // NANO-116: Game-state bridge events
+  game_state_status: (event: GameStateStatus) => void;
+  game_state_connection_result: (event: GameStateConnectionResult) => void;
   stimulus_fired: (event: StimulusFiredEvent) => void;
   // NANO-110: Addressing-others state
   addressing_others_state: (event: AddressingOthersStateEvent) => void;
@@ -1453,6 +1488,9 @@ export interface ClientToServerEvents {
   request_patience_progress: (payload: Record<string, never>) => void;
   request_twitch_status: (payload: Record<string, never>) => void;
   test_twitch_credentials: (payload: { app_id: string; app_secret: string; channel: string }) => void;
+  // NANO-116: Game-state bridge
+  request_game_state_status: (payload: Record<string, never>) => void;
+  test_game_state_connection: (payload: { host: string; port: number }) => void;
   typing_active: (payload: { active: boolean }) => void;
   // NANO-110: Tauri install
   check_tauri_install: (payload: Record<string, never>) => void;

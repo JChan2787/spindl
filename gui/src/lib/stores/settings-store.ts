@@ -92,6 +92,31 @@ export interface StimuliConfig {
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: AddressingContextEntry[];
+  // NANO-116: Game-state bridge
+  game_state_enabled: boolean;
+  game_state_host: string;
+  game_state_port: number;
+  game_state_buffer_size: number;
+  game_state_prompt_template: string;
+  // NANO-116 B.2: Dialogue pipeline
+  game_state_dialogue_enabled: boolean;
+  game_state_dialogue_buffer_size: number;
+  game_state_dialogue_prompt_template: string;
+  game_state_dialogue_token_budget: number;
+  game_state_dialogue_summarizer_model: string;
+  game_state_dialogue_summarizer_api_key: string;
+  game_state_dialogue_summarizer_persona: string;
+}
+
+// Game-state bridge status (NANO-116)
+export interface GameStateStatus {
+  connected: boolean;
+  protocol_version: string | null;
+  buffer_count: number;
+  recent_lines: string[];
+  enabled: boolean;
+  dialogue_enabled: boolean;
+  current_summary: string;
 }
 
 // Twitch module status (NANO-056b)
@@ -196,6 +221,7 @@ interface SettingsStoreState {
   isSavingStimuli: boolean;
   stimuliProgress: StimuliProgress | null;
   twitchStatus: TwitchStatus | null;
+  gameStateStatus: GameStateStatus | null;
 
   // Tools runtime config (NANO-065a)
   toolsConfig: ToolsConfig;
@@ -273,6 +299,7 @@ interface SettingsStoreState {
   setSavingStimuli: (saving: boolean) => void;
   setStimuliProgress: (progress: StimuliProgress | null) => void;
   setTwitchStatus: (status: TwitchStatus | null) => void;
+  setGameStateStatus: (status: GameStateStatus | null) => void;
 
   // Actions - Tools (NANO-065a)
   setToolsConfig: (config: ToolsConfig) => void;
@@ -397,6 +424,19 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_audience_char_cap: 150,
   twitch_has_credentials: false,
   addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
+  // NANO-116: Game-state bridge
+  game_state_enabled: false,
+  game_state_host: "127.0.0.1",
+  game_state_port: 53817,
+  game_state_buffer_size: 20,
+  game_state_prompt_template: "**New game events from the bridge.** These are in-game events — commentate on what's happening, don't address game characters directly.\n\n{events}\n",
+  game_state_dialogue_enabled: false,
+  game_state_dialogue_buffer_size: 30,
+  game_state_dialogue_prompt_template: "**The following are in-game character dialogue lines from the game you're co-hosting.** These characters are not talking to you — commentate on what they're saying, don't reply to them directly.\n\n{dialogue}\n",
+  game_state_dialogue_token_budget: 2000,
+  game_state_dialogue_summarizer_model: "anthropic/claude-sonnet-4-20250514",
+  game_state_dialogue_summarizer_api_key: "",
+  game_state_dialogue_summarizer_persona: "",
 };
 
 const DEFAULT_PROMPT: PromptConfig = {
@@ -475,6 +515,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
   isSavingStimuli: false,
   stimuliProgress: null,
   twitchStatus: null,
+  gameStateStatus: null,
 
   // Initial state - Avatar (NANO-093)
   avatarConfig: DEFAULT_AVATAR,
@@ -585,6 +626,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
 
   setStimuliProgress: (stimuliProgress) => set({ stimuliProgress }),
   setTwitchStatus: (twitchStatus) => set({ twitchStatus }),
+  setGameStateStatus: (gameStateStatus) => set({ gameStateStatus }),
 
   // Avatar actions (NANO-093)
   setAvatarConfig: (avatarConfig) => set({ avatarConfig }),
