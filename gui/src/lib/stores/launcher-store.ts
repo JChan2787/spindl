@@ -147,6 +147,7 @@ interface TTSLocalConfig {
   speaker: string;
   temperature: number;
   emitEveryFrames: number;
+  instructTemplate: string;
 }
 
 // NANO-027 Phase 3: Launch Progress State
@@ -390,6 +391,7 @@ const DEFAULT_TTS_LOCAL: TTSLocalConfig = {
   speaker: "",
   temperature: 0.6,
   emitEveryFrames: 32,
+  instructTemplate: "",
 };
 
 // NANO-043 Phase 5: Default embedding config

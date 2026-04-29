@@ -469,6 +469,7 @@ export async function POST(request: Request) {
             speaker: body.ttsLocal.speaker,
             temperature: body.ttsLocal.temperature,
             emit_every_frames: body.ttsLocal.emitEveryFrames,
+            instruct_template: body.ttsLocal.instructTemplate || "",
           }
         : {
             host: body.ttsLocal.host,
@@ -952,6 +953,7 @@ export async function GET() {
         speaker: ttsConfig.speaker || "",
         temperature: ttsConfig.temperature ?? 0.6,
         emitEveryFrames: ttsConfig.emit_every_frames ?? 32,
+        instructTemplate: ttsConfig.instruct_template || "",
       },
 
       // Embedding Server (NANO-043 Phase 5)
