@@ -330,6 +330,59 @@ def register_config_handlers(server: "GUIServer") -> None:
                 )
 
     @sio.event
+    async def set_tts_config(sid: str, data: dict) -> None:
+        """Client updates TTS provider configuration at runtime."""
+        if server._orchestrator:
+            callbacks = getattr(server._orchestrator, "_callbacks", None)
+            provider = getattr(callbacks, "_tts_provider", None) if callbacks else None
+            updated = False
+
+            if provider is not None:
+                if "speaker" in data and hasattr(provider, "_speaker"):
+                    provider._speaker = str(data["speaker"])
+                    updated = True
+                if "temperature" in data and hasattr(provider, "_temperature"):
+                    provider._temperature = float(data["temperature"])
+                    updated = True
+                if "instruct_template" in data and hasattr(provider, "_instruct_template"):
+                    provider._instruct_template = str(data["instruct_template"])
+                    updated = True
+
+            if updated:
+                # Sync provider_config dict so save_to_yaml persists the changes
+                config = server._orchestrator._config
+                pc = config.tts_config.provider_config
+                if "speaker" in data:
+                    pc["speaker"] = str(data["speaker"])
+                if "temperature" in data:
+                    pc["temperature"] = float(data["temperature"])
+                if "instruct_template" in data:
+                    pc["instruct_template"] = str(data["instruct_template"])
+
+                print(
+                    f"[GUI] TTS config updated at runtime: "
+                    f"speaker={getattr(provider, '_speaker', '?')}, "
+                    f"temperature={getattr(provider, '_temperature', '?')}, "
+                    f"instruct_template={'set' if getattr(provider, '_instruct_template', '') else 'empty'}",
+                    flush=True,
+                )
+
+                persisted = False
+                if server._config_path:
+                    try:
+                        config.save_to_yaml(server._config_path)
+                        persisted = True
+                        print(f"[GUI] TTS config persisted to {Path(server._config_path).name}", flush=True)
+                    except Exception as e:
+                        print(f"[GUI] Failed to persist TTS config: {e}", flush=True)
+
+                await sio.emit(
+                    "tts_config_updated",
+                    {"persisted": persisted},
+                    to=sid,
+                )
+
+    @sio.event
     async def set_pipeline_config(sid: str, data: dict) -> None:
         """Client updates pipeline configuration."""
         if server._orchestrator:

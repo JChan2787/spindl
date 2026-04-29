@@ -11,6 +11,7 @@ a persistent connection for session-based streaming and mid-session interrupt.
 import json
 import logging
 import socket
+import threading
 import time
 from typing import Iterator, Optional
 
@@ -36,6 +37,7 @@ class Qwen3TTSClient:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self._sock: Optional[socket.socket] = None
+        self._interrupted = threading.Event()
 
     def _ensure_connected(self) -> socket.socket:
         if self._sock is not None:
@@ -136,35 +138,49 @@ class Qwen3TTSClient:
         if instruct_per_sentence:
             request["instruct_per_sentence"] = instruct_per_sentence
 
+        self._interrupted.clear()
         self._send(request)
 
         sock = self._ensure_connected()
+        original_timeout = sock.gettimeout()
+        sock.settimeout(min(0.5, self.timeout))
         buf = b""
-        while True:
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line = line.strip()
-                if not line:
+        try:
+            while True:
+                if self._interrupted.is_set():
+                    return
+
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    resp = json.loads(line.decode("utf-8"))
+
+                    if resp.get("status") == "interrupted":
+                        return
+                    if resp.get("status") == "error":
+                        raise RuntimeError(f"Qwen3-TTS session error: {resp.get('message')}")
+
+                    yield resp
+
+                    if resp.get("is_final", False):
+                        return
+
+                try:
+                    chunk = sock.recv(1048576)
+                except socket.timeout:
                     continue
-                resp = json.loads(line.decode("utf-8"))
-
-                if resp.get("status") == "interrupted":
-                    return
-                if resp.get("status") == "error":
-                    raise RuntimeError(f"Qwen3-TTS session error: {resp.get('message')}")
-
-                yield resp
-
-                if resp.get("is_final", False):
-                    return
-
-            chunk = sock.recv(1048576)
-            if not chunk:
-                self._sock = None
-                raise ConnectionError("Server closed connection during session")
-            buf += chunk
+                if not chunk:
+                    self._sock = None
+                    raise ConnectionError("Server closed connection during session")
+                buf += chunk
+        finally:
+            if self._sock is not None:
+                self._sock.settimeout(original_timeout)
 
     def send_interrupt(self) -> None:
+        self._interrupted.set()
         try:
             self._send({"action": "interrupt"})
         except (ConnectionError, socket.error, OSError) as e:

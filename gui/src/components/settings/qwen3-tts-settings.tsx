@@ -8,11 +8,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useLauncherStore } from "@/lib/stores";
 import { useAgentStore } from "@/lib/stores";
+import { getSocket } from "@/lib/socket";
 
 export function Qwen3TTSSettings() {
   const ttsLocal = useLauncherStore((s) => s.ttsLocal);
   const updateTTSLocal = useLauncherStore((s) => s.updateTTSLocal);
   const health = useAgentStore((s) => s.health);
+  const socket = getSocket();
 
   const isQwen3 = ttsLocal.provider === "qwen3";
   const isTTSHealthy = health?.tts === true;
@@ -20,6 +22,12 @@ export function Qwen3TTSSettings() {
   if (!isQwen3 || !isTTSHealthy) {
     return null;
   }
+
+  const pushToBackend = (changes: Record<string, unknown>) => {
+    if (socket.connected) {
+      socket.emit("set_tts_config", changes);
+    }
+  };
 
   const hasEmotionPlaceholder = ttsLocal.instructTemplate.includes("{emotion}");
   const showTemplateWarning =
@@ -44,7 +52,10 @@ export function Qwen3TTSSettings() {
           <Input
             id="qwen3-speaker"
             value={ttsLocal.speaker}
-            onChange={(e) => updateTTSLocal({ speaker: e.target.value })}
+            onChange={(e) => {
+              updateTTSLocal({ speaker: e.target.value });
+              pushToBackend({ speaker: e.target.value });
+            }}
             placeholder="danny"
           />
         </div>
@@ -58,9 +69,11 @@ export function Qwen3TTSSettings() {
             min={0}
             max={2}
             value={ttsLocal.temperature}
-            onChange={(e) =>
-              updateTTSLocal({ temperature: parseFloat(e.target.value) || 0.6 })
-            }
+            onChange={(e) => {
+              const val = parseFloat(e.target.value) || 0.6;
+              updateTTSLocal({ temperature: val });
+              pushToBackend({ temperature: val });
+            }}
           />
         </div>
 
@@ -71,9 +84,10 @@ export function Qwen3TTSSettings() {
           <Textarea
             id="qwen3-instruct-template"
             value={ttsLocal.instructTemplate}
-            onChange={(e) =>
-              updateTTSLocal({ instructTemplate: e.target.value })
-            }
+            onChange={(e) => {
+              updateTTSLocal({ instructTemplate: e.target.value });
+              pushToBackend({ instruct_template: e.target.value });
+            }}
             placeholder="Express the following with a {emotion} tone."
             rows={2}
           />

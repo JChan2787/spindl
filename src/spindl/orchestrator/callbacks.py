@@ -597,6 +597,7 @@ class OrchestratorCallbacks:
         tts_text: str,
         tts_config: dict,
         display_text: Optional[str] = None,
+        suppress_final: bool = False,
     ) -> tuple[Optional[np.ndarray], Optional[list]]:
         """
         Session-based TTS delivery for streaming providers (NANO-054b).
@@ -624,9 +625,10 @@ class OrchestratorCallbacks:
 
         sentence_chunks = [{"text": ds} for ds in display_sentences]
 
-        # Build per-sentence instruct from emotion classifier + template
+        # Build per-sentence instruct from emotion classifier + template.
+        # Fall back to provider's configured template when persona doesn't have one.
         instruct_per_sentence = None
-        instruct_template = tts_config.get("instruct_template", "")
+        instruct_template = tts_config.get("instruct_template") or getattr(self._tts_provider, "instruct_template", "")
         if instruct_template and "{emotion}" in instruct_template and self._emotion_classifier:
             tts_sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
             tts_sentences = [s.strip() for s in tts_sentences if s.strip()]
@@ -645,7 +647,7 @@ class OrchestratorCallbacks:
             self._delivered_sentences = []
 
         kwargs = {
-            "speaker": tts_config.get("speaker", tts_config.get("voice")),
+            "speaker": tts_config.get("speaker"),
             "temperature": tts_config.get("temperature"),
             "instruct": tts_config.get("instruct"),
         }
@@ -674,9 +676,10 @@ class OrchestratorCallbacks:
                     with self._delivery_lock:
                         self._delivered_sentences.append(display_sentences[sentence_idx])
                 if sentence_idx < len(sentence_chunks) and self._event_bus is not None:
+                    chunk_is_final = result.is_final and not suppress_final
                     self._event_bus.emit(LLMChunkEvent(
                         text=sentence_chunks[sentence_idx]["text"],
-                        is_final=result.is_final,
+                        is_final=chunk_is_final,
                     ))
 
                 # Queue audio for playback
@@ -774,114 +777,19 @@ class OrchestratorCallbacks:
         from ..llm.pipeline import StreamingPipelineChunk
         from ..core.events import LLMChunkEvent
 
+        session_tts = self._tts_provider.get_properties().supports_streaming
+
         audio_results: dict[int, np.ndarray] = {}  # index → audio
         sentence_texts: dict[int, str] = {}  # index → display text for delivery-synced rendering
-        # sentence_emotions removed — emotion is classified once on full response
-        tts_threads: list[threading.Thread] = []
+        sentence_tts: dict[int, str] = {}  # index → tts text for re-dispatch
         lock = threading.Lock()
-        tts_semaphore = threading.Semaphore(3)  # NANO-111: cap concurrent Kokoro calls
-        total_chunks_dispatched = 0
-        all_chunks_dispatched = threading.Event()  # set when LLM stream ends
-
-        def synthesize_chunk(tts_text: str, index: int):
-            """Synthesize one sentence in a thread."""
-            with tts_semaphore:
-                try:
-                    result = self._tts_provider.synthesize(
-                        tts_text,
-                        voice=tts_config.get("voice"),
-                        **{k: v for k, v in tts_config.items() if k != "voice"},
-                    )
-                    audio = np.frombuffer(result.data, dtype=np.float32)
-                    with lock:
-                        audio_results[index] = audio
-                except Exception as e:
-                    logger.warning(f"[NANO-111] TTS failed for chunk {index}: {e}")
-                    with lock:
-                        audio_results[index] = np.array([], dtype=np.float32)
-
-        # Separate delivery thread: continuously delivers TTS audio to playback
-        # in order, independent of the LLM generation loop.
-        playback_started = False
-
-        def _make_chunk_start_cb(
-            display_text: str,
-            is_final: bool,
-        ):
-            """Create a closure that emits sentence text when playback reaches this chunk."""
-            def cb():
-                # Phase 2.5: Track delivery at playback time, not queue time.
-                if display_text:
-                    with self._delivery_lock:
-                        self._delivered_sentences.append(display_text)
-                if display_text and self._event_bus is not None:
-                    from ..core.events import LLMChunkEvent
-                    self._event_bus.emit(LLMChunkEvent(
-                        text=display_text,
-                        is_final=is_final,
-                    ))
-            return cb
 
         # NANO-111 Phase 2.5: Reset delivery tracking for this response
         with self._delivery_lock:
             self._delivered_sentences = []
 
-        def delivery_loop():
-            nonlocal playback_started
-            next_to_deliver = 0
-            while True:
-                # Check if the next chunk is ready
-                with lock:
-                    ready = next_to_deliver in audio_results
-                    total = total_chunks_dispatched
-                    done = all_chunks_dispatched.is_set()
-
-                if ready:
-                    with lock:
-                        audio_chunk = audio_results[next_to_deliver]
-                        display_text = sentence_texts.get(next_to_deliver, "")
-
-                    # NANO-111 Session 606: Text renders when playback
-                    # reaches this chunk — [text][tts][text][tts] via playback callbacks.
-                    is_final_chunk = done and next_to_deliver >= total - 1
-                    start_cb = _make_chunk_start_cb(
-                        display_text, is_final_chunk,
-                    )
-
-                    if len(audio_chunk) > 0:
-                        if not playback_started:
-                            # First chunk: fire text callback immediately from
-                            # delivery thread — don't wait for monitor's 10ms poll.
-                            # The monitor would check pos >= 0 which is always true,
-                            # but by then response event may have already arrived.
-                            start_cb()
-                            self._on_response_ready_streaming(audio_chunk)
-                            playback_started = True
-                        else:
-                            self._append_playback_audio(
-                                audio_chunk,
-                                on_chunk_start=start_cb,
-                            )
-                    next_to_deliver += 1
-                elif done and next_to_deliver >= total:
-                    # All chunks dispatched and delivered
-                    break
-                else:
-                    # Not ready yet — poll briefly
-                    time.sleep(0.02)
-
-            self._finalize_playback_streaming()
-
-        delivery_thread = threading.Thread(target=delivery_loop, daemon=True)
-        delivery_thread.start()
-
         full_display_text = []
         full_tts_text = []
-
-        # NANO-111 Session 606: No per-token callback on voice path.
-        # Text renders in sync with TTS delivery, not LLM generation.
-        # The delivery thread emits LLMChunkEvent per sentence right
-        # before audio plays — [text][tts][text][tts] ordering.
 
         # NANO-115 item #1: Tag user input with source prefix.
         tagged_input = tag_user_input(transcription, InputModality.VOICE)
@@ -897,28 +805,124 @@ class OrchestratorCallbacks:
             full_display_text.append(chunk.display_text)
             full_tts_text.append(chunk.tts_text)
 
-            # Fire TTS in parallel thread if there's text to speak
             if chunk.tts_text.strip():
-                # Store display text for delivery-synced rendering
                 with lock:
                     sentence_texts[chunk.index] = chunk.display_text
-                t = threading.Thread(
-                    target=synthesize_chunk,
-                    args=(chunk.tts_text, chunk.index),
-                    daemon=True,
-                )
-                t.start()
-                tts_threads.append(t)
-                with lock:
-                    total_chunks_dispatched += 1
+                    sentence_tts[chunk.index] = chunk.tts_text
 
-        # LLM stream complete — signal delivery thread
-        for t in tts_threads:
-            t.join()
-        all_chunks_dispatched.set()
+        if session_tts:
+            # Session-streaming provider (Qwen3): send full text, server
+            # splits into sentences with decoder carry-over for voice
+            # consistency. Per-sentence playback + barge-in still work
+            # through _session_tts_delivery's iterator.
+            tts_text_joined = " ".join(t for t in full_tts_text if t.strip())
+            display_text_joined = " ".join(t for t in full_display_text if t.strip())
+            session_audio, _ = self._session_tts_delivery(
+                tts_text_joined, tts_config, display_text=display_text_joined,
+                suppress_final=True,
+            )
+            if session_audio is not None:
+                audio_results[0] = session_audio
+        else:
+            # Parallel per-sentence TTS (Kokoro): fire threads during LLM
+            # stream, deliver audio in sentence order.
+            tts_threads: list[threading.Thread] = []
+            tts_semaphore = threading.Semaphore(3)
+            total_chunks_dispatched = 0
+            all_chunks_dispatched = threading.Event()
 
-        # Wait for delivery to finish
-        delivery_thread.join()
+            def synthesize_chunk(tts_text: str, index: int):
+                with tts_semaphore:
+                    try:
+                        result = self._tts_provider.synthesize(
+                            tts_text,
+                            voice=tts_config.get("voice"),
+                            **{k: v for k, v in tts_config.items() if k != "voice"},
+                        )
+                        audio = np.frombuffer(result.data, dtype=np.float32)
+                        with lock:
+                            audio_results[index] = audio
+                    except Exception as e:
+                        logger.warning(f"[NANO-111] TTS failed for chunk {index}: {e}")
+                        with lock:
+                            audio_results[index] = np.array([], dtype=np.float32)
+
+            playback_started = False
+
+            def _make_chunk_start_cb(
+                display_text: str,
+                is_final: bool,
+            ):
+                def cb():
+                    if display_text:
+                        with self._delivery_lock:
+                            self._delivered_sentences.append(display_text)
+                    if display_text and self._event_bus is not None:
+                        from ..core.events import LLMChunkEvent
+                        self._event_bus.emit(LLMChunkEvent(
+                            text=display_text,
+                            is_final=is_final,
+                        ))
+                return cb
+
+            def delivery_loop():
+                nonlocal playback_started
+                next_to_deliver = 0
+                while True:
+                    with lock:
+                        ready = next_to_deliver in audio_results
+                        total = total_chunks_dispatched
+                        done = all_chunks_dispatched.is_set()
+
+                    if ready:
+                        with lock:
+                            audio_chunk = audio_results[next_to_deliver]
+                            display_text = sentence_texts.get(next_to_deliver, "")
+
+                        is_final_chunk = done and next_to_deliver >= total - 1
+                        start_cb = _make_chunk_start_cb(
+                            display_text, is_final_chunk,
+                        )
+
+                        if len(audio_chunk) > 0:
+                            if not playback_started:
+                                start_cb()
+                                self._on_response_ready_streaming(audio_chunk)
+                                playback_started = True
+                            else:
+                                self._append_playback_audio(
+                                    audio_chunk,
+                                    on_chunk_start=start_cb,
+                                )
+                        next_to_deliver += 1
+                    elif done and next_to_deliver >= total:
+                        break
+                    else:
+                        time.sleep(0.02)
+
+                self._finalize_playback_streaming()
+
+            delivery_thread = threading.Thread(target=delivery_loop, daemon=True)
+            delivery_thread.start()
+
+            # Re-dispatch accumulated chunks to parallel TTS threads
+            for idx in sorted(sentence_tts.keys()):
+                tts_text = sentence_tts[idx]
+                if tts_text.strip():
+                    t = threading.Thread(
+                        target=synthesize_chunk,
+                        args=(tts_text, idx),
+                        daemon=True,
+                    )
+                    t.start()
+                    tts_threads.append(t)
+                    with lock:
+                        total_chunks_dispatched += 1
+
+            for t in tts_threads:
+                t.join()
+            all_chunks_dispatched.set()
+            delivery_thread.join()
 
         # --- Deferred post-processor results (NANO-111 Session 606) ---
         # run_stream() now runs post-processors after the stream ends and
@@ -932,15 +936,19 @@ class OrchestratorCallbacks:
             # Classify emotion on full response for final event
             emotion, emotion_confidence = self._classify_emotion(response or "")
 
-            # Build per-sentence chunks list for sub-bubble display (text only)
+            # Build per-sentence chunks list for sub-bubble display (text only).
+            # Session TTS already emitted LLMChunkEvents during playback —
+            # don't duplicate with response_chunks or the frontend renders
+            # two bubbles.
             response_chunks = None
-            with lock:
-                if sentence_texts:
-                    response_chunks = []
-                    for idx in sorted(sentence_texts.keys()):
-                        response_chunks.append({
-                            "text": sentence_texts[idx],
-                        })
+            if not session_tts:
+                with lock:
+                    if sentence_texts:
+                        response_chunks = []
+                        for idx in sorted(sentence_texts.keys()):
+                            response_chunks.append({
+                                "text": sentence_texts[idx],
+                            })
 
             # Emit response event with full metadata + chunks
             print(f"[NANO-111] response_chunks={response_chunks}", flush=True)
@@ -1024,6 +1032,13 @@ class OrchestratorCallbacks:
         """
         # Store trigger for the upcoming pipeline.run() call
         self._pending_state_trigger = "barge_in"
+
+        # Send interrupt immediately for session-streaming providers (Qwen3).
+        # _session_tts_delivery is blocked on sock.recv() waiting for the next
+        # sentence — it can't check _pending_state_trigger until a sentence
+        # yields. Sending interrupt now unblocks it server-side.
+        if self._tts_provider is not None and hasattr(self._tts_provider, 'interrupt'):
+            self._tts_provider.interrupt()
 
         # Phase 2.5: Truncate to delivered sentences
         with self._delivery_lock:

@@ -59,6 +59,10 @@ class Qwen3TTSProvider(TTSProvider):
         self._initialized = True
         logger.info(f"Qwen3TTSProvider initialized: {host}:{port}")
 
+    @property
+    def instruct_template(self) -> str:
+        return self._instruct_template
+
     def get_properties(self) -> TTSProperties:
         return TTSProperties(
             sample_rate=self.SAMPLE_RATE,
@@ -71,8 +75,8 @@ class Qwen3TTSProvider(TTSProvider):
         if not self._initialized or self._client is None:
             raise RuntimeError("Qwen3TTSProvider not initialized. Call initialize() first.")
 
-        speaker = kwargs.get("speaker", voice or self._speaker)
-        temperature = kwargs.get("temperature", self._temperature)
+        speaker = kwargs.get("speaker") or self._speaker
+        temperature = kwargs.get("temperature") or self._temperature
         instruct = kwargs.get("instruct")
 
         audio = self._client.synthesize(
@@ -93,10 +97,17 @@ class Qwen3TTSProvider(TTSProvider):
         if not self._initialized or self._client is None:
             raise RuntimeError("Qwen3TTSProvider not initialized. Call initialize() first.")
 
-        speaker = kwargs.get("speaker", voice or self._speaker)
-        temperature = kwargs.get("temperature", self._temperature)
+        speaker = kwargs.get("speaker") or self._speaker
+        temperature = kwargs.get("temperature") or self._temperature
         instruct = kwargs.get("instruct")
         instruct_per_sentence = kwargs.get("instruct_per_sentence")
+
+        if instruct_per_sentence:
+            print(f"[Qwen3-TTS] Session request: speaker={speaker}, temp={temperature}, instruct_per_sentence={instruct_per_sentence}", flush=True)
+        elif instruct:
+            print(f"[Qwen3-TTS] Session request: speaker={speaker}, temp={temperature}, instruct={instruct}", flush=True)
+        else:
+            print(f"[Qwen3-TTS] Session request: speaker={speaker}, temp={temperature}, no instruct", flush=True)
 
         for resp in self._client.synthesize_session(
             text=text,
