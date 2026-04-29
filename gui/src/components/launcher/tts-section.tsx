@@ -31,30 +31,14 @@ function FieldRow({ label, children, error }: FieldRowProps) {
   );
 }
 
-function LocalTTSFields() {
+function KokoroTTSFields() {
   const { ttsLocal, updateTTSLocal, validationErrors } = useLauncherStore();
 
-  // Determine which environment fields to show
   const showEnvNameOrPath = ttsLocal.envType === "conda" || ttsLocal.envType === "venv";
   const showCustomActivation = ttsLocal.envType === "other";
 
   return (
-    <div className="space-y-4">
-      {/* Provider Selection */}
-      <FieldRow label="Provider">
-        <Select
-          value={ttsLocal.provider}
-          onValueChange={(v) => updateTTSLocal({ provider: v as TTSProvider })}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="kokoro">Kokoro</SelectItem>
-          </SelectContent>
-        </Select>
-      </FieldRow>
-
+    <>
       {/* Network Settings */}
       <div className="grid gap-4 md:grid-cols-3">
         <FieldRow label="Host">
@@ -155,7 +139,6 @@ function LocalTTSFields() {
           </Select>
         </FieldRow>
 
-        {/* Env Name or Path - shown for conda/venv */}
         {showEnvNameOrPath && (
           <FieldRow
             label={ttsLocal.envType === "conda" ? "Conda Environment Name" : "Venv Path"}
@@ -170,7 +153,6 @@ function LocalTTSFields() {
         )}
       </div>
 
-      {/* Custom Activation - shown for 'other' */}
       {showCustomActivation && (
         <FieldRow
           label="Custom Activation Command"
@@ -183,6 +165,104 @@ function LocalTTSFields() {
           />
         </FieldRow>
       )}
+    </>
+  );
+}
+
+function Qwen3TTSFields() {
+  const { ttsLocal, updateTTSLocal } = useLauncherStore();
+
+  return (
+    <>
+      {/* Network Settings */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <FieldRow label="Host">
+          <Input
+            value={ttsLocal.host}
+            onChange={(e) => updateTTSLocal({ host: e.target.value })}
+          />
+        </FieldRow>
+
+        <FieldRow label="Port">
+          <Input
+            type="number"
+            value={ttsLocal.port}
+            onChange={(e) => updateTTSLocal({ port: parseInt(e.target.value) || 5557 })}
+          />
+        </FieldRow>
+      </div>
+
+      {/* Speaker */}
+      <FieldRow label="Speaker">
+        <Input
+          placeholder="danny"
+          value={ttsLocal.speaker}
+          onChange={(e) => updateTTSLocal({ speaker: e.target.value })}
+        />
+        <p className="text-xs text-muted-foreground">
+          Speaker embedding name (matches JSON filename in the server&apos;s speakers directory).
+        </p>
+      </FieldRow>
+
+      {/* Synthesis Settings */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <FieldRow label="Temperature">
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            max="2"
+            value={ttsLocal.temperature}
+            onChange={(e) => updateTTSLocal({ temperature: parseFloat(e.target.value) || 0.6 })}
+          />
+          <p className="text-xs text-muted-foreground">
+            0.6 recommended. Lower values may cause over-generation.
+          </p>
+        </FieldRow>
+
+        <FieldRow label="Emit Every N Frames">
+          <Input
+            type="number"
+            min="1"
+            max="128"
+            value={ttsLocal.emitEveryFrames}
+            onChange={(e) => updateTTSLocal({ emitEveryFrames: parseInt(e.target.value) || 32 })}
+          />
+          <p className="text-xs text-muted-foreground">
+            Frames accumulated before yielding audio. 32 is production default.
+          </p>
+        </FieldRow>
+      </div>
+
+      <p className="text-xs text-muted-foreground rounded-md bg-muted/50 p-3">
+        Qwen3-TTS runs as an externally managed server. Start the server manually before launching SpindL.
+      </p>
+    </>
+  );
+}
+
+function LocalTTSFields() {
+  const { ttsLocal, updateTTSLocal } = useLauncherStore();
+
+  return (
+    <div className="space-y-4">
+      {/* Provider Selection */}
+      <FieldRow label="Provider">
+        <Select
+          value={ttsLocal.provider}
+          onValueChange={(v) => updateTTSLocal({ provider: v as TTSProvider })}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="kokoro">Kokoro</SelectItem>
+            <SelectItem value="qwen3">Qwen3-TTS</SelectItem>
+          </SelectContent>
+        </Select>
+      </FieldRow>
+
+      {ttsLocal.provider === "qwen3" ? <Qwen3TTSFields /> : <KokoroTTSFields />}
     </div>
   );
 }

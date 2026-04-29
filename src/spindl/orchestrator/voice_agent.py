@@ -1280,6 +1280,13 @@ class VoiceAgentOrchestrator:
         if self._playback:
             self._playback.stop()
 
+        # Shutdown TTS provider (NANO-054b: sends shutdown to externally managed servers)
+        if self._tts_provider:
+            try:
+                self._tts_provider.shutdown()
+            except Exception as e:
+                logger.warning("TTS provider shutdown error: %s", e)
+
         # Shutdown tools (NANO-024)
         if self._tool_registry:
             self._tool_registry.shutdown()

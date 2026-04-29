@@ -364,9 +364,14 @@ class OrchestratorCallbacks:
                         # completed response. Split into sentences, fire TTS threads,
                         # delivery thread feeds playback in order.
                         if self._on_response_ready_streaming is not None:
-                            audio_response, _ = self._parallel_tts_delivery(
-                                tts_response, tts_config, display_text=response,
-                            )
+                            if self._tts_provider.get_properties().supports_streaming:
+                                audio_response, _ = self._session_tts_delivery(
+                                    tts_response, tts_config, display_text=response,
+                                )
+                            else:
+                                audio_response, _ = self._parallel_tts_delivery(
+                                    tts_response, tts_config, display_text=response,
+                                )
                             if audio_response is not None:
                                 self._total_turns += 1
                         else:
@@ -586,6 +591,117 @@ class OrchestratorCallbacks:
         ordered = [audio_results[i] for i in range(total) if len(audio_results.get(i, [])) > 0]
         audio = np.concatenate(ordered) if ordered else None
         return audio, sentence_chunks
+
+    def _session_tts_delivery(
+        self,
+        tts_text: str,
+        tts_config: dict,
+        display_text: Optional[str] = None,
+    ) -> tuple[Optional[np.ndarray], Optional[list]]:
+        """
+        Session-based TTS delivery for streaming providers (NANO-054b).
+
+        The server owns the sentence loop — sends full text as one
+        synthesize_session request, server splits into sentences, runs
+        stateful decoding with decoder carry-over, streams back per-sentence
+        audio. Voice consistency is preserved across sentences.
+
+        Barge-in: checks _pending_state_trigger between sentence reads,
+        calls provider.interrupt(), breaks iterator.
+
+        Emotion-driven instruct: if instruct_template is configured,
+        classifies each sentence's emotion and formats per-sentence
+        instruct strings for the server.
+        """
+        import re
+        from ..llm.sentence_segmenter import merge_punctuation_fragments
+        from ..core.events import LLMChunkEvent
+
+        raw = display_text or tts_text
+        display_sentences = re.split(r'(?<=[.!?。！？])\s+', raw.strip())
+        display_sentences = [s.strip() for s in display_sentences if s.strip()]
+        display_sentences = merge_punctuation_fragments(display_sentences)
+
+        sentence_chunks = [{"text": ds} for ds in display_sentences]
+
+        # Build per-sentence instruct from emotion classifier + template
+        instruct_per_sentence = None
+        instruct_template = tts_config.get("instruct_template", "")
+        if instruct_template and "{emotion}" in instruct_template and self._emotion_classifier:
+            tts_sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
+            tts_sentences = [s.strip() for s in tts_sentences if s.strip()]
+            tts_sentences = merge_punctuation_fragments(tts_sentences)
+            instruct_per_sentence = []
+            for sent in tts_sentences:
+                emotion, _ = self._emotion_classifier.classify(sent)
+                if emotion:
+                    instruct_per_sentence.append(
+                        instruct_template.replace("{emotion}", emotion)
+                    )
+                else:
+                    instruct_per_sentence.append("")
+
+        with self._delivery_lock:
+            self._delivered_sentences = []
+
+        kwargs = {
+            "speaker": tts_config.get("speaker", tts_config.get("voice")),
+            "temperature": tts_config.get("temperature"),
+            "instruct": tts_config.get("instruct"),
+        }
+        if instruct_per_sentence:
+            kwargs["instruct_per_sentence"] = instruct_per_sentence
+
+        audio_parts = []
+        playback_started = False
+        sentence_idx = 0
+
+        try:
+            for result in self._tts_provider.synthesize_stream(
+                tts_text,
+                voice=tts_config.get("voice"),
+                **kwargs,
+            ):
+                audio = np.frombuffer(result.data, dtype=np.float32)
+                if len(audio) == 0:
+                    sentence_idx += 1
+                    continue
+
+                audio_parts.append(audio)
+
+                # Track delivery + emit sub-bubble chunk
+                if sentence_idx < len(display_sentences):
+                    with self._delivery_lock:
+                        self._delivered_sentences.append(display_sentences[sentence_idx])
+                if sentence_idx < len(sentence_chunks) and self._event_bus is not None:
+                    self._event_bus.emit(LLMChunkEvent(
+                        text=sentence_chunks[sentence_idx]["text"],
+                        is_final=result.is_final,
+                    ))
+
+                # Queue audio for playback
+                if not playback_started:
+                    self._on_response_ready_streaming(audio)
+                    playback_started = True
+                else:
+                    self._append_playback_audio(audio)
+
+                sentence_idx += 1
+
+                # Check barge-in between sentences
+                if self._pending_state_trigger == "barge_in":
+                    self._tts_provider.interrupt()
+                    break
+
+            if playback_started and self._pending_state_trigger != "barge_in":
+                self._finalize_playback_streaming()
+        except Exception as e:
+            logger.warning(f"[NANO-054b] Session TTS delivery error: {e}")
+            if playback_started:
+                self._finalize_playback_streaming()
+
+        full_audio = np.concatenate(audio_parts) if audio_parts else None
+        return full_audio, sentence_chunks
 
     def _emit_text_only_chunks(self, response: str) -> Optional[list]:
         """
@@ -1141,9 +1257,14 @@ class OrchestratorCallbacks:
 
                     # NANO-111: Parallel TTS delivery for text input path
                     if self._on_response_ready_streaming is not None:
-                        audio_response, _text_input_chunks = self._parallel_tts_delivery(
-                            tts_response, tts_config, display_text=response,
-                        )
+                        if self._tts_provider.get_properties().supports_streaming:
+                            audio_response, _text_input_chunks = self._session_tts_delivery(
+                                tts_response, tts_config, display_text=response,
+                            )
+                        else:
+                            audio_response, _text_input_chunks = self._parallel_tts_delivery(
+                                tts_response, tts_config, display_text=response,
+                            )
                         if audio_response is not None:
                             self._total_turns += 1
                     else:

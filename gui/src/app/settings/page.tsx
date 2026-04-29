@@ -9,6 +9,7 @@ import {
   EmotionClassifierSettings,
   TwitchCredentials,
   GameStateBridge,
+  Qwen3TTSSettings,
 } from "@/components/settings";
 
 export default function SettingsPage() {
@@ -24,6 +25,7 @@ export default function SettingsPage() {
       <VADSettings />
       <PipelineSettings />
       <ProviderDisplay />
+      <Qwen3TTSSettings />
       <AvatarSettings />
       <BaseAnimationsSettings />
       <EmotionClassifierSettings />

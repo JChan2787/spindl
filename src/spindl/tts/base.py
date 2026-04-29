@@ -197,6 +197,10 @@ class TTSProvider(ABC):
         """
         pass
 
+    def interrupt(self) -> None:
+        """Interrupt an active streaming session. No-op for non-streaming providers."""
+        pass
+
     @classmethod
     @abstractmethod
     def get_server_command(cls, config: dict) -> Optional[str]:
