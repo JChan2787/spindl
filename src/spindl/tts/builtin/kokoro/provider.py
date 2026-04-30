@@ -143,6 +143,11 @@ class KokoroTTSProvider(TTSProvider):
         language = kwargs.get("language", self._default_language)
 
         # Delegate to client
+        if self._voice_blend_enabled:
+            active = ", ".join(f"{k}={v:.2f}" for k, v in self._voice_blend_weights.items() if v > 0)
+            print(f"[TTS] Routing synthesis through blended voice ({active})", flush=True)
+        else:
+            print(f"[TTS] Routing synthesis through single voice '{resolved_voice}'", flush=True)
         audio_array = self._client.synthesize(
             text=text,
             voice=resolved_voice,

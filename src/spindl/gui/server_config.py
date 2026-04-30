@@ -380,14 +380,19 @@ def register_config_handlers(server: "GUIServer") -> None:
                 if "voice_blend" in data:
                     pc["voice_blend"] = data["voice_blend"]
 
-                print(
-                    f"[GUI] TTS config updated at runtime: "
-                    f"speaker={getattr(provider, '_speaker', '?')}, "
-                    f"temperature={getattr(provider, '_temperature', '?')}, "
-                    f"instruct_template={'set' if getattr(provider, '_instruct_template', '') else 'empty'}"
-                    f"{', blend=' + ('on' if getattr(provider, '_voice_blend_enabled', False) else 'off') if 'voice_blend' in data else ''}",
-                    flush=True,
-                )
+                if hasattr(provider, "_speaker"):
+                    log_detail = (
+                        f"speaker={getattr(provider, '_speaker', '?')}, "
+                        f"temperature={getattr(provider, '_temperature', '?')}, "
+                        f"instruct_template={'set' if getattr(provider, '_instruct_template', '') else 'empty'}"
+                    )
+                else:
+                    log_detail = (
+                        f"voice={getattr(provider, '_default_voice', '?')}, "
+                        f"lang={getattr(provider, '_default_language', '?')}, "
+                        f"blend={'on' if getattr(provider, '_voice_blend_enabled', False) else 'off'}"
+                    )
+                print(f"[GUI] TTS config updated at runtime: {log_detail}", flush=True)
 
                 persisted = False
                 if server._config_path:

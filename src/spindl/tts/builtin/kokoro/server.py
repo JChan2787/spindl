@@ -251,8 +251,10 @@ class KokoroTTSServer:
 
         try:
             if use_blend and self._blended_voice is not None:
+                print(f"[TTS] Synthesize via blended voice ({len(text)} chars)", flush=True)
                 audio = self.synthesize_with_blend(text, lang)
             else:
+                print(f"[TTS] Synthesize via single voice '{voice}' ({len(text)} chars)", flush=True)
                 audio = self.synthesize(text, voice, lang)
         except ValueError as e:
             return {"status": "error", "error": str(e)}
