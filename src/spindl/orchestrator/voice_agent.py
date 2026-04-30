@@ -546,6 +546,10 @@ class VoiceAgentOrchestrator:
         self._callbacks._on_response_ready_streaming = self._on_response_ready_streaming
         self._callbacks._append_playback_audio = self._append_playback_audio
         self._callbacks._finalize_playback_streaming = self._finalize_playback_streaming
+        self._callbacks._is_playback_active = lambda: self._playback.is_playing if self._playback else False
+        self._callbacks._suppress_playback_complete = self._suppress_playback_complete
+        self._callbacks._restore_playback_complete = self._restore_playback_complete
+        self._callbacks._on_session_playback_complete = self._on_playback_complete
 
         # NANO-112: Wire TTS-skipped callback for voice path state transition.
         # Can't use _on_playback_complete — that calls finish_system_speaking()
@@ -903,6 +907,18 @@ class VoiceAgentOrchestrator:
     def _finalize_playback_streaming(self) -> None:
         """Signal that no more audio chunks will arrive (NANO-111 Phase 2)."""
         self._playback.finalize_streaming()
+
+    def _suppress_playback_complete(self) -> None:
+        """Suppress on_complete callback during session TTS delivery."""
+        if self._playback is not None:
+            self._playback._saved_on_complete = self._playback.on_complete
+            self._playback.on_complete = None
+
+    def _restore_playback_complete(self) -> None:
+        """Restore on_complete callback without firing it."""
+        if self._playback is not None:
+            saved = getattr(self._playback, '_saved_on_complete', None)
+            self._playback.on_complete = saved
 
     def _on_playback_complete(self) -> None:
         """Called when TTS playback finishes naturally."""

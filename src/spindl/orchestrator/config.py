@@ -1244,6 +1244,15 @@ class OrchestratorConfig(BaseModel):
             data["tools"] = {}
         data["tools"]["enabled"] = self.tools_config.enabled
 
+        # --- TTS ---
+        if "tts" not in data:
+            data["tts"] = {}
+        tts = data["tts"]
+        tts["provider"] = self.tts_config.provider
+        if "providers" not in tts:
+            tts["providers"] = {}
+        tts["providers"][self.tts_config.provider] = dict(self.tts_config.provider_config)
+
         # --- VTubeStudio ---
         if "vtubestudio" in data:
             data["vtubestudio"]["enabled"] = self.vtubestudio_config.enabled

@@ -136,6 +136,11 @@ class OrchestratorCallbacks:
         self._on_response_ready_streaming: Optional[Callable[[np.ndarray], None]] = None
         self._append_playback_audio: Optional[Callable[[np.ndarray], None]] = None
         self._finalize_playback_streaming: Optional[Callable[[], None]] = None
+        self._is_playback_active: Optional[Callable[[], bool]] = None
+        # NANO-054b: Session TTS playback control
+        self._suppress_playback_complete: Optional[Callable[[], None]] = None
+        self._restore_playback_complete: Optional[Callable[[], None]] = None
+        self._on_session_playback_complete: Optional[Callable[[], None]] = None
         # NANO-112: Called when voice path completes without TTS (no playback to trigger state transition)
         self._on_tts_skipped: Optional[Callable[[], None]] = None
         self._event_bus = event_bus
@@ -600,23 +605,24 @@ class OrchestratorCallbacks:
         suppress_final: bool = False,
     ) -> tuple[Optional[np.ndarray], Optional[list]]:
         """
-        Session-based TTS delivery for streaming providers (NANO-054b).
+        Serial session TTS delivery for streaming providers (NANO-054b).
 
-        The server owns the sentence loop — sends full text as one
-        synthesize_session request, server splits into sentences, runs
-        stateful decoding with decoder carry-over, streams back per-sentence
-        audio. Voice consistency is preserved across sentences.
+        Orchestrator owns the sentence loop. Server provides decoder
+        carry-over across per-sentence synthesize_next calls for voice
+        consistency. Barge-in is a simple loop break — no interrupt
+        signaling, no threading, no socket blocking.
 
-        Barge-in: checks _pending_state_trigger between sentence reads,
-        calls provider.interrupt(), breaks iterator.
-
-        Emotion-driven instruct: if instruct_template is configured,
-        classifies each sentence's emotion and formats per-sentence
-        instruct strings for the server.
+        Flow: split sentences → begin_session → for each sentence:
+        synthesize_next → queue audio → check barge-in → next or break.
         """
         import re
         from ..llm.sentence_segmenter import merge_punctuation_fragments
         from ..core.events import LLMChunkEvent
+
+        # Split TTS text into sentences (orchestrator-side split)
+        tts_sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
+        tts_sentences = [s.strip() for s in tts_sentences if s.strip()]
+        tts_sentences = merge_punctuation_fragments(tts_sentences)
 
         raw = display_text or tts_text
         display_sentences = re.split(r'(?<=[.!?。！？])\s+', raw.strip())
@@ -625,14 +631,10 @@ class OrchestratorCallbacks:
 
         sentence_chunks = [{"text": ds} for ds in display_sentences]
 
-        # Build per-sentence instruct from emotion classifier + template.
-        # Fall back to provider's configured template when persona doesn't have one.
-        instruct_per_sentence = None
+        # Build per-sentence instruct from emotion classifier + template
+        instruct_per_sentence: list[str] | None = None
         instruct_template = tts_config.get("instruct_template") or getattr(self._tts_provider, "instruct_template", "")
         if instruct_template and "{emotion}" in instruct_template and self._emotion_classifier:
-            tts_sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
-            tts_sentences = [s.strip() for s in tts_sentences if s.strip()]
-            tts_sentences = merge_punctuation_fragments(tts_sentences)
             instruct_per_sentence = []
             for sent in tts_sentences:
                 emotion, _ = self._emotion_classifier.classify(sent)
@@ -646,62 +648,92 @@ class OrchestratorCallbacks:
         with self._delivery_lock:
             self._delivered_sentences = []
 
-        kwargs = {
-            "speaker": tts_config.get("speaker"),
-            "temperature": tts_config.get("temperature"),
-            "instruct": tts_config.get("instruct"),
-        }
-        if instruct_per_sentence:
-            kwargs["instruct_per_sentence"] = instruct_per_sentence
+        speaker = tts_config.get("speaker")
+        temperature = tts_config.get("temperature")
+        base_instruct = tts_config.get("instruct")
 
         audio_parts = []
         playback_started = False
-        sentence_idx = 0
+        total = len(tts_sentences)
 
         try:
-            for result in self._tts_provider.synthesize_stream(
-                tts_text,
-                voice=tts_config.get("voice"),
-                **kwargs,
-            ):
+            # Suppress on_complete so the monitor thread doesn't transition
+            # the state machine while we're still blocking on playback.
+            if self._suppress_playback_complete is not None:
+                self._suppress_playback_complete()
+
+            self._tts_provider.begin_session()
+
+            for i, sentence in enumerate(tts_sentences):
+                if self._pending_state_trigger == "barge_in":
+                    break
+
+                sent_instruct = base_instruct
+                if instruct_per_sentence and i < len(instruct_per_sentence):
+                    sent_instruct = instruct_per_sentence[i]
+
+                is_last = (i == total - 1)
+                result = self._tts_provider.synthesize_next(
+                    text=sentence,
+                    speaker=speaker,
+                    temperature=temperature,
+                    instruct=sent_instruct,
+                    is_last=is_last,
+                )
+
                 audio = np.frombuffer(result.data, dtype=np.float32)
                 if len(audio) == 0:
-                    sentence_idx += 1
                     continue
 
                 audio_parts.append(audio)
 
-                # Track delivery + emit sub-bubble chunk
-                if sentence_idx < len(display_sentences):
-                    with self._delivery_lock:
-                        self._delivered_sentences.append(display_sentences[sentence_idx])
-                if sentence_idx < len(sentence_chunks) and self._event_bus is not None:
-                    chunk_is_final = result.is_final and not suppress_final
-                    self._event_bus.emit(LLMChunkEvent(
-                        text=sentence_chunks[sentence_idx]["text"],
-                        is_final=chunk_is_final,
-                    ))
+                # Build callback that emits sub-bubble + tracks delivery
+                # when playback actually reaches this sentence
+                def _make_on_start(idx: int, is_final_sent: bool):
+                    def _on_start():
+                        if idx < len(display_sentences):
+                            with self._delivery_lock:
+                                self._delivered_sentences.append(display_sentences[idx])
+                        if idx < len(sentence_chunks) and self._event_bus is not None:
+                            chunk_final = is_final_sent and not suppress_final
+                            self._event_bus.emit(LLMChunkEvent(
+                                text=sentence_chunks[idx]["text"],
+                                is_final=chunk_final,
+                            ))
+                    return _on_start
 
-                # Queue audio for playback
+                on_start = _make_on_start(i, is_last)
+
+                # Queue audio via streaming playback (one continuous stream)
                 if not playback_started:
-                    self._on_response_ready_streaming(audio)
+                    self._on_response_ready_streaming(audio, on_chunk_start=on_start)
                     playback_started = True
                 else:
-                    self._append_playback_audio(audio)
-
-                sentence_idx += 1
-
-                # Check barge-in between sentences
-                if self._pending_state_trigger == "barge_in":
-                    self._tts_provider.interrupt()
-                    break
+                    self._append_playback_audio(audio, on_chunk_start=on_start)
 
             if playback_started and self._pending_state_trigger != "barge_in":
                 self._finalize_playback_streaming()
+                # Block until all audio finishes playing
+                if self._is_playback_active is not None:
+                    logger.info("[NANO-054b] Waiting for playback to finish...")
+                    wait_start = time.time()
+                    while self._is_playback_active():
+                        if self._pending_state_trigger == "barge_in":
+                            logger.info("[NANO-054b] Barge-in during playback wait")
+                            break
+                        time.sleep(0.05)
+                    logger.info("[NANO-054b] Playback wait done (%.1fs)", time.time() - wait_start)
         except Exception as e:
             logger.warning(f"[NANO-054b] Session TTS delivery error: {e}")
             if playback_started:
                 self._finalize_playback_streaming()
+        finally:
+            if self._restore_playback_complete is not None:
+                self._restore_playback_complete()
+            # Fire state transition only on normal completion (not barge-in)
+            if playback_started and self._pending_state_trigger != "barge_in":
+                if self._on_session_playback_complete is not None:
+                    self._on_session_playback_complete()
 
         full_audio = np.concatenate(audio_parts) if audio_parts else None
         return full_audio, sentence_chunks
@@ -811,10 +843,9 @@ class OrchestratorCallbacks:
                     sentence_tts[chunk.index] = chunk.tts_text
 
         if session_tts:
-            # Session-streaming provider (Qwen3): send full text, server
-            # splits into sentences with decoder carry-over for voice
-            # consistency. Per-sentence playback + barge-in still work
-            # through _session_tts_delivery's iterator.
+            # Session provider (Qwen3): serial per-sentence synthesis with
+            # decoder carry-over. Orchestrator owns the loop, barge-in is
+            # a simple flag check between sentences.
             tts_text_joined = " ".join(t for t in full_tts_text if t.strip())
             display_text_joined = " ".join(t for t in full_display_text if t.strip())
             session_audio, _ = self._session_tts_delivery(
@@ -1032,13 +1063,6 @@ class OrchestratorCallbacks:
         """
         # Store trigger for the upcoming pipeline.run() call
         self._pending_state_trigger = "barge_in"
-
-        # Send interrupt immediately for session-streaming providers (Qwen3).
-        # _session_tts_delivery is blocked on sock.recv() waiting for the next
-        # sentence — it can't check _pending_state_trigger until a sentence
-        # yields. Sending interrupt now unblocks it server-side.
-        if self._tts_provider is not None and hasattr(self._tts_provider, 'interrupt'):
-            self._tts_provider.interrupt()
 
         # Phase 2.5: Truncate to delivered sentences
         with self._delivery_lock:

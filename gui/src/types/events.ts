@@ -1458,6 +1458,8 @@ export interface ClientToServerEvents {
   set_vad_config: (payload: SetVADConfigPayload) => void;
   set_pipeline_config: (payload: SetPipelineConfigPayload) => void;
   set_memory_config: (payload: SetMemoryConfigPayload) => void;
+  // NANO-054b: Qwen3 TTS runtime config
+  set_tts_config: (payload: Record<string, unknown>) => void;
   // NANO-102: Memory curation config
   set_curation_config: (payload: Record<string, unknown>) => void;
   // NANO-045d: Prompt injection wrappers
