@@ -167,6 +167,7 @@ class TestKokoroTTSProviderSynthesize:
                 text="hello world",
                 voice="af_bella",
                 lang="a",
+                use_blend=False,
             )
 
     def test_returns_audio_result(self) -> None:
@@ -203,6 +204,7 @@ class TestKokoroTTSProviderSynthesize:
                     text="hello",
                     voice="af_nicole",
                     lang="a",
+                    use_blend=False,
                 )
 
     def test_uses_provided_language(self) -> None:
@@ -219,6 +221,7 @@ class TestKokoroTTSProviderSynthesize:
                 text="cheerio",
                 voice="af_bella",
                 lang="b",
+                use_blend=False,
             )
 
 
@@ -664,6 +667,7 @@ class TestKokoroTTSProviderVoiceResolution:
                     text="hello",
                     voice="af_bella",  # Default fallback
                     lang="a",
+                    use_blend=False,
                 )
 
     def test_uses_default_when_voice_is_none(self) -> None:
@@ -684,6 +688,7 @@ class TestKokoroTTSProviderVoiceResolution:
                 text="hello",
                 voice="am_michael",  # Configured default
                 lang="a",
+                use_blend=False,
             )
 
 

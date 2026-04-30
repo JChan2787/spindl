@@ -351,6 +351,20 @@ def register_config_handlers(server: "GUIServer") -> None:
                     provider._seed = int(data["seed"])
                     updated = True
 
+            if "voice_blend" in data and provider is not None:
+                blend_data = data["voice_blend"]
+                if hasattr(provider, "set_voice_blend") and isinstance(blend_data, dict):
+                    enabled = blend_data.get("enabled", False)
+                    weights = blend_data.get("weights", {})
+                    missing = provider.set_voice_blend(enabled=enabled, weights=weights)
+                    updated = True
+                    # Send missing voices back to frontend
+                    await sio.emit(
+                        "voice_blend_status",
+                        {"missing": missing, "enabled": enabled},
+                        to=sid,
+                    )
+
             if updated:
                 # Sync provider_config dict so save_to_yaml persists the changes
                 config = server._orchestrator._config
@@ -363,12 +377,15 @@ def register_config_handlers(server: "GUIServer") -> None:
                     pc["instruct_template"] = str(data["instruct_template"])
                 if "seed" in data:
                     pc["seed"] = int(data["seed"])
+                if "voice_blend" in data:
+                    pc["voice_blend"] = data["voice_blend"]
 
                 print(
                     f"[GUI] TTS config updated at runtime: "
                     f"speaker={getattr(provider, '_speaker', '?')}, "
                     f"temperature={getattr(provider, '_temperature', '?')}, "
-                    f"instruct_template={'set' if getattr(provider, '_instruct_template', '') else 'empty'}",
+                    f"instruct_template={'set' if getattr(provider, '_instruct_template', '') else 'empty'}"
+                    f"{', blend=' + ('on' if getattr(provider, '_voice_blend_enabled', False) else 'off') if 'voice_blend' in data else ''}",
                     flush=True,
                 )
 
@@ -386,6 +403,25 @@ def register_config_handlers(server: "GUIServer") -> None:
                     {"persisted": persisted},
                     to=sid,
                 )
+
+    @sio.event
+    async def get_voice_list(sid: str, data: dict) -> None:
+        """Client requests list of available TTS voices."""
+        if server._orchestrator:
+            callbacks = getattr(server._orchestrator, "_callbacks", None)
+            provider = getattr(callbacks, "_tts_provider", None) if callbacks else None
+            if provider and hasattr(provider, "list_voices"):
+                try:
+                    voices = provider.list_voices()
+                    await sio.emit("voice_list", {"voices": voices}, to=sid)
+                except Exception as e:
+                    await sio.emit(
+                        "voice_list",
+                        {"voices": [], "error": str(e)},
+                        to=sid,
+                    )
+            else:
+                await sio.emit("voice_list", {"voices": []}, to=sid)
 
     @sio.event
     async def set_pipeline_config(sid: str, data: dict) -> None:
