@@ -34,6 +34,7 @@ class Qwen3TTSProvider(TTSProvider):
         self._temperature: float = 0.6
         self._emit_every_frames: int = 32
         self._instruct_template: str = ""
+        self._seed: int = 0
         self._initialized: bool = False
 
     def initialize(self, config: dict) -> None:
@@ -47,6 +48,7 @@ class Qwen3TTSProvider(TTSProvider):
         self._temperature = config.get("temperature", 0.6)
         self._emit_every_frames = config.get("emit_every_frames", 32)
         self._instruct_template = config.get("instruct_template", "")
+        self._seed = config.get("seed", 0)
 
         self._client = Qwen3TTSClient(host=host, port=port, timeout=timeout)
 

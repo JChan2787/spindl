@@ -347,6 +347,9 @@ def register_config_handlers(server: "GUIServer") -> None:
                 if "instruct_template" in data and hasattr(provider, "_instruct_template"):
                     provider._instruct_template = str(data["instruct_template"])
                     updated = True
+                if "seed" in data and hasattr(provider, "_seed"):
+                    provider._seed = int(data["seed"])
+                    updated = True
 
             if updated:
                 # Sync provider_config dict so save_to_yaml persists the changes
@@ -358,6 +361,8 @@ def register_config_handlers(server: "GUIServer") -> None:
                     pc["temperature"] = float(data["temperature"])
                 if "instruct_template" in data:
                     pc["instruct_template"] = str(data["instruct_template"])
+                if "seed" in data:
+                    pc["seed"] = int(data["seed"])
 
                 print(
                     f"[GUI] TTS config updated at runtime: "

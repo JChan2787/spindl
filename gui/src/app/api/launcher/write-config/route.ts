@@ -470,6 +470,7 @@ export async function POST(request: Request) {
             temperature: body.ttsLocal.temperature,
             emit_every_frames: body.ttsLocal.emitEveryFrames,
             instruct_template: body.ttsLocal.instructTemplate || "",
+            seed: body.ttsLocal.seed ?? 0,
           }
         : {
             host: body.ttsLocal.host,
@@ -956,6 +957,7 @@ export async function GET() {
         temperature: qwen3Config.temperature ?? 0.6,
         emitEveryFrames: qwen3Config.emit_every_frames ?? 32,
         instructTemplate: qwen3Config.instruct_template || "",
+        seed: qwen3Config.seed ?? 0,
       },
 
       // Embedding Server (NANO-043 Phase 5)

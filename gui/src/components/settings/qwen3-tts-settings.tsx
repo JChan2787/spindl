@@ -30,6 +30,9 @@ export function Qwen3TTSSettings() {
   const [localInstructTemplate, setLocalInstructTemplate] = useState(ttsLocal.instructTemplate);
   const instructTemplateSyncedRef = useRef(ttsLocal.instructTemplate);
 
+  const [localSeed, setLocalSeed] = useState(ttsLocal.seed);
+  const seedSyncedRef = useRef(ttsLocal.seed);
+
   // Sync local state when backend/store config changes
   useEffect(() => {
     if (ttsLocal.speaker !== speakerSyncedRef.current) {
@@ -44,7 +47,11 @@ export function Qwen3TTSSettings() {
       setLocalInstructTemplate(ttsLocal.instructTemplate);
       instructTemplateSyncedRef.current = ttsLocal.instructTemplate;
     }
-  }, [ttsLocal.speaker, ttsLocal.temperature, ttsLocal.instructTemplate]);
+    if (ttsLocal.seed !== seedSyncedRef.current) {
+      setLocalSeed(ttsLocal.seed);
+      seedSyncedRef.current = ttsLocal.seed;
+    }
+  }, [ttsLocal.speaker, ttsLocal.temperature, ttsLocal.instructTemplate, ttsLocal.seed]);
 
   const pushToBackend = useCallback(
     (changes: Record<string, unknown>) => {
@@ -79,6 +86,14 @@ export function Qwen3TTSSettings() {
       instructTemplateSyncedRef.current = localInstructTemplate;
     }
   }, [localInstructTemplate, updateTTSLocal, pushToBackend]);
+
+  const handleSeedBlur = useCallback(() => {
+    if (localSeed !== seedSyncedRef.current) {
+      updateTTSLocal({ seed: localSeed });
+      pushToBackend({ seed: localSeed });
+      seedSyncedRef.current = localSeed;
+    }
+  }, [localSeed, updateTTSLocal, pushToBackend]);
 
   if (!isQwen3) {
     return null;
@@ -127,6 +142,23 @@ export function Qwen3TTSSettings() {
             onChange={(e) => setLocalTemperature(parseFloat(e.target.value) || 0.6)}
             onBlur={handleTemperatureBlur}
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="qwen3-seed">Seed</Label>
+          <Input
+            id="qwen3-seed"
+            type="number"
+            step={1}
+            min={0}
+            value={localSeed}
+            onChange={(e) => setLocalSeed(parseInt(e.target.value) || 0)}
+            onBlur={handleSeedBlur}
+            placeholder="0"
+          />
+          <p className="text-xs text-muted-foreground">
+            Fixed seed for voice consistency. 0 = auto (derived from response text).
+          </p>
         </div>
 
         <div className="space-y-2">

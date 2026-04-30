@@ -125,6 +125,7 @@ export const TTSLocalConfigSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.6),
   emitEveryFrames: z.number().int().min(1).max(128).default(32),
   instructTemplate: z.string().default(""),
+  seed: z.number().int().min(0).default(0),
 });
 
 export const EmbeddingConfigSchema = z.object({

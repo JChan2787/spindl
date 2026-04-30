@@ -646,7 +646,8 @@ class OrchestratorCallbacks:
         speaker = tts_config.get("speaker")
         temperature = tts_config.get("temperature")
         base_instruct = tts_config.get("instruct")
-        seed = hash(tts_text) & 0x7FFFFFFF
+        provider_seed = getattr(self._tts_provider, "_seed", 0)
+        seed = provider_seed if provider_seed else hash(tts_text) & 0x7FFFFFFF
 
         audio_parts = []
         playback_started = False
@@ -1290,6 +1291,7 @@ class OrchestratorCallbacks:
                         if self._tts_provider.get_properties().supports_streaming:
                             audio_response, _text_input_chunks = self._session_tts_delivery(
                                 tts_response, tts_config, display_text=response,
+                                suppress_final=True,
                             )
                         else:
                             audio_response, _text_input_chunks = self._parallel_tts_delivery(
