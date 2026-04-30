@@ -254,7 +254,7 @@ class KokoroTTSProvider(TTSProvider):
 
         # Language validation (optional but must be valid if provided)
         language = config.get("language")
-        if language is not None and language not in ("a", "b"):
+        if language and language not in ("a", "b"):
             errors.append(f"language must be 'a' or 'b', got '{language}'")
 
         # Timeout validation (optional but must be positive if provided)

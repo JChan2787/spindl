@@ -809,7 +809,9 @@ export async function GET() {
     const vlmCloudConfig = vlmSection?.providers?.openai || {};
 
     const ttsProvider = raw?.tts?.provider;
-    const ttsConfig = raw?.tts?.providers?.[ttsProvider] || {};
+    const ttsProviders = raw?.tts?.providers || {};
+    const kokoroConfig = ttsProviders.kokoro || {};
+    const qwen3Config = ttsProviders.qwen3 || {};
 
     // Parse launcher.services for environment info
     const sttLauncher = raw?.launcher?.services?.stt || {};
@@ -940,20 +942,20 @@ export async function GET() {
       ttsProviderType: "local" as const, // Cloud not implemented yet
       ttsLocal: {
         provider: ttsProvider || "kokoro",
-        host: ttsConfig.host || "127.0.0.1",
-        port: ttsConfig.port || (ttsProvider === "qwen3" ? 5557 : 5556),
-        voice: ttsConfig.voice || "",
-        language: ttsConfig.language || "",
-        modelsDirectory: ttsConfig.models_dir || "./tts/models",
-        device: ttsConfig.device || "cuda",
-        timeout: ttsConfig.timeout || 30,
-        envType: ttsConfig.conda_env ? "conda" : "system",
-        envNameOrPath: ttsConfig.conda_env || "",
+        host: (ttsProvider === "qwen3" ? qwen3Config : kokoroConfig).host || "127.0.0.1",
+        port: (ttsProvider === "qwen3" ? qwen3Config : kokoroConfig).port || (ttsProvider === "qwen3" ? 5557 : 5556),
+        voice: kokoroConfig.voice || "af_bella",
+        language: kokoroConfig.language || "a",
+        modelsDirectory: kokoroConfig.models_dir || "./tts/models",
+        device: kokoroConfig.device || "cuda",
+        timeout: kokoroConfig.timeout || 30,
+        envType: kokoroConfig.conda_env ? "conda" : "system",
+        envNameOrPath: kokoroConfig.conda_env || "",
         customActivation: "",
-        speaker: ttsConfig.speaker || "",
-        temperature: ttsConfig.temperature ?? 0.6,
-        emitEveryFrames: ttsConfig.emit_every_frames ?? 32,
-        instructTemplate: ttsConfig.instruct_template || "",
+        speaker: qwen3Config.speaker || "danny",
+        temperature: qwen3Config.temperature ?? 0.6,
+        emitEveryFrames: qwen3Config.emit_every_frames ?? 32,
+        instructTemplate: qwen3Config.instruct_template || "",
       },
 
       // Embedding Server (NANO-043 Phase 5)
