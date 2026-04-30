@@ -126,6 +126,11 @@ export const TTSLocalConfigSchema = z.object({
   emitEveryFrames: z.number().int().min(1).max(128).default(32),
   instructTemplate: z.string().default(""),
   seed: z.number().int().min(0).default(0),
+  voiceBlend: z.object({
+    name: z.string().default(""),
+    enabled: z.boolean().default(false),
+    weights: z.record(z.string(), z.number().min(0).max(1)).default({}),
+  }).nullable().default(null),
 });
 
 export const EmbeddingConfigSchema = z.object({

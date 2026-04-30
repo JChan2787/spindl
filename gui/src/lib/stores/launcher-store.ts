@@ -130,6 +130,13 @@ export interface EmbeddingConfig {
   topK: number;
 }
 
+// Kokoro voice blend preset
+interface VoiceBlendPreset {
+  name: string;
+  enabled: boolean;
+  weights: Record<string, number>;
+}
+
 // TTS Local Configuration
 interface TTSLocalConfig {
   provider: TTSProvider;
@@ -149,6 +156,8 @@ interface TTSLocalConfig {
   emitEveryFrames: number;
   instructTemplate: string;
   seed: number;
+  // Kokoro voice blend (NANO-118)
+  voiceBlend: VoiceBlendPreset | null;
 }
 
 // NANO-027 Phase 3: Launch Progress State
@@ -394,6 +403,7 @@ const DEFAULT_TTS_LOCAL: TTSLocalConfig = {
   emitEveryFrames: 32,
   instructTemplate: "",
   seed: 0,
+  voiceBlend: null,
 };
 
 // NANO-043 Phase 5: Default embedding config

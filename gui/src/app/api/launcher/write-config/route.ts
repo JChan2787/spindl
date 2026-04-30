@@ -483,6 +483,13 @@ export async function POST(request: Request) {
             ...(body.ttsLocal.envType === "conda" && body.ttsLocal.envNameOrPath
               ? { conda_env: body.ttsLocal.envNameOrPath }
               : {}),
+            ...(body.ttsLocal.voiceBlend ? {
+              voice_blend: {
+                name: body.ttsLocal.voiceBlend.name,
+                enabled: body.ttsLocal.voiceBlend.enabled,
+                weights: body.ttsLocal.voiceBlend.weights,
+              },
+            } : {}),
           };
 
       existingConfig.tts = {
@@ -958,6 +965,11 @@ export async function GET() {
         emitEveryFrames: qwen3Config.emit_every_frames ?? 32,
         instructTemplate: qwen3Config.instruct_template || "",
         seed: qwen3Config.seed ?? 0,
+        voiceBlend: kokoroConfig.voice_blend ? {
+          name: kokoroConfig.voice_blend.name || "",
+          enabled: kokoroConfig.voice_blend.enabled ?? false,
+          weights: kokoroConfig.voice_blend.weights || {},
+        } : null,
       },
 
       // Embedding Server (NANO-043 Phase 5)

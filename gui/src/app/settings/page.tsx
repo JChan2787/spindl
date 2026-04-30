@@ -11,6 +11,7 @@ import {
   TwitchCredentials,
   GameStateBridge,
   Qwen3TTSSettings,
+  KokoroVoiceBlend,
 } from "@/components/settings";
 import { useLauncherStore } from "@/lib/stores/launcher-store";
 import type { HydrateConfig } from "@/lib/stores/launcher-store";
@@ -48,6 +49,7 @@ export default function SettingsPage() {
       <PipelineSettings />
       <ProviderDisplay />
       <Qwen3TTSSettings />
+      <KokoroVoiceBlend />
       <AvatarSettings />
       <BaseAnimationsSettings />
       <EmotionClassifierSettings />

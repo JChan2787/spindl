@@ -1440,6 +1440,9 @@ export interface ServerToClientEvents {
   audio_level: (event: AudioLevelEvent) => void;
   // NANO-073b: Mic input level for voice overlay
   mic_level: (event: MicLevelEvent) => void;
+  // NANO-118: Voice list + blend status
+  voice_list: (event: { voices: string[]; error?: string }) => void;
+  voice_blend_status: (event: { missing: string[]; enabled: boolean }) => void;
   // NANO-111: Streaming LLM sentence chunks
   llm_chunk: (event: { text: string; is_final: boolean; emotion?: string; emotion_confidence?: number }) => void;
   // NANO-111: Token-level LLM text for real-time display
@@ -1460,6 +1463,8 @@ export interface ClientToServerEvents {
   set_memory_config: (payload: SetMemoryConfigPayload) => void;
   // NANO-054b: Qwen3 TTS runtime config
   set_tts_config: (payload: Record<string, unknown>) => void;
+  // NANO-118: Request voice list from TTS provider
+  get_voice_list: (payload: Record<string, never>) => void;
   // NANO-102: Memory curation config
   set_curation_config: (payload: Record<string, unknown>) => void;
   // NANO-045d: Prompt injection wrappers

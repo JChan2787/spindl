@@ -7,3 +7,4 @@ export { TwitchCredentials } from "./twitch-credentials";
 export { GameStateBridge } from "./game-state-bridge";
 export { BaseAnimationsSettings } from "./base-animations-settings";
 export { Qwen3TTSSettings } from "./qwen3-tts-settings";
+export { KokoroVoiceBlend } from "./kokoro-voice-blend";
