@@ -103,13 +103,17 @@ export function KokoroVoiceBlend() {
     s.on("voice_list", handleVoiceList);
     s.on("voice_blend_status", handleBlendStatus);
 
+    const requestVoiceList = () => s.emit("get_voice_list", {});
+
     if (socket.connected) {
-      s.emit("get_voice_list", {});
+      requestVoiceList();
     }
+    s.on("connect", requestVoiceList);
 
     return () => {
       s.off("voice_list", handleVoiceList);
       s.off("voice_blend_status", handleBlendStatus);
+      s.off("connect", requestVoiceList);
     };
   }, [isKokoro, socket]);
 
@@ -176,13 +180,18 @@ export function KokoroVoiceBlend() {
     .filter(([, w]) => w > 0)
     .sort(([, a], [, b]) => b - a);
 
+  // Show full voice list when services are running, fall back to saved weight keys when not
+  const displayVoices = voices.length > 0
+    ? voices
+    : Object.keys(localWeights).filter((k) => localWeights[k] > 0).sort();
+
   return (
     <CollapsibleCard
       id="kokoro-voice-blend"
       title="Kokoro Voice Blend"
       icon={<Volume2 className="h-4 w-4" />}
     >
-      <div className="space-y-4">
+      <div className="space-y-4 max-w-full">
         <div className="flex items-center justify-between">
           <Label htmlFor="blend-toggle" className="text-sm">
             Use Blend
@@ -222,13 +231,13 @@ export function KokoroVoiceBlend() {
           </div>
         )}
 
-        {voices.length > 0 ? (
-          <div className={!blendEnabled ? "opacity-50 pointer-events-none" : ""}>
+        {displayVoices.length > 0 ? (
+          <div className={`w-full overflow-hidden ${!blendEnabled ? "opacity-50 pointer-events-none" : ""}`}>
             <div
-              className="overflow-x-auto flex gap-1.5 pb-2 pt-1"
+              className="overflow-x-auto flex gap-1.5 pb-2 pt-1 w-0 min-w-full"
               style={{ scrollbarWidth: "thin" }}
             >
-              {voices.map((voiceId) => (
+              {displayVoices.map((voiceId) => (
                 <VoiceSlider
                   key={voiceId}
                   voiceId={voiceId}
