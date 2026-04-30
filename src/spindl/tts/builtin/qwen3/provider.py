@@ -78,12 +78,14 @@ class Qwen3TTSProvider(TTSProvider):
         speaker = kwargs.get("speaker") or self._speaker
         temperature = kwargs.get("temperature") or self._temperature
         instruct = kwargs.get("instruct")
+        seed = kwargs.get("seed")
 
         audio = self._client.synthesize(
             text=text,
             speaker=speaker,
             temperature=temperature,
             instruct=instruct,
+            seed=seed,
         )
 
         return AudioResult(
@@ -91,55 +93,6 @@ class Qwen3TTSProvider(TTSProvider):
             sample_rate=self.SAMPLE_RATE,
             format=self.AUDIO_FORMAT,
             is_final=True,
-        )
-
-    def begin_session(self) -> None:
-        if not self._initialized or self._client is None:
-            raise RuntimeError("Qwen3TTSProvider not initialized. Call initialize() first.")
-        resp = self._client.begin_session()
-        if resp.get("status") != "success":
-            raise RuntimeError(f"begin_session failed: {resp}")
-
-    def synthesize_next(
-        self,
-        text: str,
-        speaker: Optional[str] = None,
-        temperature: Optional[float] = None,
-        instruct: Optional[str] = None,
-        is_last: bool = False,
-    ) -> AudioResult:
-        if not self._initialized or self._client is None:
-            raise RuntimeError("Qwen3TTSProvider not initialized. Call initialize() first.")
-
-        spk = speaker or self._speaker
-        temp = temperature or self._temperature
-
-        resp = self._client.synthesize_next(
-            text=text,
-            speaker=spk,
-            temperature=temp,
-            instruct=instruct,
-            is_last=is_last,
-        )
-
-        if resp.get("status") == "error":
-            raise RuntimeError(f"synthesize_next error: {resp.get('message')}")
-
-        audio_hex = resp.get("audio", "")
-        if not audio_hex:
-            return AudioResult(
-                data=np.array([], dtype=np.float32).tobytes(),
-                sample_rate=self.SAMPLE_RATE,
-                format=self.AUDIO_FORMAT,
-                is_final=is_last,
-            )
-
-        audio = np.frombuffer(bytes.fromhex(audio_hex), dtype=np.float32)
-        return AudioResult(
-            data=audio.tobytes(),
-            sample_rate=self.SAMPLE_RATE,
-            format=self.AUDIO_FORMAT,
-            is_final=is_last,
         )
 
     def synthesize_stream(self, text: str, voice: Optional[str] = None, **kwargs) -> Iterator[AudioResult]:

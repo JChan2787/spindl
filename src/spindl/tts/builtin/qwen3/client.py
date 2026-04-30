@@ -98,6 +98,7 @@ class Qwen3TTSClient:
         speaker: str = "ryan",
         temperature: float = 0.6,
         instruct: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> np.ndarray:
         request: dict = {
             "action": "synthesize",
@@ -107,6 +108,8 @@ class Qwen3TTSClient:
         }
         if instruct:
             request["instruct"] = instruct
+        if seed is not None:
+            request["seed"] = seed
 
         resp = self._send_recv(request)
 
@@ -118,28 +121,6 @@ class Qwen3TTSClient:
             return np.array([], dtype=np.float32)
 
         return np.frombuffer(bytes.fromhex(audio_hex), dtype=np.float32)
-
-    def begin_session(self) -> dict:
-        return self._send_recv({"action": "begin_session"})
-
-    def synthesize_next(
-        self,
-        text: str,
-        speaker: str = "ryan",
-        temperature: float = 0.6,
-        instruct: Optional[str] = None,
-        is_last: bool = False,
-    ) -> dict:
-        request: dict = {
-            "action": "synthesize_next",
-            "text": text,
-            "speaker": speaker,
-            "temperature": temperature,
-            "is_last": is_last,
-        }
-        if instruct:
-            request["instruct"] = instruct
-        return self._send_recv(request)
 
     def synthesize_session(
         self,

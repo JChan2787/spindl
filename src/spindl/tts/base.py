@@ -201,21 +201,6 @@ class TTSProvider(ABC):
         """Interrupt an active streaming session. No-op for non-streaming providers."""
         pass
 
-    def begin_session(self) -> None:
-        """Reset decoder state for a new serial session. No-op for stateless providers."""
-        pass
-
-    def synthesize_next(
-        self,
-        text: str,
-        speaker: Optional[str] = None,
-        temperature: Optional[float] = None,
-        instruct: Optional[str] = None,
-        is_last: bool = False,
-    ) -> "AudioResult":
-        """Synthesize one sentence within a serial session. Raises NotImplementedError for providers that don't support sessions."""
-        raise NotImplementedError("This provider does not support serial session synthesis.")
-
     @classmethod
     @abstractmethod
     def get_server_command(cls, config: dict) -> Optional[str]:

@@ -605,21 +605,17 @@ class OrchestratorCallbacks:
         suppress_final: bool = False,
     ) -> tuple[Optional[np.ndarray], Optional[list]]:
         """
-        Serial session TTS delivery for streaming providers (NANO-054b).
+        Serial per-sentence TTS delivery for streaming providers (NANO-054b).
 
-        Orchestrator owns the sentence loop. Server provides decoder
-        carry-over across per-sentence synthesize_next calls for voice
-        consistency. Barge-in is a simple loop break — no interrupt
-        signaling, no threading, no socket blocking.
-
-        Flow: split sentences → begin_session → for each sentence:
-        synthesize_next → queue audio → check barge-in → next or break.
+        Orchestrator owns the sentence loop. Each sentence is an independent
+        synthesize() call with a fixed seed for voice consistency. Decoder
+        state resets per sentence (no carry-over) to eliminate boundary
+        stutter. Barge-in is a simple loop break.
         """
         import re
         from ..llm.sentence_segmenter import merge_punctuation_fragments
         from ..core.events import LLMChunkEvent
 
-        # Split TTS text into sentences (orchestrator-side split)
         tts_sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
         tts_sentences = [s.strip() for s in tts_sentences if s.strip()]
         tts_sentences = merge_punctuation_fragments(tts_sentences)
@@ -631,7 +627,6 @@ class OrchestratorCallbacks:
 
         sentence_chunks = [{"text": ds} for ds in display_sentences]
 
-        # Build per-sentence instruct from emotion classifier + template
         instruct_per_sentence: list[str] | None = None
         instruct_template = tts_config.get("instruct_template") or getattr(self._tts_provider, "instruct_template", "")
         if instruct_template and "{emotion}" in instruct_template and self._emotion_classifier:
@@ -651,18 +646,15 @@ class OrchestratorCallbacks:
         speaker = tts_config.get("speaker")
         temperature = tts_config.get("temperature")
         base_instruct = tts_config.get("instruct")
+        seed = hash(tts_text) & 0x7FFFFFFF
 
         audio_parts = []
         playback_started = False
         total = len(tts_sentences)
 
         try:
-            # Suppress on_complete so the monitor thread doesn't transition
-            # the state machine while we're still blocking on playback.
             if self._suppress_playback_complete is not None:
                 self._suppress_playback_complete()
-
-            self._tts_provider.begin_session()
 
             for i, sentence in enumerate(tts_sentences):
                 if self._pending_state_trigger == "barge_in":
@@ -672,13 +664,12 @@ class OrchestratorCallbacks:
                 if instruct_per_sentence and i < len(instruct_per_sentence):
                     sent_instruct = instruct_per_sentence[i]
 
-                is_last = (i == total - 1)
-                result = self._tts_provider.synthesize_next(
+                result = self._tts_provider.synthesize(
                     text=sentence,
                     speaker=speaker,
                     temperature=temperature,
                     instruct=sent_instruct,
-                    is_last=is_last,
+                    seed=seed,
                 )
 
                 audio = np.frombuffer(result.data, dtype=np.float32)
@@ -702,7 +693,7 @@ class OrchestratorCallbacks:
                             ))
                     return _on_start
 
-                on_start = _make_on_start(i, is_last)
+                on_start = _make_on_start(i, i == total - 1)
 
                 # Queue audio via streaming playback (one continuous stream)
                 if not playback_started:
@@ -843,11 +834,9 @@ class OrchestratorCallbacks:
                     sentence_tts[chunk.index] = chunk.tts_text
 
         if session_tts:
-            # Session provider (Qwen3): serial per-sentence synthesis with
-            # decoder carry-over. Orchestrator owns the loop, barge-in is
-            # a simple flag check between sentences.
             tts_text_joined = " ".join(t for t in full_tts_text if t.strip())
             display_text_joined = " ".join(t for t in full_display_text if t.strip())
+            self._last_response = display_text_joined
             session_audio, _ = self._session_tts_delivery(
                 tts_text_joined, tts_config, display_text=display_text_joined,
                 suppress_final=True,
@@ -962,7 +951,9 @@ class OrchestratorCallbacks:
 
         if result is not None:
             response = result.content
-            self._last_response = response
+            barged = self._pending_state_trigger == "barge_in"
+            if not barged:
+                self._last_response = response
 
             # Classify emotion on full response for final event
             emotion, emotion_confidence = self._classify_emotion(response or "")
@@ -981,12 +972,12 @@ class OrchestratorCallbacks:
                                 "text": sentence_texts[idx],
                             })
 
-            # Emit response event with full metadata + chunks
+            display_response = self._last_response if barged else response
             print(f"[NANO-111] response_chunks={response_chunks}", flush=True)
             if self._event_bus is not None:
                 self._event_bus.emit(
                     ResponseReadyEvent(
-                        text=response or "",
+                        text=display_response or "",
                         user_input=transcription,
                         activated_codex_entries=result.activated_codex_entries,
                         retrieved_memories=result.retrieved_memories,
@@ -1037,9 +1028,9 @@ class OrchestratorCallbacks:
                     result.block_contents,
                 )
         else:
-            # Fallback: no stream result (shouldn't happen, but defensive)
             response = " ".join(full_display_text)
-            self._last_response = response
+            if self._pending_state_trigger != "barge_in":
+                self._last_response = response
 
         if not response or response.strip() == "":
             return None
