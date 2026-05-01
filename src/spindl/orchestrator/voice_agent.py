@@ -552,6 +552,9 @@ class VoiceAgentOrchestrator:
         self._callbacks._restore_playback_complete = self._restore_playback_complete
         self._callbacks._on_session_playback_complete = self._on_playback_complete
 
+        # Stimulus barge-in: wire state machine processing transition
+        self._callbacks._on_start_processing = lambda: self._state_machine.start_processing()
+
         # NANO-112: Wire TTS-skipped callback for voice path state transition.
         # Can't use _on_playback_complete — that calls finish_system_speaking()
         # which only transitions SYSTEM_SPEAKING→LISTENING. With TTS off, state

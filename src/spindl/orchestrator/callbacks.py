@@ -176,6 +176,9 @@ class OrchestratorCallbacks:
         self._on_session_playback_complete: Optional[Callable[[], None]] = None
         # NANO-112: Called when voice path completes without TTS (no playback to trigger state transition)
         self._on_tts_skipped: Optional[Callable[[], None]] = None
+        # Stimulus barge-in: transitions state machine LISTENING→PROCESSING
+        # so the TTS chain (PROCESSING→SYSTEM_SPEAKING→barge-in) works.
+        self._on_start_processing: Optional[Callable[[], None]] = None
         self._event_bus = event_bus
         self._context_manager = context_manager
 
@@ -1165,8 +1168,13 @@ class OrchestratorCallbacks:
                 Twitch chat content for prompt block injection). NANO-056b.
         """
         def process():
-            # Suppress VAD during text input to prevent phantom triggers
-            if self._on_pause_listening is not None:
+            # For stimulus sources, use real state machine transitions so
+            # barge-in works during TTS playback.  For keyboard text input,
+            # suppress VAD to prevent phantom triggers (existing behavior).
+            use_state_machine = bool(stimulus_source) and self._on_start_processing is not None
+            if use_state_machine:
+                self._on_start_processing()
+            elif self._on_pause_listening is not None:
                 self._on_pause_listening()
 
             self._processing_start_time = time.time()
@@ -1313,8 +1321,10 @@ class OrchestratorCallbacks:
 
                 # Check for empty response
                 if not response or response.strip() == "":
-                    # Return to idle on empty response
+                    # Return to idle/listening on empty response
                     self._emit_state_change(current_state, "idle", "empty_response")
+                    if use_state_machine and self._on_tts_skipped is not None:
+                        self._on_tts_skipped()
                     return
 
                 # Synthesize speech via provider (unless skip_tts requested)
@@ -1360,6 +1370,8 @@ class OrchestratorCallbacks:
                     _text_input_chunks = self._emit_text_only_chunks(response)
                     self._total_turns += 1
                     self._emit_state_change(current_state, "idle", "response_complete")
+                    if use_state_machine and self._on_tts_skipped is not None:
+                        self._on_tts_skipped()
 
                 # NANO-111 Session 606: Emit response event AFTER TTS.
                 # When streaming callbacks are wired, llm_chunk events already
@@ -1409,10 +1421,14 @@ class OrchestratorCallbacks:
 
                 # NANO-031: Return to idle on error
                 self._emit_state_change(current_state, "idle", "error")
+                if use_state_machine and self._on_tts_skipped is not None:
+                    self._on_tts_skipped()
 
             finally:
-                # Re-enable VAD after text input processing completes
-                if self._on_resume_listening is not None:
+                # Re-enable VAD after text input processing completes.
+                # Stimulus sources use real state machine transitions instead
+                # of VAD suppression — state machine handles the return to LISTENING.
+                if not use_state_machine and self._on_resume_listening is not None:
                     self._on_resume_listening()
 
         # Run processing in background thread

@@ -342,6 +342,17 @@ class AudioStateMachine:
                 self._speech_start_time = None
                 self._transition(AgentState.IDLE, "deactivation")
 
+    def start_processing(self) -> None:
+        """
+        Signal that processing has started from a non-voice source (stimulus/text).
+
+        Transitions LISTENING → PROCESSING so the normal TTS chain
+        (start_system_speaking → SYSTEM_SPEAKING → barge-in) works.
+        """
+        with self._lock:
+            if self._state == AgentState.LISTENING:
+                self._transition(AgentState.PROCESSING, "stimulus_processing")
+
     def start_system_speaking(self) -> None:
         """
         Signal that system is about to speak (play TTS).
