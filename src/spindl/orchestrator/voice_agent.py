@@ -652,6 +652,8 @@ class VoiceAgentOrchestrator:
                 prompt_template=stimuli_cfg.game_state_prompt_template,
                 enabled=stimuli_cfg.game_state_enabled,
                 dialogue_buffer_size=stimuli_cfg.game_state_dialogue_buffer_size,
+                dialogue_min_lines=stimuli_cfg.game_state_dialogue_min_lines,
+                dialogue_drain_delay=stimuli_cfg.game_state_dialogue_drain_delay,
             )
             game_state._dialogue_store = self._dialogue_store
             game_state._dialogue_prompt_template = stimuli_cfg.game_state_dialogue_prompt_template
