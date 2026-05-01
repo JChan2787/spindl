@@ -98,15 +98,27 @@ body {
   }
 }
 
-/* ── Drag region (top edge) ──────────────────────────── */
+/* ── Drag grip (top bar) ────────────────────────────── */
 
-body::before {
-  content: "";
-  display: block;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 6px;
+.drag-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 0;
+  cursor: grab;
   -webkit-app-region: drag;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.drag-grip:hover {
+  opacity: 0.9;
+}
+
+.drag-grip span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #52525b;
 }

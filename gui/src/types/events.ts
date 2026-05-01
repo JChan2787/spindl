@@ -1505,6 +1505,7 @@ export interface ClientToServerEvents {
   // NANO-110: Tauri install
   check_tauri_install: (payload: Record<string, never>) => void;
   install_tauri_apps: (payload: Record<string, never>) => void;
+  rebuild_tauri_apps: (payload: Record<string, never>) => void;
   // NANO-110: Addressing-others
   addressing_others_start: (payload: { context_id: string }) => void;
   addressing_others_stop: (payload: Record<string, never>) => void;

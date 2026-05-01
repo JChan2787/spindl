@@ -9,7 +9,7 @@ Extracted from server.py (NANO-113). Handles:
 - Avatar model reload (reload_avatar_model)
 - Avatar config (set_avatar_config)
 - Animation rescan (avatar_rescan_animations)
-- Tauri install check/trigger (check_tauri_install, install_tauri_apps)
+- Tauri install check/trigger (check_tauri_install, install_tauri_apps, rebuild_tauri_apps)
 
 Also exposes Tauri binary helpers as standalone functions:
 tauri_binary_path(), tauri_binary_exists(),
@@ -23,6 +23,7 @@ and _launch_services_async.
 import asyncio
 import platform
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -629,3 +630,32 @@ def register_avatar_handlers(server: "GUIServer") -> None:
         # Shared workspace means first build compiles all deps,
         # subsequent builds are near-instant (seconds).
         tauri_install_all_in_background(server, missing)
+
+    @sio.event
+    async def rebuild_tauri_apps(sid: str, data: dict) -> None:
+        """Kill running Tauri processes, clear frontend dist, rebuild all binaries."""
+        project_root = Path(__file__).parent.parent.parent.parent
+
+        # Kill any running overlay processes before rebuilding —
+        # Windows locks running .exe files.
+        server._avatar_kill()
+        server._subtitle_kill()
+        server._stream_deck_kill()
+
+        apps = [
+            (project_root / "spindl-avatar", "Avatar"),
+            (project_root / "spindl-subtitles", "Subtitle"),
+            (project_root / "spindl-stream-deck", "Stream Deck"),
+        ]
+
+        # Remove frontend dist/ so the build step regenerates them
+        for app_dir, _ in apps:
+            dist = app_dir / "dist"
+            if dist.exists():
+                shutil.rmtree(dist, ignore_errors=True)
+
+        present = [(d, n) for d, n in apps if d.exists()]
+        if not present:
+            return
+
+        tauri_install_all_in_background(server, present)

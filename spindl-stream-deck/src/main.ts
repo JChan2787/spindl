@@ -33,6 +33,14 @@ const app = document.getElementById("app")!;
 function render(): void {
   app.innerHTML = "";
 
+  // Drag grip bar
+  const grip = document.createElement("div");
+  grip.className = "drag-grip";
+  for (let i = 0; i < 5; i++) {
+    grip.appendChild(document.createElement("span"));
+  }
+  app.appendChild(grip);
+
   // Status bar
   const status = document.createElement("div");
   status.className = `status ${connected ? "connected" : "disconnected"}`;
@@ -104,8 +112,9 @@ function resizeWindow(): void {
   const buttonHeight = 48;
   const gap = 8;
   const statusHeight = 24;
+  const dragGripHeight = 15;
   const padding = 24; // 12px top + 12px bottom
-  const targetHeight = statusHeight + padding + contexts.length * buttonHeight + (contexts.length - 1) * gap;
+  const targetHeight = dragGripHeight + statusHeight + padding + contexts.length * buttonHeight + (contexts.length - 1) * gap;
 
   // Dynamically resize the Tauri window
   import("@tauri-apps/api/window").then(({ getCurrentWindow, LogicalSize }) => {

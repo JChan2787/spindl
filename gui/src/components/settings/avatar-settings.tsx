@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { User, Clock, Subtitles, Pin, Gamepad2, Loader2, Download } from "lucide-react";
+import { User, Clock, Subtitles, Pin, Gamepad2, Loader2, Download, RefreshCw } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
@@ -23,6 +23,11 @@ export function AvatarSettings() {
   const handleInstall = useCallback(() => {
     const socket = getSocket();
     socket.emit("install_tauri_apps", {});
+  }, []);
+
+  const handleRebuild = useCallback(() => {
+    const socket = getSocket();
+    socket.emit("rebuild_tauri_apps", {});
   }, []);
 
   const handleToggle = useCallback(() => {
@@ -77,14 +82,16 @@ export function AvatarSettings() {
       title="Avatar"
       icon={<User className="h-4 w-4" />}
     >
-      {/* NANO-110: Install banner — shown when binaries don't exist */}
-      {notInstalled && (
+      {/* Install / Rebuild banner */}
+      {(notInstalled || installing) && (
         <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
           {installing ? (
             <>
               <div className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                <span className="text-sm font-medium">Installing overlay apps...</span>
+                <span className="text-sm font-medium">
+                  {notInstalled ? "Installing" : "Rebuilding"} overlay apps...
+                </span>
               </div>
               <p className="text-xs text-muted-foreground">
                 {avatarConfig.tauri_install_message || "Preparing build..."}
@@ -106,6 +113,18 @@ export function AvatarSettings() {
             </>
           )}
         </div>
+      )}
+
+      {/* Rebuild button — shown when binaries exist and no build in progress */}
+      {!notInstalled && !installing && (
+        <button
+          onClick={handleRebuild}
+          disabled={!connected}
+          className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Rebuild Overlay Apps
+        </button>
       )}
 
       {/* Enable toggle */}
