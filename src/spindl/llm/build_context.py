@@ -96,6 +96,10 @@ class BuildContext:
     # None means legacy template path (byte-identical output).
     block_config: Optional[list["PromptBlock"]] = None
 
+    # Per-trigger voice state overrides (populated from prompt_blocks config)
+    # Keys match VOICE_STATE_INJECTIONS: "barge_in", "empty_transcription", "error"
+    voice_state_overrides: Optional[dict[str, str]] = None
+
     # Per-block content tracking (NANO-045b: per-block token counting)
     # Populated by _build_with_blocks() during prompt assembly. Each dict has:
     # id, label, section (header name or None), chars (character count), deferred (bool).

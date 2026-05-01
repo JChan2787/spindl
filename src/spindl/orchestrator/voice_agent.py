@@ -2020,6 +2020,14 @@ class VoiceAgentOrchestrator:
                 "content_wrapper": block.content_wrapper,
             })
 
+        # Include per-trigger voice state overrides (compound keys)
+        raw_pb = self._config.prompt_blocks
+        if raw_pb and isinstance(raw_pb, dict):
+            raw_overrides = raw_pb.get("overrides", {})
+            for key, val in raw_overrides.items():
+                if key.startswith("voice_state:") and val is not None:
+                    overrides_dict[key] = val
+
         return {
             "order": order_list,
             "disabled": disabled_list,

@@ -35,11 +35,16 @@ class VoiceStateProvider(ContextProvider):
         if not context.state_trigger:
             return None
 
-        # Look up base injection text for this trigger
+        # Check per-trigger user overrides first
+        if context.voice_state_overrides:
+            override = context.voice_state_overrides.get(context.state_trigger)
+            if override is not None:
+                return override.strip()
+
+        # Fall back to hardcoded defaults
         injection = VOICE_STATE_INJECTIONS.get(context.state_trigger)
 
         if not injection:
-            # Unknown trigger - collapse section (normal flow)
             return None
 
         return injection.strip()
