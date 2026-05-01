@@ -41,12 +41,22 @@ logger = logging.getLogger(__name__)
 
 
 # NANO-115 item #1: Source labeling.
+# Default voice state injection text (used as fallback when config is unavailable)
+_DEFAULT_VOICE_STATE: dict[str, str] = {
+    "barge_in": "The User interrupted you mid-sentence.",
+    "empty_transcription": "The User made a sound but no words were detected.",
+    "error": "An error occurred. Acknowledge briefly and continue.",
+}
+
+
 # Every user-role message gets a structural `[Message Type - Subtype] ` prefix
 # so modality/origin survives into conversation history.
 def tag_user_input(
     user_input: str,
     input_modality: InputModality,
     stimulus_source: Optional[str] = None,
+    state_trigger: Optional[str] = None,
+    voice_state_config: Optional[object] = None,
 ) -> str:
     """
     Prefix user_input with a message-type tag derived from modality + stimulus_source.
@@ -56,6 +66,12 @@ def tag_user_input(
     Stimulus (source="twitch")   -> [Message Type - Twitch Chat]
     Stimulus (source="game_state") -> [Message Type - Game State]
     Stimulus (any other source)  -> [Message Type - Stimuli]  (catch-all)
+
+    When state_trigger is set and input is voice, a voice state injection
+    line is inserted between the tag and the transcription:
+        [Message Type - Voice]
+        The User interrupted you mid-sentence.
+        actual transcription here
 
     Tag uses ASCII hyphen for JSONL/YAML robustness. Preserves the original
     payload verbatim — only the prefix is added.
@@ -70,6 +86,21 @@ def tag_user_input(
         tag = "[Message Type - Voice]"
     else:
         tag = "[Message Type - Direct Keyboard]"
+
+    # Inject voice state context between tag and content for voice inputs
+    if state_trigger and input_modality == InputModality.VOICE:
+        if voice_state_config is not None:
+            config_key = f"voice_state_{state_trigger}"
+            injection = getattr(voice_state_config, config_key, None)
+        else:
+            injection = None
+        if not injection:
+            injection = _DEFAULT_VOICE_STATE.get(state_trigger)
+        if injection:
+            if user_input:
+                return f"{tag}\n{injection}\n{user_input}"
+            return f"{tag}\n{injection}"
+
     return f"{tag} {user_input}" if user_input else tag
 
 
@@ -100,6 +131,7 @@ class OrchestratorCallbacks:
         event_bus: Optional[EventBus] = None,
         context_manager: Optional[ContextManager] = None,
         context_limit_getter: Optional[Callable[[], int]] = None,
+        orchestrator_config: Optional[object] = None,
     ):
         """
         Initialize orchestrator callbacks.
@@ -124,6 +156,7 @@ class OrchestratorCallbacks:
         self._tts_provider = tts_provider
         self._pipeline = llm_pipeline
         self._persona = persona
+        self._orchestrator_config = orchestrator_config
 
         self._on_response_ready = on_response_ready
         self._on_barge_in_triggered = on_barge_in_triggered
@@ -302,7 +335,11 @@ class OrchestratorCallbacks:
                     # 5. Generate response via LLM pipeline (returns PipelineResult)
                     # NANO-115 item #1: Tag user input with source prefix so
                     # modality persists into conversation history.
-                    tagged_input = tag_user_input(transcription, InputModality.VOICE)
+                    tagged_input = tag_user_input(
+                        transcription, InputModality.VOICE,
+                        state_trigger=state_trigger,
+                        voice_state_config=self._orchestrator_config.prompt_config if self._orchestrator_config else None,
+                    )
                     result = self._pipeline.run(
                         tagged_input,
                         self._persona,
@@ -816,7 +853,11 @@ class OrchestratorCallbacks:
         full_tts_text = []
 
         # NANO-115 item #1: Tag user input with source prefix.
-        tagged_input = tag_user_input(transcription, InputModality.VOICE)
+        tagged_input = tag_user_input(
+            transcription, InputModality.VOICE,
+            state_trigger=state_trigger,
+            voice_state_config=self._orchestrator_config.prompt_config if self._orchestrator_config else None,
+        )
         for chunk in self._pipeline.run_stream(
             tagged_input,
             self._persona,

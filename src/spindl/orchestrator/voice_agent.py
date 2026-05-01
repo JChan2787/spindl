@@ -540,6 +540,7 @@ class VoiceAgentOrchestrator:
             context_limit_getter=lambda: (
                 self._provider_holder.provider.get_properties().context_length or 8192
             ) if self._provider_holder else 8192,
+            orchestrator_config=self._config,
         )
 
         # NANO-111 Phase 2: Wire streaming playback callbacks
@@ -1463,6 +1464,9 @@ class VoiceAgentOrchestrator:
         codex_suffix: Optional[str] = ...,
         example_dialogue_prefix: Optional[str] = ...,
         example_dialogue_suffix: Optional[str] = ...,
+        voice_state_barge_in: Optional[str] = ...,
+        voice_state_empty_transcription: Optional[str] = ...,
+        voice_state_error: Optional[str] = ...,
     ) -> None:
         """
         Update prompt injection wrappers at runtime (NANO-045d + NANO-052 follow-up).
@@ -1474,6 +1478,9 @@ class VoiceAgentOrchestrator:
             codex_suffix: New codex suffix. Ellipsis (...) = keep current.
             example_dialogue_prefix: New example dialogue prefix. Ellipsis = keep current.
             example_dialogue_suffix: New example dialogue suffix. Ellipsis = keep current.
+            voice_state_barge_in: Barge-in injection text. Ellipsis = keep current.
+            voice_state_empty_transcription: Empty transcription text. Ellipsis = keep current.
+            voice_state_error: Error injection text. Ellipsis = keep current.
         """
         pc = self._config.prompt_config
         if rag_prefix is not ...:
@@ -1488,6 +1495,12 @@ class VoiceAgentOrchestrator:
             pc.example_dialogue_prefix = example_dialogue_prefix or ""
         if example_dialogue_suffix is not ...:
             pc.example_dialogue_suffix = example_dialogue_suffix or ""
+        if voice_state_barge_in is not ...:
+            pc.voice_state_barge_in = voice_state_barge_in or ""
+        if voice_state_empty_transcription is not ...:
+            pc.voice_state_empty_transcription = voice_state_empty_transcription or ""
+        if voice_state_error is not ...:
+            pc.voice_state_error = voice_state_error or ""
 
         if self._rag_injector:
             self._rag_injector.update_config(
@@ -2019,14 +2032,6 @@ class VoiceAgentOrchestrator:
                 "has_override": block.user_override is not None,
                 "content_wrapper": block.content_wrapper,
             })
-
-        # Include per-trigger voice state overrides (compound keys)
-        raw_pb = self._config.prompt_blocks
-        if raw_pb and isinstance(raw_pb, dict):
-            raw_overrides = raw_pb.get("overrides", {})
-            for key, val in raw_overrides.items():
-                if key.startswith("voice_state:") and val is not None:
-                    overrides_dict[key] = val
 
         return {
             "order": order_list,

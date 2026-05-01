@@ -63,6 +63,9 @@ export interface PromptConfig {
   codex_suffix: string;
   example_dialogue_prefix: string;
   example_dialogue_suffix: string;
+  voice_state_barge_in: string;
+  voice_state_empty_transcription: string;
+  voice_state_error: string;
 }
 
 // NANO-110: Addressing-others context
@@ -452,6 +455,9 @@ const DEFAULT_PROMPT: PromptConfig = {
   codex_suffix: "",
   example_dialogue_prefix: "The following are example dialogues demonstrating this character's voice, tone, and response style. Use them as style reference only — do not repeat or quote them directly:",
   example_dialogue_suffix: "End of style examples.",
+  voice_state_barge_in: "The User interrupted you mid-sentence.",
+  voice_state_empty_transcription: "The User made a sound but no words were detected.",
+  voice_state_error: "An error occurred. Acknowledge briefly and continue.",
 };
 
 const DEFAULT_TOOLS: ToolsConfig = {
@@ -688,7 +694,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       curation: { ...DEFAULT_CURATION, ...((config.settings?.memory as any)?.curation ?? {}) },
     },
-    promptConfig: config.settings?.prompt ?? DEFAULT_PROMPT,
+    promptConfig: { ...DEFAULT_PROMPT, ...(config.settings?.prompt ?? {}) },
     generationConfig: { ...DEFAULT_GENERATION, ...(config.settings?.generation ?? {}) },
     stimuliConfig: { ...DEFAULT_STIMULI, ...(config.settings?.stimuli ?? {}) },
     toolsConfig: config.settings?.tools

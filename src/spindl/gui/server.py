@@ -1057,6 +1057,9 @@ class GUIServer:
                     "codex_suffix": config.prompt_config.codex_suffix,
                     "example_dialogue_prefix": config.prompt_config.example_dialogue_prefix,
                     "example_dialogue_suffix": config.prompt_config.example_dialogue_suffix,
+                    "voice_state_barge_in": config.prompt_config.voice_state_barge_in,
+                    "voice_state_empty_transcription": config.prompt_config.voice_state_empty_transcription,
+                    "voice_state_error": config.prompt_config.voice_state_error,
                 },
                 "generation": {
                     "temperature": config.llm_config.provider_config.get("temperature", 0.7),

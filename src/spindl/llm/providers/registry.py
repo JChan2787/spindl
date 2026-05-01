@@ -20,8 +20,6 @@ from .persona_provider import (
     PersonaRulesProvider,
     ScenarioProvider,
 )
-from .voice_state_provider import VoiceStateProvider
-
 logger = logging.getLogger(__name__)
 
 
@@ -78,9 +76,8 @@ def create_default_registry() -> ProviderRegistry:
     Provider order:
     1. Persona providers (name, appearance, personality, scenario, example dialogue, rules)
     2. Modality providers (context, rules)
-    3. Voice state provider
-    4. History providers (summary, recent)
-    5. Input provider
+    3. History providers (summary, recent)
+    4. Input provider
 
     Note: Vision is no longer injected into prompts. Use tools (NANO-024)
     for on-demand vision capabilities instead of always-on injection.
@@ -101,9 +98,6 @@ def create_default_registry() -> ProviderRegistry:
     # Modality providers
     registry.register(ModalityContextProvider())
     registry.register(ModalityRulesProvider())
-
-    # Voice state provider
-    registry.register(VoiceStateProvider())
 
     # History providers
     # Note: SummaryProvider fills [CONVERSATION_SUMMARY] (collapses when empty).

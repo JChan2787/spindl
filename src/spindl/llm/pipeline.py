@@ -179,7 +179,6 @@ class LLMPipeline:
         self._tool_executor: Optional["ToolExecutor"] = tool_executor
         self._force_role_history: str = "flatten"
         self._block_config: Optional[list[PromptBlock]] = None
-        self._voice_state_overrides: Optional[dict[str, str]] = None
         # NANO-111: Deferred post-processor result from run_stream()
         self._last_stream_result: Optional[PipelineResult] = None
         # Codex injection wrappers (NANO-045d)
@@ -209,18 +208,8 @@ class LLMPipeline:
         """
         if prompt_blocks_config is not None:
             self._block_config = load_block_config(prompt_blocks_config)
-            # Extract per-trigger voice state overrides from compound keys
-            overrides = prompt_blocks_config.get("overrides", {})
-            vs_overrides: dict[str, str] = {}
-            prefix = "voice_state:"
-            for key, val in overrides.items():
-                if key.startswith(prefix) and val is not None:
-                    trigger = key[len(prefix):]
-                    vs_overrides[trigger] = val
-            self._voice_state_overrides = vs_overrides or None
         else:
             self._block_config = None
-            self._voice_state_overrides = None
 
     def set_codex_wrappers(
         self,
@@ -334,7 +323,6 @@ class LLMPipeline:
             last_assistant_message=last_assistant_message,
             block_config=self._block_config,
             addressing_others_prompt=addressing_others_prompt,
-            voice_state_overrides=self._voice_state_overrides,
         )
 
         context = PipelineContext(
@@ -513,7 +501,6 @@ class LLMPipeline:
             last_assistant_message=last_assistant_message,
             block_config=self._block_config,
             addressing_others_prompt=addressing_others_prompt,
-            voice_state_overrides=self._voice_state_overrides,
         )
 
         context = PipelineContext(
@@ -688,7 +675,6 @@ class LLMPipeline:
             state_trigger=None,
             last_assistant_message=None,
             block_config=self._block_config,
-            voice_state_overrides=self._voice_state_overrides,
         )
 
         context = PipelineContext(

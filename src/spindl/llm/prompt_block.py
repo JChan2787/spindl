@@ -109,12 +109,6 @@ def create_default_blocks() -> list[PromptBlock]:
             section_header="Context",
         ),
         PromptBlock(
-            id="voice_state",
-            label="Voice State",
-            order=6,
-            placeholder="[STATE_CONTEXT]",
-        ),
-        PromptBlock(
             id="codex_context",
             label="Codex",
             order=7,

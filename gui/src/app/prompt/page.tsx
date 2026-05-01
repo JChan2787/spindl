@@ -268,15 +268,6 @@ export default function PromptCompositionPage() {
                     onSetOverride={(blockId, content) =>
                       setOverride(blockId, content)
                     }
-                    triggerOverrides={
-                      selectedBlock.id === "voice_state"
-                        ? Object.fromEntries(
-                            Object.entries(effectiveOverrides)
-                              .filter(([k]) => k.startsWith("voice_state:"))
-                              .map(([k, v]) => [k.slice("voice_state:".length), v])
-                          )
-                        : undefined
-                    }
                   />
                 ) : (
                   <Card>

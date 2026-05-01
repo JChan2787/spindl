@@ -9,7 +9,6 @@ export const BLOCK_COLORS: Record<string, string> = {
   persona_appearance: "bg-violet-400",
   persona_personality: "bg-violet-300",
   modality_context: "bg-cyan-500",
-  voice_state: "bg-cyan-400",
   codex_context: "bg-cyan-300",
   rag_context: "bg-cyan-200",
   persona_rules: "bg-amber-500",

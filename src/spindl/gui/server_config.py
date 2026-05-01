@@ -106,14 +106,6 @@ def get_block_config_pre_launch(server: "GUIServer") -> dict:
             "content_wrapper": block.content_wrapper,
         })
 
-    # Include per-trigger voice state overrides (compound keys)
-    raw_pb = server._prompt_blocks_config
-    if raw_pb and isinstance(raw_pb, dict):
-        raw_overrides = raw_pb.get("overrides", {})
-        for key, val in raw_overrides.items():
-            if key.startswith("voice_state:") and val is not None:
-                overrides_dict[key] = val
-
     return {
         "order": order_list,
         "disabled": disabled_list,
@@ -509,6 +501,19 @@ def register_config_handlers(server: "GUIServer") -> None:
                 example_dialogue_suffix = str(data["example_dialogue_suffix"])
                 updated = True
 
+            voice_state_barge_in = ...
+            voice_state_empty_transcription = ...
+            voice_state_error = ...
+            if "voice_state_barge_in" in data:
+                voice_state_barge_in = str(data["voice_state_barge_in"])
+                updated = True
+            if "voice_state_empty_transcription" in data:
+                voice_state_empty_transcription = str(data["voice_state_empty_transcription"])
+                updated = True
+            if "voice_state_error" in data:
+                voice_state_error = str(data["voice_state_error"])
+                updated = True
+
             if updated:
                 server._orchestrator.update_prompt_config(
                     rag_prefix=rag_prefix,
@@ -517,6 +522,9 @@ def register_config_handlers(server: "GUIServer") -> None:
                     codex_suffix=codex_suffix,
                     example_dialogue_prefix=example_dialogue_prefix,
                     example_dialogue_suffix=example_dialogue_suffix,
+                    voice_state_barge_in=voice_state_barge_in,
+                    voice_state_empty_transcription=voice_state_empty_transcription,
+                    voice_state_error=voice_state_error,
                 )
 
                 pc = server._orchestrator._config.prompt_config
@@ -546,6 +554,9 @@ def register_config_handlers(server: "GUIServer") -> None:
                         "codex_suffix": pc.codex_suffix,
                         "example_dialogue_prefix": pc.example_dialogue_prefix,
                         "example_dialogue_suffix": pc.example_dialogue_suffix,
+                        "voice_state_barge_in": pc.voice_state_barge_in,
+                        "voice_state_empty_transcription": pc.voice_state_empty_transcription,
+                        "voice_state_error": pc.voice_state_error,
                         "persisted": persisted,
                     },
                     to=sid,

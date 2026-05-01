@@ -413,6 +413,11 @@ class PromptConfig(BaseModel):
         "do not repeat or quote them directly:"
     )
     example_dialogue_suffix: str = "End of style examples."
+    voice_state_barge_in: str = "The User interrupted you mid-sentence."
+    voice_state_empty_transcription: str = (
+        "The User made a sound but no words were detected."
+    )
+    voice_state_error: str = "An error occurred. Acknowledge briefly and continue."
 
     @classmethod
     def from_dict(cls, data: dict) -> "PromptConfig":
@@ -425,6 +430,9 @@ class PromptConfig(BaseModel):
             codex_suffix=data.get("codex_suffix", defaults.codex_suffix),
             example_dialogue_prefix=data.get("example_dialogue_prefix", defaults.example_dialogue_prefix),
             example_dialogue_suffix=data.get("example_dialogue_suffix", defaults.example_dialogue_suffix),
+            voice_state_barge_in=data.get("voice_state_barge_in", defaults.voice_state_barge_in),
+            voice_state_empty_transcription=data.get("voice_state_empty_transcription", defaults.voice_state_empty_transcription),
+            voice_state_error=data.get("voice_state_error", defaults.voice_state_error),
         )
 
 
@@ -1149,6 +1157,9 @@ class OrchestratorConfig(BaseModel):
         data["prompt"]["codex_suffix"] = self.prompt_config.codex_suffix
         data["prompt"]["example_dialogue_prefix"] = self.prompt_config.example_dialogue_prefix
         data["prompt"]["example_dialogue_suffix"] = self.prompt_config.example_dialogue_suffix
+        data["prompt"]["voice_state_barge_in"] = self.prompt_config.voice_state_barge_in
+        data["prompt"]["voice_state_empty_transcription"] = self.prompt_config.voice_state_empty_transcription
+        data["prompt"]["voice_state_error"] = self.prompt_config.voice_state_error
 
         # --- LLM ---
         if "llm" not in data:
