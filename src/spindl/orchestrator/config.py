@@ -475,9 +475,12 @@ class StimuliConfig(BaseModel):
     enabled: bool = False
     patience_enabled: bool = False
     patience_seconds: float = Field(default=60.0, ge=1.0)
-    patience_prompt: str = (
-        "Continue the conversation naturally. "
-        "You have been idle. Think of something interesting to say or ask."
+    patience_prompts: list[str] = Field(
+        default_factory=lambda: [
+            "Continue the conversation naturally. "
+            "You have been idle. Think of something interesting to say or ask."
+        ],
+        min_length=1,
     )
 
     # Twitch integration (NANO-056b)
@@ -568,7 +571,12 @@ class StimuliConfig(BaseModel):
             enabled=data.get("enabled", defaults.enabled),
             patience_enabled=patience.get("enabled", defaults.patience_enabled),
             patience_seconds=patience.get("seconds", defaults.patience_seconds),
-            patience_prompt=patience.get("prompt", defaults.patience_prompt),
+            patience_prompts=patience.get(
+                "prompts",
+                [patience["prompt"]]
+                if "prompt" in patience
+                else defaults.patience_prompts,
+            ),
             twitch_enabled=twitch.get("enabled", defaults.twitch_enabled),
             twitch_channel=twitch.get("channel", defaults.twitch_channel),
             twitch_app_id=twitch.get("app_id", defaults.twitch_app_id),
@@ -1203,7 +1211,8 @@ class OrchestratorConfig(BaseModel):
             stim["patience"] = {}
         stim["patience"]["enabled"] = self.stimuli_config.patience_enabled
         stim["patience"]["seconds"] = self.stimuli_config.patience_seconds
-        stim["patience"]["prompt"] = self.stimuli_config.patience_prompt
+        stim["patience"].pop("prompt", None)
+        stim["patience"]["prompts"] = self.stimuli_config.patience_prompts
 
         # Twitch (nested under stimuli)
         if "twitch" not in stim:

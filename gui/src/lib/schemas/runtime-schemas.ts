@@ -186,7 +186,7 @@ export const StimuliConfigUpdatedSchema = z.object({
   enabled: z.boolean(),
   patience_enabled: z.boolean(),
   patience_seconds: z.number().min(1),
-  patience_prompt: z.string(),
+  patience_prompts: z.array(z.string()).min(1),
   twitch_enabled: z.boolean(),
   twitch_channel: z.string(),
   twitch_app_id: z.string(),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Zap, Timer, MessageSquare, Users, Plus, Trash2 } from "lucide-react";
+import { Zap, Timer, MessageSquare, Users, Plus, Trash2, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -103,25 +103,70 @@ export function StimuliSettings() {
     [updatePendingStimuli, emitChanges]
   );
 
-  // Local state for prompt textarea — only emits on blur, not per-keystroke
-  const [localPrompt, setLocalPrompt] = useState(effectiveConfig.patience_prompt);
-  const promptSyncedRef = useRef(effectiveConfig.patience_prompt);
+  // Local state for prompt list — only emits on blur (NANO-120: weighted rotation)
+  const [localPrompts, setLocalPrompts] = useState<string[]>(effectiveConfig.patience_prompts);
+  const promptsSyncedRef = useRef<string[]>(effectiveConfig.patience_prompts);
 
   // Sync local state when backend config changes (e.g. character reload)
   useEffect(() => {
-    if (effectiveConfig.patience_prompt !== promptSyncedRef.current) {
-      setLocalPrompt(effectiveConfig.patience_prompt);
-      promptSyncedRef.current = effectiveConfig.patience_prompt;
+    const incoming = effectiveConfig.patience_prompts;
+    const current = promptsSyncedRef.current;
+    if (
+      incoming.length !== current.length ||
+      incoming.some((t, i) => t !== current[i])
+    ) {
+      setLocalPrompts(incoming);
+      promptsSyncedRef.current = incoming;
     }
-  }, [effectiveConfig.patience_prompt]);
+  }, [effectiveConfig.patience_prompts]);
 
-  const handlePatiencePromptBlur = useCallback(() => {
-    if (localPrompt !== promptSyncedRef.current) {
-      updatePendingStimuli({ patience_prompt: localPrompt });
-      emitChanges({ patience_prompt: localPrompt });
-      promptSyncedRef.current = localPrompt;
+  const emitIdlePrompts = useCallback(
+    (prompts: string[]) => {
+      const nonEmpty = prompts.filter((p) => p.trim().length > 0);
+      if (nonEmpty.length === 0) return;
+      updatePendingStimuli({ patience_prompts: nonEmpty });
+      emitChanges({ patience_prompts: nonEmpty });
+      promptsSyncedRef.current = nonEmpty;
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleIdlePromptBlur = useCallback(() => {
+    const synced = promptsSyncedRef.current;
+    if (
+      localPrompts.length !== synced.length ||
+      localPrompts.some((t, i) => t !== synced[i])
+    ) {
+      emitIdlePrompts(localPrompts);
     }
-  }, [localPrompt, updatePendingStimuli, emitChanges]);
+  }, [localPrompts, emitIdlePrompts]);
+
+  const handleAddIdlePrompt = useCallback(() => {
+    setLocalPrompts((prev) => [...prev, ""]);
+  }, []);
+
+  const handleRemoveIdlePrompt = useCallback(
+    (index: number) => {
+      setLocalPrompts((prev) => {
+        if (prev.length <= 1) return prev;
+        const next = prev.filter((_, i) => i !== index);
+        emitIdlePrompts(next);
+        return next;
+      });
+    },
+    [emitIdlePrompts]
+  );
+
+  const handleIdlePromptChange = useCallback(
+    (index: number, value: string) => {
+      setLocalPrompts((prev) => {
+        const next = [...prev];
+        next[index] = value;
+        return next;
+      });
+    },
+    []
+  );
 
   // NANO-110: Addressing-others contexts
   const contexts = effectiveConfig.addressing_others_contexts ?? [
@@ -264,18 +309,41 @@ export function StimuliSettings() {
               />
 
               <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-sm">
-                  <MessageSquare className="h-3 w-3" />
-                  Idle Prompt
-                </Label>
-                <Textarea
-                  value={localPrompt}
-                  onChange={(e) => setLocalPrompt(e.target.value)}
-                  onBlur={handlePatiencePromptBlur}
-                  rows={3}
-                  className="text-xs resize-none"
-                  placeholder="Prompt sent when idle timer fires..."
-                />
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-2 text-sm">
+                    <MessageSquare className="h-3 w-3" />
+                    Idle Prompts
+                  </Label>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                    onClick={handleAddIdlePrompt}
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add
+                  </button>
+                </div>
+                {localPrompts.map((prompt, idx) => (
+                  <div key={idx} className="relative">
+                    <Textarea
+                      value={prompt}
+                      onChange={(e) => handleIdlePromptChange(idx, e.target.value)}
+                      onBlur={handleIdlePromptBlur}
+                      rows={3}
+                      className="text-xs resize-none pr-8"
+                      placeholder={`Idle prompt ${idx + 1}...`}
+                    />
+                    {localPrompts.length > 1 && (
+                      <button
+                        type="button"
+                        className="absolute top-1 right-1 p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveIdlePrompt(idx)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 

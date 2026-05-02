@@ -925,8 +925,8 @@ llm:
 class TestSaveToYamlStimuliPrompt:
     """Tests for save_to_yaml patience prompt persistence."""
 
-    def test_save_to_yaml_updates_patience_prompt(self, tmp_path: Path) -> None:
-        """save_to_yaml persists patience_prompt to YAML."""
+    def test_save_to_yaml_updates_patience_prompts(self, tmp_path: Path) -> None:
+        """save_to_yaml persists patience_prompts to YAML."""
         config_file = tmp_path / "spindl.yaml"
         config_file.write_text("""
 stimuli:
@@ -937,14 +937,14 @@ stimuli:
     prompt: Old default prompt text.
 """)
         config = OrchestratorConfig.from_yaml(str(config_file))
-        config.stimuli_config.patience_prompt = "Say something funny about cats."
+        config.stimuli_config.patience_prompts = ["Say something funny about cats."]
         config.save_to_yaml(str(config_file))
 
         reloaded = OrchestratorConfig.from_yaml(str(config_file))
-        assert reloaded.stimuli_config.patience_prompt == "Say something funny about cats."
+        assert reloaded.stimuli_config.patience_prompts == ["Say something funny about cats."]
 
     def test_save_to_yaml_prompt_section_isolated(self, tmp_path: Path) -> None:
-        """save_to_yaml only updates prompt under stimuli, not other sections."""
+        """save_to_yaml only updates prompts under stimuli, not other sections."""
         config_file = tmp_path / "spindl.yaml"
         config_file.write_text("""
 prompt:
@@ -957,13 +957,13 @@ stimuli:
     prompt: Original patience prompt.
 """)
         config = OrchestratorConfig.from_yaml(str(config_file))
-        config.stimuli_config.patience_prompt = "Updated patience prompt."
+        config.stimuli_config.patience_prompts = ["Updated patience prompt."]
         config.save_to_yaml(str(config_file))
 
         content = config_file.read_text()
         # The prompt section's prompt should be untouched
         assert "This is a prompt section value" in content
-        # The stimuli section's prompt should be updated
+        # The stimuli section's prompts should be updated
         assert "Updated patience prompt." in content
 
 

@@ -80,7 +80,7 @@ export interface StimuliConfig {
   enabled: boolean;
   patience_enabled: boolean;
   patience_seconds: number;
-  patience_prompt: string;
+  patience_prompts: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled: boolean;
   twitch_channel: string;
@@ -418,7 +418,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   enabled: false,
   patience_enabled: false,
   patience_seconds: 60,
-  patience_prompt: "Continue the conversation naturally. You have been idle. Think of something interesting to say or ask.",
+  patience_prompts: ["Continue the conversation naturally. You have been idle. Think of something interesting to say or ask."],
   twitch_enabled: false,
   twitch_channel: "",
   twitch_app_id: "",

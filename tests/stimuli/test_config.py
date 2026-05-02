@@ -18,7 +18,7 @@ class TestStimuliConfig:
         assert cfg.enabled is False
         assert cfg.patience_enabled is False
         assert cfg.patience_seconds == 60.0
-        assert "idle" in cfg.patience_prompt.lower()
+        assert "idle" in cfg.patience_prompts[0].lower()
 
     def test_from_dict_full(self):
         data = {
@@ -33,7 +33,7 @@ class TestStimuliConfig:
         assert cfg.enabled is True
         assert cfg.patience_enabled is False
         assert cfg.patience_seconds == 30.0
-        assert cfg.patience_prompt == "Say something!"
+        assert cfg.patience_prompts == ["Say something!"]
 
     def test_from_dict_minimal(self):
         """Only 'enabled' set, patience uses defaults."""

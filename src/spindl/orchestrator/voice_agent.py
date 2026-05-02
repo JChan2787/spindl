@@ -620,7 +620,7 @@ class VoiceAgentOrchestrator:
         # Register PATIENCE module
         patience = PatienceModule(
             timeout_seconds=stimuli_cfg.patience_seconds,
-            prompt=stimuli_cfg.patience_prompt,
+            prompts=stimuli_cfg.patience_prompts,
             enabled=stimuli_cfg.patience_enabled,
         )
         self._stimuli_engine.register_module(patience)
@@ -2074,7 +2074,7 @@ class VoiceAgentOrchestrator:
         enabled: Optional[bool] = None,
         patience_enabled: Optional[bool] = None,
         patience_seconds: Optional[float] = None,
-        patience_prompt: Optional[str] = None,
+        patience_prompts: Optional[list[str]] = None,
         twitch_enabled: Optional[bool] = None,
         twitch_channel: Optional[str] = None,
         twitch_app_id: Optional[str] = None,
@@ -2108,7 +2108,7 @@ class VoiceAgentOrchestrator:
             enabled: Master enable/disable for stimuli engine.
             patience_enabled: Enable/disable PATIENCE timer.
             patience_seconds: PATIENCE timeout in seconds.
-            patience_prompt: Custom PATIENCE prompt text.
+            patience_prompts: PATIENCE prompt templates (weighted rotation).
             twitch_enabled: Enable/disable Twitch module (NANO-056b).
             twitch_channel: Twitch channel name.
             twitch_app_id: Twitch app ID.
@@ -2156,9 +2156,9 @@ class VoiceAgentOrchestrator:
                     if patience_seconds is not None:
                         module.timeout_seconds = patience_seconds
                         cfg.patience_seconds = patience_seconds
-                    if patience_prompt is not None:
-                        module.prompt = patience_prompt
-                        cfg.patience_prompt = patience_prompt
+                    if patience_prompts is not None:
+                        module.prompts = patience_prompts
+                        cfg.patience_prompts = patience_prompts
                     break
 
             # Find the Twitch module and update it (NANO-056b)

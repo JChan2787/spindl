@@ -196,7 +196,7 @@ export interface ConfigLoadedEvent {
       enabled: boolean;
       patience_enabled: boolean;
       patience_seconds: number;
-      patience_prompt: string;
+      patience_prompts: string[];
     };
     // NANO-065a: Tools runtime config
     tools?: {
@@ -547,7 +547,7 @@ export interface StimuliConfigUpdatedEvent {
   enabled: boolean;
   patience_enabled: boolean;
   patience_seconds: number;
-  patience_prompt: string;
+  patience_prompts: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled: boolean;
   twitch_channel: string;
@@ -588,7 +588,7 @@ export interface SetStimuliConfigPayload {
   enabled?: boolean;
   patience_enabled?: boolean;
   patience_seconds?: number;
-  patience_prompt?: string;
+  patience_prompts?: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled?: boolean;
   twitch_channel?: string;

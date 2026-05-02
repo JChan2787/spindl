@@ -83,7 +83,7 @@ def build_stimuli_hydration(cfg) -> dict:
         "enabled": cfg.enabled,
         "patience_enabled": cfg.patience_enabled,
         "patience_seconds": cfg.patience_seconds,
-        "patience_prompt": cfg.patience_prompt,
+        "patience_prompts": cfg.patience_prompts,
         "twitch_enabled": cfg.twitch_enabled,
         "twitch_channel": cfg.twitch_channel or "",
         "twitch_app_id": cfg.twitch_app_id or "",
@@ -136,7 +136,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             enabled = data.get("enabled")
             patience_enabled = data.get("patience_enabled")
             patience_seconds = data.get("patience_seconds")
-            patience_prompt = data.get("patience_prompt")
+            patience_prompts = data.get("patience_prompts")
 
             # Twitch fields (NANO-056b)
             twitch_enabled = data.get("twitch_enabled")
@@ -160,10 +160,19 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                     patience_seconds = 5.0
                 elif patience_seconds > 600:
                     patience_seconds = 600.0
-            if patience_prompt is not None:
-                patience_prompt = str(patience_prompt).strip()
-                if not patience_prompt:
-                    patience_prompt = None  # Don't set empty prompts
+            if patience_prompts is not None:
+                if not isinstance(patience_prompts, list):
+                    patience_prompts = None
+                else:
+                    cleaned_prompts: list[str] = []
+                    for p in patience_prompts:
+                        s = str(p).strip()
+                        if s:
+                            cleaned_prompts.append(s)
+                    if not cleaned_prompts:
+                        patience_prompts = None
+                    else:
+                        patience_prompts = cleaned_prompts
 
             # Twitch type coercion (NANO-056b)
             if twitch_enabled is not None:
@@ -332,7 +341,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 enabled=enabled,
                 patience_enabled=patience_enabled,
                 patience_seconds=patience_seconds,
-                patience_prompt=patience_prompt,
+                patience_prompts=patience_prompts,
                 twitch_enabled=twitch_enabled,
                 twitch_channel=twitch_channel,
                 twitch_app_id=twitch_app_id,
