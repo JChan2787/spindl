@@ -206,7 +206,7 @@ export const StimuliConfigUpdatedSchema = z.object({
   // NANO-116 Phase B.2: Dialogue pipeline
   game_state_dialogue_enabled: z.boolean(),
   game_state_dialogue_buffer_size: z.number().int().min(1).max(200),
-  game_state_dialogue_prompt_template: z.string(),
+  game_state_dialogue_prompt_templates: z.array(z.string()).min(1),
   game_state_dialogue_token_budget: z.number().int().min(200).max(4000),
   game_state_dialogue_summary_max_tokens: z.number().int().min(64).max(2048),
   game_state_dialogue_min_lines: z.number().int().min(1).max(50),

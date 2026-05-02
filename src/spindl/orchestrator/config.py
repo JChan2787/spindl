@@ -517,12 +517,15 @@ class StimuliConfig(BaseModel):
     # Dialogue pipeline (NANO-116 Phase B.2)
     game_state_dialogue_enabled: bool = False
     game_state_dialogue_buffer_size: int = Field(default=30, ge=1, le=200)
-    game_state_dialogue_prompt_template: str = (
-        "**The following are in-game character dialogue lines from the game "
-        "you're co-hosting.** These characters are not talking to you \u2014 "
-        "commentate on what they're saying, don't reply to them directly.\n"
-        "\n"
-        "{dialogue}\n"
+    game_state_dialogue_prompt_templates: list[str] = Field(
+        default_factory=lambda: [
+            "**The following are in-game character dialogue lines from the game "
+            "you're co-hosting.** These characters are not talking to you — "
+            "commentate on what they're saying, don't reply to them directly.\n"
+            "\n"
+            "{dialogue}\n"
+        ],
+        min_length=1,
     )
     game_state_dialogue_token_budget: int = Field(default=500, ge=200, le=4000)
     game_state_dialogue_summary_max_tokens: int = Field(default=512, ge=64, le=2048)
@@ -606,8 +609,11 @@ class StimuliConfig(BaseModel):
             game_state_dialogue_buffer_size=dialogue.get(
                 "buffer_size", defaults.game_state_dialogue_buffer_size
             ),
-            game_state_dialogue_prompt_template=dialogue.get(
-                "prompt_template", defaults.game_state_dialogue_prompt_template
+            game_state_dialogue_prompt_templates=dialogue.get(
+                "prompt_templates",
+                [dialogue["prompt_template"]]
+                if "prompt_template" in dialogue
+                else defaults.game_state_dialogue_prompt_templates,
             ),
             game_state_dialogue_token_budget=dialogue.get(
                 "token_budget", defaults.game_state_dialogue_token_budget
@@ -1227,7 +1233,8 @@ class OrchestratorConfig(BaseModel):
             gs["dialogue"] = {}
         gsd = gs["dialogue"]
         gsd["buffer_size"] = self.stimuli_config.game_state_dialogue_buffer_size
-        gsd["prompt_template"] = self.stimuli_config.game_state_dialogue_prompt_template
+        gsd.pop("prompt_template", None)
+        gsd["prompt_templates"] = self.stimuli_config.game_state_dialogue_prompt_templates
         gsd["token_budget"] = self.stimuli_config.game_state_dialogue_token_budget
         gsd["summary_max_tokens"] = self.stimuli_config.game_state_dialogue_summary_max_tokens
         gsd["min_lines"] = self.stimuli_config.game_state_dialogue_min_lines

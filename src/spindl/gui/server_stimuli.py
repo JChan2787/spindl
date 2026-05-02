@@ -105,7 +105,7 @@ def build_stimuli_hydration(cfg) -> dict:
         # NANO-116 B.2: Dialogue pipeline
         "game_state_dialogue_enabled": cfg.game_state_dialogue_enabled,
         "game_state_dialogue_buffer_size": cfg.game_state_dialogue_buffer_size,
-        "game_state_dialogue_prompt_template": cfg.game_state_dialogue_prompt_template,
+        "game_state_dialogue_prompt_templates": cfg.game_state_dialogue_prompt_templates,
         "game_state_dialogue_token_budget": cfg.game_state_dialogue_token_budget,
         "game_state_dialogue_summary_max_tokens": cfg.game_state_dialogue_summary_max_tokens,
         "game_state_dialogue_min_lines": cfg.game_state_dialogue_min_lines,
@@ -237,7 +237,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             # Game-state dialogue pipeline fields (NANO-116 B.2)
             game_state_dialogue_enabled = data.get("game_state_dialogue_enabled")
             game_state_dialogue_buffer_size = data.get("game_state_dialogue_buffer_size")
-            game_state_dialogue_prompt_template = data.get("game_state_dialogue_prompt_template")
+            game_state_dialogue_prompt_templates = data.get("game_state_dialogue_prompt_templates")
             game_state_dialogue_token_budget = data.get("game_state_dialogue_token_budget")
             game_state_dialogue_summary_max_tokens = data.get("game_state_dialogue_summary_max_tokens")
             game_state_dialogue_min_lines = data.get("game_state_dialogue_min_lines")
@@ -282,23 +282,33 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             if game_state_dialogue_buffer_size is not None:
                 game_state_dialogue_buffer_size = int(game_state_dialogue_buffer_size)
                 game_state_dialogue_buffer_size = max(1, min(200, game_state_dialogue_buffer_size))
-            if game_state_dialogue_prompt_template is not None:
-                game_state_dialogue_prompt_template = str(game_state_dialogue_prompt_template).strip()
-                if not game_state_dialogue_prompt_template:
-                    game_state_dialogue_prompt_template = None
-                elif "{dialogue}" not in game_state_dialogue_prompt_template:
-                    await sio.emit(
-                        "stimuli_config_error",
-                        {
-                            "field": "game_state_dialogue_prompt_template",
-                            "message": (
-                                "game_state_dialogue_prompt_template must contain "
-                                "the {dialogue} placeholder."
-                            ),
-                        },
-                        to=sid,
-                    )
-                    return
+            if game_state_dialogue_prompt_templates is not None:
+                if not isinstance(game_state_dialogue_prompt_templates, list):
+                    game_state_dialogue_prompt_templates = None
+                else:
+                    cleaned: list[str] = []
+                    for t in game_state_dialogue_prompt_templates:
+                        s = str(t).strip()
+                        if not s:
+                            continue
+                        if "{dialogue}" not in s:
+                            await sio.emit(
+                                "stimuli_config_error",
+                                {
+                                    "field": "game_state_dialogue_prompt_templates",
+                                    "message": (
+                                        "Every dialogue prompt template must "
+                                        "contain the {dialogue} placeholder."
+                                    ),
+                                },
+                                to=sid,
+                            )
+                            return
+                        cleaned.append(s)
+                    if not cleaned:
+                        game_state_dialogue_prompt_templates = None
+                    else:
+                        game_state_dialogue_prompt_templates = cleaned
             if game_state_dialogue_token_budget is not None:
                 game_state_dialogue_token_budget = int(game_state_dialogue_token_budget)
                 game_state_dialogue_token_budget = max(200, min(4000, game_state_dialogue_token_budget))
@@ -340,7 +350,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_prompt_template=game_state_prompt_template,
                 game_state_dialogue_enabled=game_state_dialogue_enabled,
                 game_state_dialogue_buffer_size=game_state_dialogue_buffer_size,
-                game_state_dialogue_prompt_template=game_state_dialogue_prompt_template,
+                game_state_dialogue_prompt_templates=game_state_dialogue_prompt_templates,
                 game_state_dialogue_token_budget=game_state_dialogue_token_budget,
                 game_state_dialogue_summary_max_tokens=game_state_dialogue_summary_max_tokens,
                 game_state_dialogue_min_lines=game_state_dialogue_min_lines,

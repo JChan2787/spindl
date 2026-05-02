@@ -104,7 +104,7 @@ export interface StimuliConfig {
   // NANO-116 B.2: Dialogue pipeline
   game_state_dialogue_enabled: boolean;
   game_state_dialogue_buffer_size: number;
-  game_state_dialogue_prompt_template: string;
+  game_state_dialogue_prompt_templates: string[];
   game_state_dialogue_token_budget: number;
   game_state_dialogue_summary_max_tokens: number;
   game_state_dialogue_min_lines: number;
@@ -438,7 +438,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   game_state_prompt_template: "**New game events from the bridge.** These are in-game events — commentate on what's happening, don't address game characters directly.\n\n{events}\n",
   game_state_dialogue_enabled: false,
   game_state_dialogue_buffer_size: 30,
-  game_state_dialogue_prompt_template: "**The following are in-game character dialogue lines from the game you're co-hosting.** These characters are not talking to you — commentate on what they're saying, don't reply to them directly.\n\n{dialogue}\n",
+  game_state_dialogue_prompt_templates: ["**The following are in-game character dialogue lines from the game you're co-hosting.** These characters are not talking to you — commentate on what they're saying, don't reply to them directly.\n\n{dialogue}\n"],
   game_state_dialogue_token_budget: 500,
   game_state_dialogue_summary_max_tokens: 512,
   game_state_dialogue_min_lines: 1,

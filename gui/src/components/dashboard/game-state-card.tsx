@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Gamepad2, Wifi, WifiOff, Layers, MessageSquare, Key, Brain, BookOpen, Timer, ListFilter } from "lucide-react";
+import { Gamepad2, Wifi, WifiOff, Layers, MessageSquare, Key, Brain, BookOpen, Timer, ListFilter, Plus, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -138,9 +139,9 @@ export function GameStateCard() {
     [updatePendingStimuli, emitChanges, socket, setGameStateStatus]
   );
 
-  // Local state for textareas — emit on blur
-  const [localDialoguePrompt, setLocalDialoguePrompt] = useState(effectiveConfig.game_state_dialogue_prompt_template);
-  const dialoguePromptSyncedRef = useRef(effectiveConfig.game_state_dialogue_prompt_template);
+  // Local state for template list — emit on blur
+  const [localDialoguePrompts, setLocalDialoguePrompts] = useState<string[]>(effectiveConfig.game_state_dialogue_prompt_templates);
+  const dialoguePromptsSyncedRef = useRef<string[]>(effectiveConfig.game_state_dialogue_prompt_templates);
 
   const [localSummarizerPersona, setLocalSummarizerPersona] = useState(effectiveConfig.game_state_dialogue_summarizer_persona);
   const summarizerPersonaSyncedRef = useRef(effectiveConfig.game_state_dialogue_summarizer_persona);
@@ -156,9 +157,14 @@ export function GameStateCard() {
 
   // Sync local state when backend config changes
   useEffect(() => {
-    if (effectiveConfig.game_state_dialogue_prompt_template !== dialoguePromptSyncedRef.current) {
-      setLocalDialoguePrompt(effectiveConfig.game_state_dialogue_prompt_template);
-      dialoguePromptSyncedRef.current = effectiveConfig.game_state_dialogue_prompt_template;
+    const incoming = effectiveConfig.game_state_dialogue_prompt_templates;
+    const current = dialoguePromptsSyncedRef.current;
+    if (
+      incoming.length !== current.length ||
+      incoming.some((t, i) => t !== current[i])
+    ) {
+      setLocalDialoguePrompts(incoming);
+      dialoguePromptsSyncedRef.current = incoming;
     }
     if (effectiveConfig.game_state_dialogue_summarizer_persona !== summarizerPersonaSyncedRef.current) {
       setLocalSummarizerPersona(effectiveConfig.game_state_dialogue_summarizer_persona);
@@ -169,22 +175,65 @@ export function GameStateCard() {
       summarizerApiKeySyncedRef.current = effectiveConfig.game_state_dialogue_summarizer_api_key;
     }
   }, [
-    effectiveConfig.game_state_dialogue_prompt_template,
+    effectiveConfig.game_state_dialogue_prompt_templates,
     effectiveConfig.game_state_dialogue_summarizer_persona,
     effectiveConfig.game_state_dialogue_summarizer_api_key,
   ]);
 
-  const dialoguePromptMissingPlaceholder =
-    localDialoguePrompt.trim().length > 0 && !localDialoguePrompt.includes("{dialogue}");
+  const dialoguePromptsMissingPlaceholder = localDialoguePrompts.map(
+    (t) => t.trim().length > 0 && !t.includes("{dialogue}")
+  );
+  const anyMissingPlaceholder = dialoguePromptsMissingPlaceholder.some(Boolean);
+
+  const emitDialoguePrompts = useCallback(
+    (templates: string[]) => {
+      if (templates.some((t) => t.trim().length > 0 && !t.includes("{dialogue}"))) return;
+      const nonEmpty = templates.filter((t) => t.trim().length > 0);
+      if (nonEmpty.length === 0) return;
+      updatePendingStimuli({ game_state_dialogue_prompt_templates: nonEmpty });
+      emitChanges({ game_state_dialogue_prompt_templates: nonEmpty });
+      dialoguePromptsSyncedRef.current = nonEmpty;
+    },
+    [updatePendingStimuli, emitChanges]
+  );
 
   const handleDialoguePromptBlur = useCallback(() => {
-    if (dialoguePromptMissingPlaceholder) return;
-    if (localDialoguePrompt !== dialoguePromptSyncedRef.current) {
-      updatePendingStimuli({ game_state_dialogue_prompt_template: localDialoguePrompt });
-      emitChanges({ game_state_dialogue_prompt_template: localDialoguePrompt });
-      dialoguePromptSyncedRef.current = localDialoguePrompt;
+    if (anyMissingPlaceholder) return;
+    const synced = dialoguePromptsSyncedRef.current;
+    if (
+      localDialoguePrompts.length !== synced.length ||
+      localDialoguePrompts.some((t, i) => t !== synced[i])
+    ) {
+      emitDialoguePrompts(localDialoguePrompts);
     }
-  }, [localDialoguePrompt, dialoguePromptMissingPlaceholder, updatePendingStimuli, emitChanges]);
+  }, [localDialoguePrompts, anyMissingPlaceholder, emitDialoguePrompts]);
+
+  const handleAddTemplate = useCallback(() => {
+    setLocalDialoguePrompts((prev) => [...prev, ""]);
+  }, []);
+
+  const handleRemoveTemplate = useCallback(
+    (index: number) => {
+      setLocalDialoguePrompts((prev) => {
+        if (prev.length <= 1) return prev;
+        const next = prev.filter((_, i) => i !== index);
+        emitDialoguePrompts(next);
+        return next;
+      });
+    },
+    [emitDialoguePrompts]
+  );
+
+  const handleTemplateChange = useCallback(
+    (index: number, value: string) => {
+      setLocalDialoguePrompts((prev) => {
+        const next = [...prev];
+        next[index] = value;
+        return next;
+      });
+    },
+    []
+  );
 
   const handleSummarizerPersonaBlur = useCallback(() => {
     if (localSummarizerPersona !== summarizerPersonaSyncedRef.current) {
@@ -371,26 +420,50 @@ export function GameStateCard() {
         )}
 
         <div className="space-y-3">
-            {/* Dialogue stimulus template */}
+            {/* Dialogue stimulus templates (NANO-119: weighted rotation) */}
             <div className="space-y-1">
-              <Label className="flex items-center gap-2 text-xs">
-                <MessageSquare className="h-3 w-3" />
-                Dialogue Stimulus Template
-              </Label>
-              <Textarea
-                value={localDialoguePrompt}
-                onChange={(e) => setLocalDialoguePrompt(e.target.value)}
-                onBlur={handleDialoguePromptBlur}
-                rows={3}
-                className={`text-xs resize-none ${dialoguePromptMissingPlaceholder ? "border-red-500" : ""}`}
-                placeholder="Template for game dialogue injection..."
-                aria-invalid={dialoguePromptMissingPlaceholder}
-              />
-              {dialoguePromptMissingPlaceholder && (
-                <p className="text-xs text-red-500">
-                  Template must contain {"{dialogue}"}. Without it, buffered dialogue lines have nowhere to render.
-                </p>
-              )}
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2 text-xs">
+                  <MessageSquare className="h-3 w-3" />
+                  Dialogue Stimulus Templates
+                </Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={handleAddTemplate}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add
+                </Button>
+              </div>
+              {localDialoguePrompts.map((template, idx) => (
+                <div key={idx} className="relative">
+                  <Textarea
+                    value={template}
+                    onChange={(e) => handleTemplateChange(idx, e.target.value)}
+                    onBlur={handleDialoguePromptBlur}
+                    rows={3}
+                    className={`text-xs resize-none pr-8 ${dialoguePromptsMissingPlaceholder[idx] ? "border-red-500" : ""}`}
+                    placeholder={`Template ${idx + 1} for game dialogue injection...`}
+                    aria-invalid={dialoguePromptsMissingPlaceholder[idx]}
+                  />
+                  {localDialoguePrompts.length > 1 && (
+                    <button
+                      type="button"
+                      className="absolute top-1 right-1 p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleRemoveTemplate(idx)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                  {dialoguePromptsMissingPlaceholder[idx] && (
+                    <p className="text-xs text-red-500 mt-0.5">
+                      Template must contain {"{dialogue}"}.
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Summarizer persona */}

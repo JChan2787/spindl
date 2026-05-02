@@ -118,7 +118,7 @@ def main():
 
     # Use npm.cmd on Windows, npm elsewhere
     npm = "npm.cmd" if sys.platform == "win32" else "npm"
-    frontend_cmd = [npm, "run", "dev"]
+    frontend_cmd = [npm, "run", "dev", "--", "--hostname", "127.0.0.1"]
 
     procs: list[tuple[str, subprocess.Popen]] = []
 

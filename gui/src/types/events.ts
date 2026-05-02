@@ -610,7 +610,7 @@ export interface SetStimuliConfigPayload {
   // NANO-116 B.2: Dialogue pipeline
   game_state_dialogue_enabled?: boolean;
   game_state_dialogue_buffer_size?: number;
-  game_state_dialogue_prompt_template?: string;
+  game_state_dialogue_prompt_templates?: string[];
   game_state_dialogue_token_budget?: number;
   game_state_dialogue_summary_max_tokens?: number;
   game_state_dialogue_min_lines?: number;

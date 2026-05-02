@@ -16,6 +16,7 @@ in get_stimulus(), template-formatted output.
 import asyncio
 import json
 import logging
+import random
 import threading
 import time
 from collections import deque
@@ -39,6 +40,15 @@ _DEFAULT_PROMPT_TEMPLATE = (
 
 _RECONNECT_DELAY = 5.0
 _READ_BUFFER_SIZE = 65536
+_DECAY_FACTOR = 0.5
+
+_DEFAULT_DIALOGUE_PROMPT_TEMPLATES: list[str] = [
+    "**The following are in-game character dialogue lines from the game "
+    "you're co-hosting.** These characters are not talking to you — "
+    "commentate on what they're saying, don't reply to them directly.\n"
+    "\n"
+    "{dialogue}\n"
+]
 
 
 class GameStateModule(StimulusModule):
@@ -79,6 +89,11 @@ class GameStateModule(StimulusModule):
         self._dialogue_min_lines = max(1, dialogue_min_lines)
         self._dialogue_drain_delay = max(0.0, dialogue_drain_delay)
         self._first_line_time: float | None = None
+
+        self._dialogue_prompt_templates: list[str] = list(
+            _DEFAULT_DIALOGUE_PROMPT_TEMPLATES
+        )
+        self._template_weights: list[float] = [1.0]
 
         self._dialogue_store = None
         self._summarizing = False
@@ -169,6 +184,18 @@ class GameStateModule(StimulusModule):
     @prompt_template.setter
     def prompt_template(self, value: str) -> None:
         self._prompt_template = value
+
+    @property
+    def dialogue_prompt_templates(self) -> list[str]:
+        return self._dialogue_prompt_templates
+
+    @dialogue_prompt_templates.setter
+    def dialogue_prompt_templates(self, value: list[str]) -> None:
+        self._dialogue_prompt_templates = value if value else list(
+            _DEFAULT_DIALOGUE_PROMPT_TEMPLATES
+        )
+        n = len(self._dialogue_prompt_templates)
+        self._template_weights = [1.0 / n] * n
 
     @property
     def dialogue_min_lines(self) -> int:
@@ -263,12 +290,23 @@ class GameStateModule(StimulusModule):
 
         dialogue_block = "\n".join(formatted_lines)
 
-        template = getattr(self, "_dialogue_prompt_template", None) or (
-            "**The following are in-game character dialogue lines from the game "
-            "you're co-hosting.** These characters are not talking to you — "
-            "commentate on what they're saying, don't reply to them directly.\n\n"
-            "{dialogue}\n"
-        )
+        templates = self._dialogue_prompt_templates
+        weights = self._template_weights
+        if len(templates) == 1:
+            template = templates[0]
+        else:
+            idx = random.choices(range(len(templates)), weights=weights, k=1)[0]
+            template = templates[idx]
+            pre = weights[idx]
+            weights[idx] = pre * _DECAY_FACTOR
+            lost = pre - weights[idx]
+            share = lost / (len(weights) - 1) if len(weights) > 1 else 0.0
+            for i in range(len(weights)):
+                if i != idx:
+                    weights[i] += share
+            total = sum(weights)
+            if total > 0:
+                self._template_weights = [w / total for w in weights]
 
         user_input = template.format(dialogue=dialogue_block)
 

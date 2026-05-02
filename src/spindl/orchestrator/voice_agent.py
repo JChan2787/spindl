@@ -659,7 +659,7 @@ class VoiceAgentOrchestrator:
                 dialogue_drain_delay=stimuli_cfg.game_state_dialogue_drain_delay,
             )
             game_state._dialogue_store = self._dialogue_store
-            game_state._dialogue_prompt_template = stimuli_cfg.game_state_dialogue_prompt_template
+            game_state.dialogue_prompt_templates = stimuli_cfg.game_state_dialogue_prompt_templates
             self._stimuli_engine.register_module(game_state)
             self._game_state_module = game_state
             logger.info(
@@ -2092,7 +2092,7 @@ class VoiceAgentOrchestrator:
         game_state_prompt_template: Optional[str] = None,
         game_state_dialogue_enabled: Optional[bool] = None,
         game_state_dialogue_buffer_size: Optional[int] = None,
-        game_state_dialogue_prompt_template: Optional[str] = None,
+        game_state_dialogue_prompt_templates: Optional[list[str]] = None,
         game_state_dialogue_token_budget: Optional[int] = None,
         game_state_dialogue_summary_max_tokens: Optional[int] = None,
         game_state_dialogue_min_lines: Optional[int] = None,
@@ -2124,7 +2124,7 @@ class VoiceAgentOrchestrator:
             game_state_prompt_template: Prompt template for game events.
             game_state_dialogue_enabled: Enable/disable dialogue pipeline.
             game_state_dialogue_buffer_size: Max buffered dialogue lines.
-            game_state_dialogue_prompt_template: Prompt template for dialogue stimulus.
+            game_state_dialogue_prompt_templates: Prompt templates for dialogue stimulus (weighted rotation).
             game_state_dialogue_token_budget: Token budget for CHARACTER_KNOWLEDGE block (tiktoken tokens).
             game_state_dialogue_summary_max_tokens: Max tokens for summarizer output.
             game_state_dialogue_summarizer_model: OpenRouter model for summarizer.
@@ -2260,9 +2260,9 @@ class VoiceAgentOrchestrator:
                         if hasattr(module, "dialogue_buffer") and module.dialogue_buffer:
                             module.dialogue_buffer.maxlen = game_state_dialogue_buffer_size
                         cfg.game_state_dialogue_buffer_size = game_state_dialogue_buffer_size
-                    if game_state_dialogue_prompt_template is not None:
-                        module._dialogue_prompt_template = game_state_dialogue_prompt_template
-                        cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
+                    if game_state_dialogue_prompt_templates is not None:
+                        module.dialogue_prompt_templates = game_state_dialogue_prompt_templates
+                        cfg.game_state_dialogue_prompt_templates = game_state_dialogue_prompt_templates
                     if game_state_dialogue_token_budget is not None:
                         cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
                     if game_state_dialogue_min_lines is not None:
@@ -2288,8 +2288,8 @@ class VoiceAgentOrchestrator:
             cfg.game_state_dialogue_enabled = game_state_dialogue_enabled
         if game_state_dialogue_buffer_size is not None:
             cfg.game_state_dialogue_buffer_size = game_state_dialogue_buffer_size
-        if game_state_dialogue_prompt_template is not None:
-            cfg.game_state_dialogue_prompt_template = game_state_dialogue_prompt_template
+        if game_state_dialogue_prompt_templates is not None:
+            cfg.game_state_dialogue_prompt_templates = game_state_dialogue_prompt_templates
         if game_state_dialogue_token_budget is not None:
             cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
         if game_state_dialogue_summary_max_tokens is not None:
