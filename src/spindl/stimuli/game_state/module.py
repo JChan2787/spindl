@@ -16,7 +16,6 @@ in get_stimulus(), template-formatted output.
 import asyncio
 import json
 import logging
-import random
 import threading
 import time
 from collections import deque
@@ -24,6 +23,7 @@ from typing import Optional
 
 from ..base import StimulusModule
 from ..models import StimulusData, StimulusSource
+from ..weighted_rotator import WeightedRotator
 from .dialogue_buffer import DialogueBuffer
 from .models import GameEvent
 from .validator import check_protocol_version, load_vendored_version, validate_envelope
@@ -40,7 +40,6 @@ _DEFAULT_PROMPT_TEMPLATE = (
 
 _RECONNECT_DELAY = 5.0
 _READ_BUFFER_SIZE = 65536
-_DECAY_FACTOR = 0.5
 
 _DEFAULT_DIALOGUE_PROMPT_TEMPLATES: list[str] = [
     "**The following are in-game character dialogue lines from the game "
@@ -93,7 +92,7 @@ class GameStateModule(StimulusModule):
         self._dialogue_prompt_templates: list[str] = list(
             _DEFAULT_DIALOGUE_PROMPT_TEMPLATES
         )
-        self._template_weights: list[float] = [1.0]
+        self._template_rotator = WeightedRotator(self._dialogue_prompt_templates)
 
         self._dialogue_store = None
         self._summarizing = False
@@ -194,8 +193,7 @@ class GameStateModule(StimulusModule):
         self._dialogue_prompt_templates = value if value else list(
             _DEFAULT_DIALOGUE_PROMPT_TEMPLATES
         )
-        n = len(self._dialogue_prompt_templates)
-        self._template_weights = [1.0 / n] * n
+        self._template_rotator.items = self._dialogue_prompt_templates
 
     @property
     def dialogue_min_lines(self) -> int:
@@ -290,23 +288,7 @@ class GameStateModule(StimulusModule):
 
         dialogue_block = "\n".join(formatted_lines)
 
-        templates = self._dialogue_prompt_templates
-        weights = self._template_weights
-        if len(templates) == 1:
-            template = templates[0]
-        else:
-            idx = random.choices(range(len(templates)), weights=weights, k=1)[0]
-            template = templates[idx]
-            pre = weights[idx]
-            weights[idx] = pre * _DECAY_FACTOR
-            lost = pre - weights[idx]
-            share = lost / (len(weights) - 1) if len(weights) > 1 else 0.0
-            for i in range(len(weights)):
-                if i != idx:
-                    weights[i] += share
-            total = sum(weights)
-            if total > 0:
-                self._template_weights = [w / total for w in weights]
+        template = self._template_rotator.select() or self._dialogue_prompt_templates[0]
 
         user_input = template.format(dialogue=dialogue_block)
 

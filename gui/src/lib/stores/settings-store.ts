@@ -112,6 +112,10 @@ export interface StimuliConfig {
   game_state_dialogue_summarizer_model: string;
   game_state_dialogue_summarizer_api_key: string;
   game_state_dialogue_summarizer_persona: string;
+  // NANO-121: Model cycling
+  model_rotation_enabled: boolean;
+  model_rotation_models: string[];
+  model_rotation_api_key: string;
 }
 
 // Game-state bridge status (NANO-116)
@@ -446,6 +450,10 @@ const DEFAULT_STIMULI: StimuliConfig = {
   game_state_dialogue_summarizer_model: "anthropic/claude-sonnet-4-20250514",
   game_state_dialogue_summarizer_api_key: "",
   game_state_dialogue_summarizer_persona: "",
+  // NANO-121: Model cycling
+  model_rotation_enabled: false,
+  model_rotation_models: [],
+  model_rotation_api_key: "",
 };
 
 const DEFAULT_PROMPT: PromptConfig = {

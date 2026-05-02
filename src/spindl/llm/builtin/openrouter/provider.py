@@ -202,9 +202,12 @@ class OpenRouterProvider(LLMProvider):
         if max_tokens == 256:
             max_tokens = self._default_max_tokens
 
+        # NANO-121: Per-call model override for stimuli model cycling
+        model = kwargs.pop("model", self._model)
+
         # Build request payload
         payload = {
-            "model": self._model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -313,9 +316,12 @@ class OpenRouterProvider(LLMProvider):
         if max_tokens == 256:
             max_tokens = self._default_max_tokens
 
+        # NANO-121: Per-call model override for stimuli model cycling
+        model = kwargs.pop("model", self._model)
+
         # Build request payload with streaming enabled
         payload = {
-            "model": self._model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,

@@ -559,6 +559,10 @@ export interface StimuliConfigUpdatedEvent {
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: AddressingContext[];
+  // NANO-121: Model cycling
+  model_rotation_enabled: boolean;
+  model_rotation_models: string[];
+  model_rotation_api_key: string;
   persisted: boolean;
 }
 
@@ -618,6 +622,10 @@ export interface SetStimuliConfigPayload {
   game_state_dialogue_summarizer_model?: string;
   game_state_dialogue_summarizer_api_key?: string;
   game_state_dialogue_summarizer_persona?: string;
+  // NANO-121: Model cycling
+  model_rotation_enabled?: boolean;
+  model_rotation_models?: string[];
+  model_rotation_api_key?: string;
 }
 
 // NANO-116: Game-state bridge status

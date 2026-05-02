@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Zap, Timer, MessageSquare, Users, Plus, Trash2, X } from "lucide-react";
+import { Zap, Timer, MessageSquare, Users, Plus, Trash2, X, Shuffle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useSettingsStore, selectEffectiveStimuliConfig, type AddressingContextEntry } from "@/lib/stores";
+import { useLauncherStore } from "@/lib/stores/launcher-store";
 import { getSocket } from "@/lib/socket";
+import { ModelCombobox, type ModelOption } from "@/components/ui/model-combobox";
 
 interface SliderProps {
   label: string;
@@ -243,6 +245,94 @@ export function StimuliSettings() {
     }
   }, [localContexts, emitContexts]);
 
+  // NANO-121: Model cycling
+  const handleModelRotationEnabledChange = useCallback(
+    (checked: boolean) => {
+      updatePendingStimuli({ model_rotation_enabled: checked });
+      emitChanges({ model_rotation_enabled: checked });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const rotationModels = effectiveConfig.model_rotation_models ?? [];
+
+  const handleAddRotationModel = useCallback(
+    (modelId: string) => {
+      if (!modelId || rotationModels.includes(modelId)) return;
+      const updated = [...rotationModels, modelId];
+      updatePendingStimuli({ model_rotation_models: updated });
+      emitChanges({ model_rotation_models: updated });
+    },
+    [rotationModels, updatePendingStimuli, emitChanges]
+  );
+
+  const handleRemoveRotationModel = useCallback(
+    (index: number) => {
+      const updated = rotationModels.filter((_, i) => i !== index);
+      updatePendingStimuli({ model_rotation_models: updated });
+      emitChanges({ model_rotation_models: updated });
+    },
+    [rotationModels, updatePendingStimuli, emitChanges]
+  );
+
+  const [localRotationApiKey, setLocalRotationApiKey] = useState(
+    effectiveConfig.model_rotation_api_key ?? ""
+  );
+
+  useEffect(() => {
+    setLocalRotationApiKey(effectiveConfig.model_rotation_api_key ?? "");
+  }, [effectiveConfig.model_rotation_api_key]);
+
+  const handleRotationApiKeyBlur = useCallback(() => {
+    emitChanges({ model_rotation_api_key: localRotationApiKey });
+  }, [localRotationApiKey, emitChanges]);
+
+  // Model list fetching for rotation combobox
+  const launcherCloud = useLauncherStore((s) => s.llmCloud);
+  const fallbackKey = launcherCloud.provider === "openrouter" && launcherCloud.apiKey
+    ? launcherCloud.apiKey
+    : effectiveConfig.game_state_dialogue_summarizer_api_key || "";
+  const effectiveRotationApiKey = localRotationApiKey || effectiveConfig.model_rotation_api_key || fallbackKey;
+
+  const [rotationModelOptions, setRotationModelOptions] = useState<ModelOption[]>([]);
+  const [isLoadingRotationModels, setIsLoadingRotationModels] = useState(false);
+  const [rotationModelsError, setRotationModelsError] = useState<string | null>(null);
+
+  const fetchRotationModels = useCallback(async () => {
+    const key = effectiveRotationApiKey;
+    if (!key) return;
+    setIsLoadingRotationModels(true);
+    setRotationModelsError(null);
+    try {
+      const response = await fetch("/api/launcher/fetch-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "openrouter", apiKey: key }),
+      });
+      const data = await response.json();
+      if (!data.success) {
+        setRotationModelsError(data.error || "Failed to fetch models");
+        setRotationModelOptions([]);
+      } else {
+        setRotationModelOptions(data.models);
+      }
+    } catch (err) {
+      setRotationModelsError(err instanceof Error ? err.message : "Network error");
+      setRotationModelOptions([]);
+    } finally {
+      setIsLoadingRotationModels(false);
+    }
+  }, [effectiveRotationApiKey]);
+
+  useEffect(() => {
+    if (effectiveRotationApiKey && rotationModelOptions.length === 0 && !isLoadingRotationModels) {
+      fetchRotationModels();
+    }
+  }, [effectiveRotationApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Dummy value for the "add model" combobox — always empty, selection triggers add
+  const [addModelValue, setAddModelValue] = useState("");
+
   return (
     <Card>
       <CardHeader>
@@ -407,6 +497,97 @@ export function StimuliSettings() {
                     />
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* NANO-121: Model Rotation */}
+            <div className="border-t border-border pt-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2 text-sm font-medium">
+                  <Shuffle className="h-3 w-3" />
+                  Model Rotation
+                </Label>
+                <button
+                  onClick={() => handleModelRotationEnabledChange(!effectiveConfig.model_rotation_enabled)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    effectiveConfig.model_rotation_enabled ? "bg-primary" : "bg-muted"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      effectiveConfig.model_rotation_enabled ? "translate-x-4" : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Cycle between OpenRouter models for stimulus responses. Each fire picks a different model to vary output personality.
+              </p>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 text-sm">
+                  Models in Rotation
+                </Label>
+                {rotationModels.length === 0 && (
+                  <p className="text-xs text-muted-foreground italic">
+                    No models configured. Select models below to enable cycling.
+                  </p>
+                )}
+                {rotationModels.map((modelId, idx) => {
+                  const modelInfo = rotationModelOptions.find((m) => m.id === modelId);
+                  return (
+                    <div key={modelId} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium truncate block">
+                          {modelInfo?.name || modelId}
+                        </span>
+                        <span className="text-xs text-muted-foreground font-mono truncate block">
+                          {modelId}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="shrink-0 p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveRotationModel(idx)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+                <div className="pt-1">
+                  <Label className="text-xs text-muted-foreground mb-1 block">
+                    Add Model
+                  </Label>
+                  <ModelCombobox
+                    value={addModelValue}
+                    onValueChange={(id) => {
+                      handleAddRotationModel(id);
+                      setAddModelValue("");
+                    }}
+                    models={rotationModelOptions}
+                    isLoading={isLoadingRotationModels}
+                    error={rotationModelsError}
+                    onRefresh={fetchRotationModels}
+                    placeholder="Search models..."
+                    disabled={!effectiveRotationApiKey}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">
+                  API Key Override (optional)
+                </Label>
+                <input
+                  type="password"
+                  value={localRotationApiKey}
+                  onChange={(e) => setLocalRotationApiKey(e.target.value)}
+                  onBlur={handleRotationApiKeyBlur}
+                  className="w-full h-8 rounded-md border border-input bg-background px-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  placeholder="Falls back to main LLM API key"
+                />
               </div>
             </div>
 

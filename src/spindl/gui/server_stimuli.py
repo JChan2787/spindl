@@ -118,6 +118,10 @@ def build_stimuli_hydration(cfg) -> dict:
             {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
             for ctx in cfg.addressing_others_contexts
         ],
+        # NANO-121: Model cycling
+        "model_rotation_enabled": cfg.model_rotation_enabled,
+        "model_rotation_models": cfg.model_rotation_models,
+        "model_rotation_api_key": cfg.model_rotation_api_key or "",
     }
 
 
@@ -255,6 +259,23 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             game_state_dialogue_summarizer_api_key = data.get("game_state_dialogue_summarizer_api_key")
             game_state_dialogue_summarizer_persona = data.get("game_state_dialogue_summarizer_persona")
 
+            # NANO-121: Model cycling fields
+            model_rotation_enabled = data.get("model_rotation_enabled")
+            model_rotation_models = data.get("model_rotation_models")
+            model_rotation_api_key = data.get("model_rotation_api_key")
+
+            if model_rotation_enabled is not None:
+                model_rotation_enabled = bool(model_rotation_enabled)
+            if model_rotation_models is not None:
+                if not isinstance(model_rotation_models, list):
+                    model_rotation_models = None
+                else:
+                    model_rotation_models = [
+                        str(m).strip() for m in model_rotation_models if str(m).strip()
+                    ]
+            if model_rotation_api_key is not None:
+                model_rotation_api_key = str(model_rotation_api_key).strip()
+
             # Game-state type coercion (NANO-116)
             if game_state_enabled is not None:
                 game_state_enabled = bool(game_state_enabled)
@@ -367,6 +388,9 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_dialogue_summarizer_model=game_state_dialogue_summarizer_model,
                 game_state_dialogue_summarizer_api_key=game_state_dialogue_summarizer_api_key,
                 game_state_dialogue_summarizer_persona=game_state_dialogue_summarizer_persona,
+                model_rotation_enabled=model_rotation_enabled,
+                model_rotation_models=model_rotation_models,
+                model_rotation_api_key=model_rotation_api_key,
             )
 
             cfg = server._orchestrator._config.stimuli_config

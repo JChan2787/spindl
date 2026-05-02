@@ -6,12 +6,12 @@ for a configurable number of seconds. Lowest priority — only fires when
 no other module has a pending stimulus.
 """
 
-import random
 import time
 from typing import Optional
 
 from .base import StimulusModule
 from .models import StimulusData, StimulusSource
+from .weighted_rotator import WeightedRotator
 
 import logging
 
@@ -21,8 +21,6 @@ _DEFAULT_PROMPTS = [
     "Continue the conversation naturally. "
     "You have been idle. Think of something interesting to say or ask."
 ]
-
-_DECAY_FACTOR = 0.5
 
 
 class PatienceModule(StimulusModule):
@@ -35,8 +33,7 @@ class PatienceModule(StimulusModule):
     Supports pause/resume: when paused, elapsed reports 0 and the timer
     does not accumulate. On resume, the timer restarts from zero.
 
-    Supports weighted prompt rotation (NANO-120): multiple prompts with
-    decay-based selection to prevent repetition.
+    Supports weighted prompt rotation (NANO-120) via WeightedRotator.
 
     Priority 0 — lowest. Only fires when no other module has a stimulus.
     """
@@ -49,15 +46,11 @@ class PatienceModule(StimulusModule):
     ):
         self._timeout = timeout_seconds
         self._prompts = prompts if prompts else list(_DEFAULT_PROMPTS)
-        self._template_weights = self._init_weights(len(self._prompts))
+        self._rotator = WeightedRotator(self._prompts)
         self._enabled = enabled
         self._last_activity_time = time.monotonic()
         self._running = False
         self._paused = False
-
-    @staticmethod
-    def _init_weights(n: int) -> list[float]:
-        return [1.0 / n] * n if n > 0 else [1.0]
 
     @property
     def name(self) -> str:
@@ -90,7 +83,7 @@ class PatienceModule(StimulusModule):
     @prompts.setter
     def prompts(self, value: list[str]) -> None:
         self._prompts = value if value else list(_DEFAULT_PROMPTS)
-        self._template_weights = self._init_weights(len(self._prompts))
+        self._rotator.items = self._prompts
 
     @property
     def paused(self) -> bool:
@@ -136,23 +129,7 @@ class PatienceModule(StimulusModule):
         # Reset timer after firing (prevents re-fire next cycle)
         self._last_activity_time = time.monotonic()
 
-        # Weighted prompt selection with decay (NANO-120)
-        if len(self._prompts) == 1:
-            prompt = self._prompts[0]
-        else:
-            idx = random.choices(
-                range(len(self._prompts)), weights=self._template_weights, k=1
-            )[0]
-            prompt = self._prompts[idx]
-            original_weight = self._template_weights[idx]
-            self._template_weights[idx] *= _DECAY_FACTOR
-            lost = original_weight - self._template_weights[idx]
-            n_others = len(self._template_weights) - 1
-            for i in range(len(self._template_weights)):
-                if i != idx:
-                    self._template_weights[i] += lost / n_others
-            total = sum(self._template_weights)
-            self._template_weights = [w / total for w in self._template_weights]
+        prompt = self._rotator.select() or self._prompts[0]
 
         return StimulusData(
             source=StimulusSource.PATIENCE,

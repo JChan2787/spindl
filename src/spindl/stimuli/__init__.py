@@ -17,6 +17,7 @@ from .game_state import GameStateModule
 from .models import StimulusData, StimulusSource
 from .patience import PatienceModule
 from .twitch import TwitchModule
+from .weighted_rotator import WeightedRotator
 
 __all__ = [
     "StimuliEngine",
@@ -26,4 +27,5 @@ __all__ = [
     "GameStateModule",
     "PatienceModule",
     "TwitchModule",
+    "WeightedRotator",
 ]

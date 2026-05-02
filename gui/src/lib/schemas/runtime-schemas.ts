@@ -216,6 +216,10 @@ export const StimuliConfigUpdatedSchema = z.object({
   game_state_dialogue_summarizer_persona: z.string(),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
+  // NANO-121: Model cycling
+  model_rotation_enabled: z.boolean(),
+  model_rotation_models: z.array(z.string()),
+  model_rotation_api_key: z.string(),
   persisted: z.boolean().optional(),
 });
 

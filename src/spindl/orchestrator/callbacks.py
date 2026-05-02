@@ -192,6 +192,10 @@ class OrchestratorCallbacks:
         # Runtime generation parameter overrides (NANO-053)
         self._generation_params: Optional[dict] = None
 
+        # NANO-121: Model cycling for stimulus responses
+        self._model_rotator = None
+        self._model_cycling_enabled: bool = False
+
         # NANO-076: Session file getter for snapshot sidecar persistence.
         # Set by VoiceAgentOrchestrator after construction.
         self._session_file_getter: Optional[Callable] = None
@@ -1231,15 +1235,37 @@ class OrchestratorCallbacks:
                 # NANO-115 item #1: Tag user input with source prefix so
                 # modality/origin persists into conversation history.
                 tagged_input = tag_user_input(transcription, modality, stimulus_source)
+
+                # NANO-121: Model cycling for stimulus responses
+                gen_params = self._generation_params
+                effective_metadata = stimulus_metadata
+                if (
+                    stimulus_source
+                    and self._model_cycling_enabled
+                    and self._model_rotator is not None
+                ):
+                    cycled_model = self._model_rotator.select()
+                    if cycled_model:
+                        gen_params = dict(gen_params) if gen_params else {}
+                        gen_params["model"] = cycled_model
+                        if effective_metadata is None:
+                            effective_metadata = {}
+                        effective_metadata["cycled_model"] = cycled_model
+                        logger.info(
+                            "Model cycling: stimulus=%s, model=%s",
+                            stimulus_source,
+                            cycled_model,
+                        )
+
                 result = self._pipeline.run(
                     tagged_input,
                     self._persona,
-                    generation_params=self._generation_params,
+                    generation_params=gen_params,
                     state_trigger=state_trigger,
                     input_modality=modality,
                     last_assistant_message=None,
                     stimulus_source=stimulus_source,
-                    stimulus_metadata=stimulus_metadata,
+                    stimulus_metadata=effective_metadata,
                 )
                 response = result.content
                 tts_response = result.tts_text or response  # NANO-109
@@ -1469,6 +1495,11 @@ class OrchestratorCallbacks:
             params: Dict with temperature/max_tokens/top_p overrides, or None.
         """
         self._generation_params = params
+
+    def update_model_rotation(self, enabled: bool, rotator) -> None:
+        """Update model cycling state (NANO-121)."""
+        self._model_cycling_enabled = enabled
+        self._model_rotator = rotator
 
     @property
     def last_transcription(self) -> Optional[str]:

@@ -583,6 +583,16 @@ class VoiceAgentOrchestrator:
         self._callbacks._is_addressing_others = lambda: self._addressing_others
         self._callbacks._consume_addressing_others_prompt = self._consume_addressing_others_prompt
 
+        # NANO-121: Model cycling for stimulus responses
+        self._model_rotator = None
+        if stimuli_cfg.model_rotation_models:
+            from ..stimuli.weighted_rotator import WeightedRotator
+            self._model_rotator = WeightedRotator(stimuli_cfg.model_rotation_models)
+        self._callbacks.update_model_rotation(
+            enabled=stimuli_cfg.model_rotation_enabled and bool(stimuli_cfg.model_rotation_models),
+            rotator=self._model_rotator,
+        )
+
         # Wrapper to emit state change events
         def on_state_change_with_event(transition):
             # Original logging
@@ -2100,6 +2110,9 @@ class VoiceAgentOrchestrator:
         game_state_dialogue_summarizer_model: Optional[str] = None,
         game_state_dialogue_summarizer_api_key: Optional[str] = None,
         game_state_dialogue_summarizer_persona: Optional[str] = None,
+        model_rotation_enabled: Optional[bool] = None,
+        model_rotation_models: Optional[list[str]] = None,
+        model_rotation_api_key: Optional[str] = None,
     ) -> None:
         """
         Update stimuli config at runtime (NANO-056).
@@ -2312,6 +2325,28 @@ class VoiceAgentOrchestrator:
             cfg.game_state_dialogue_summarizer_persona = game_state_dialogue_summarizer_persona
             if self._dialogue_summarizer:
                 self._dialogue_summarizer.persona_prompt = game_state_dialogue_summarizer_persona
+
+        # NANO-121: Model cycling for stimulus responses
+        rotation_changed = False
+        if model_rotation_enabled is not None:
+            cfg.model_rotation_enabled = model_rotation_enabled
+            rotation_changed = True
+        if model_rotation_models is not None:
+            cfg.model_rotation_models = model_rotation_models
+            rotation_changed = True
+        if model_rotation_api_key is not None:
+            cfg.model_rotation_api_key = model_rotation_api_key
+        if rotation_changed:
+            from ..stimuli.weighted_rotator import WeightedRotator
+            models = cfg.model_rotation_models
+            if models:
+                self._model_rotator = WeightedRotator(models)
+            else:
+                self._model_rotator = None
+            self._callbacks.update_model_rotation(
+                enabled=cfg.model_rotation_enabled and bool(models),
+                rotator=self._model_rotator,
+            )
 
     def update_vts_config(
         self,

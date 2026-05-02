@@ -543,6 +543,11 @@ class StimuliConfig(BaseModel):
         default_factory=_default_addressing_contexts,
     )
 
+    # Model cycling for stimuli responses (NANO-121)
+    model_rotation_enabled: bool = False
+    model_rotation_models: list[str] = Field(default_factory=list)
+    model_rotation_api_key: str = ""
+
     @classmethod
     def from_dict(cls, data: dict) -> "StimuliConfig":
         """Parse stimuli config from YAML dict."""
@@ -551,6 +556,7 @@ class StimuliConfig(BaseModel):
         twitch = data.get("twitch", {})
         game_state = data.get("game_state", {})
         dialogue = game_state.get("dialogue", {})
+        model_rotation = data.get("model_rotation", {})
 
         # Parse addressing-others contexts (NANO-110)
         addressing = data.get("addressing_others", {})
@@ -651,6 +657,15 @@ class StimuliConfig(BaseModel):
                 "summarizer_persona", defaults.game_state_dialogue_summarizer_persona
             ),
             addressing_others_contexts=contexts,
+            model_rotation_enabled=model_rotation.get(
+                "enabled", defaults.model_rotation_enabled
+            ),
+            model_rotation_models=model_rotation.get(
+                "models", defaults.model_rotation_models
+            ),
+            model_rotation_api_key=model_rotation.get(
+                "api_key", defaults.model_rotation_api_key
+            ),
         )
 
 
@@ -1265,6 +1280,14 @@ class OrchestratorConfig(BaseModel):
             {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
             for ctx in self.stimuli_config.addressing_others_contexts
         ]
+
+        # Model cycling (NANO-121, nested under stimuli)
+        if "model_rotation" not in stim:
+            stim["model_rotation"] = {}
+        mr = stim["model_rotation"]
+        mr["enabled"] = self.stimuli_config.model_rotation_enabled
+        mr["models"] = self.stimuli_config.model_rotation_models
+        mr["api_key"] = self.stimuli_config.model_rotation_api_key
 
         # --- Tools ---
         if "tools" not in data:
