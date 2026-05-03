@@ -139,8 +139,8 @@ class GameStateModule(StimulusModule):
         self._gameplay_first_event_time: float | None = None
         # Dedupe: enemy_ctx_id → last seen monotonic time
         self._disengage_seen: dict[int, float] = {}
-        # Chapter dedupe: last chapter_hash that fired
-        self._last_chapter_hash: int | None = None
+        # Chapter dedupe: last chapter name that fired (zone-level, not status-level)
+        self._last_chapter_name: str | None = None
 
         # Snapshot aggregate (Phase 2)
         self._last_evaluated_snapshot: dict[str, Any] | None = None
@@ -381,7 +381,7 @@ class GameStateModule(StimulusModule):
         self._current_snapshot = None
         self._snapshot_probability = self._gameplay_base_probability
         self._snapshot_roll_passed = False
-        self._last_chapter_hash = None
+        self._last_chapter_name = None
         self._last_sequence = -1
         self._thread = None
         logger.info("Game-state module stopped")
@@ -551,11 +551,12 @@ class GameStateModule(StimulusModule):
                 self._disengage_seen[ctx_id] = now
 
         if etype == "chapter_status_changed":
-            ch_hash = p.get("chapter_hash")
-            if ch_hash is not None and ch_hash == self._last_chapter_hash:
-                logger.debug("Deduped chapter_status_changed hash=%s", ch_hash)
+            ch_name = p.get("chapter_name") or ""
+            base_name = ch_name.removesuffix(" (sub)").strip()
+            if base_name and base_name == self._last_chapter_name:
+                logger.debug("Deduped chapter_status_changed name=%s", base_name)
                 return
-            self._last_chapter_hash = ch_hash
+            self._last_chapter_name = base_name or None
 
         self._gameplay_event_buffer.append(event)
         if self._gameplay_first_event_time is None:
@@ -591,7 +592,7 @@ class GameStateModule(StimulusModule):
 
         snap = self._current_snapshot
         self._last_evaluated_snapshot = dict(snap)
-        if "enemies" in snap:
+        if snap.get("enemies"):
             self._last_evaluated_snapshot["enemies"] = [dict(e) for e in snap["enemies"]]
         self._snapshot_probability = self._gameplay_base_probability
 
@@ -627,8 +628,8 @@ class GameStateModule(StimulusModule):
             if cur.get(field) != prev.get(field):
                 return True
 
-        cur_enemies = cur.get("enemies", [])
-        prev_enemies = prev.get("enemies", [])
+        cur_enemies = cur.get("enemies") or []
+        prev_enemies = prev.get("enemies") or []
         if len(cur_enemies) != len(prev_enemies):
             return True
 
@@ -676,7 +677,7 @@ class GameStateModule(StimulusModule):
         status = "DEAD" if is_dead else ("in combat" if in_combat else "exploring")
         lines.append(f"- Hugh: {hp_pct}% HP, {weapon} equipped, {status}")
 
-        enemies = snap.get("enemies", [])
+        enemies = snap.get("enemies") or []
         engaged = [e for e in enemies if not e.get("is_dead", False)]
         if engaged:
             parts: list[str] = []
