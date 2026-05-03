@@ -545,7 +545,6 @@ class StimuliConfig(BaseModel):
     game_state_gameplay_probability_ceiling: float = Field(default=1.0, ge=0.1, le=1.0)
     game_state_gameplay_dirty_hp_threshold: float = Field(default=0.10, ge=0.01, le=0.5)
     game_state_gameplay_event_batch_window: float = Field(default=2.0, ge=0.5, le=10.0)
-    game_state_gameplay_disengage_dedupe_window: float = Field(default=10.0, ge=2.0, le=30.0)
 
     # Addressing-others contexts (NANO-110)
     addressing_others_contexts: list[AddressingContext] = Field(
@@ -683,9 +682,6 @@ class StimuliConfig(BaseModel):
             ),
             game_state_gameplay_event_batch_window=gameplay.get(
                 "event_batch_window", defaults.game_state_gameplay_event_batch_window
-            ),
-            game_state_gameplay_disengage_dedupe_window=gameplay.get(
-                "disengage_dedupe_window", defaults.game_state_gameplay_disengage_dedupe_window
             ),
             addressing_others_contexts=contexts,
             model_rotation_enabled=model_rotation.get(
@@ -1313,7 +1309,6 @@ class OrchestratorConfig(BaseModel):
         gsg["probability_ceiling"] = self.stimuli_config.game_state_gameplay_probability_ceiling
         gsg["dirty_hp_threshold"] = self.stimuli_config.game_state_gameplay_dirty_hp_threshold
         gsg["event_batch_window"] = self.stimuli_config.game_state_gameplay_event_batch_window
-        gsg["disengage_dedupe_window"] = self.stimuli_config.game_state_gameplay_disengage_dedupe_window
 
         # Addressing-others contexts (NANO-110, nested under stimuli)
         if "addressing_others" not in stim:

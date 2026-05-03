@@ -629,7 +629,6 @@ export interface SetStimuliConfigPayload {
   game_state_gameplay_probability_ceiling?: number;
   game_state_gameplay_dirty_hp_threshold?: number;
   game_state_gameplay_event_batch_window?: number;
-  game_state_gameplay_disengage_dedupe_window?: number;
   // NANO-121: Model cycling
   model_rotation_enabled?: boolean;
   model_rotation_models?: string[];

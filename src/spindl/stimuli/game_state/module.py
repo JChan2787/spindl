@@ -49,7 +49,6 @@ _READ_BUFFER_SIZE = 65536
 # NANO-122: Event types that trigger immediate gameplay stimulus
 _GAMEPLAY_EVENT_TYPES = frozenset({
     "enemy_engaged_player",
-    "enemy_disengaged_player",
     "enemy_died",
     "boss_battle_started",
     "boss_battle_ended",
@@ -99,7 +98,6 @@ class GameStateModule(StimulusModule):
         gameplay_probability_ceiling: float = 1.0,
         gameplay_dirty_hp_threshold: float = 0.10,
         gameplay_event_batch_window: float = 2.0,
-        gameplay_disengage_dedupe_window: float = 10.0,
     ):
         self._host = host
         self._port = port
@@ -132,13 +130,10 @@ class GameStateModule(StimulusModule):
         self._gameplay_probability_ceiling = max(0.1, min(1.0, gameplay_probability_ceiling))
         self._gameplay_dirty_hp_threshold = max(0.01, min(0.5, gameplay_dirty_hp_threshold))
         self._gameplay_event_batch_window = max(0.5, min(10.0, gameplay_event_batch_window))
-        self._gameplay_disengage_dedupe_window = max(2.0, min(30.0, gameplay_disengage_dedupe_window))
 
         # Event-based gameplay buffer (Phase 1)
         self._gameplay_event_buffer: list[GameEvent] = []
         self._gameplay_first_event_time: float | None = None
-        # Dedupe: enemy_ctx_id → last seen monotonic time
-        self._disengage_seen: dict[int, float] = {}
         # Chapter dedupe: last chapter name that fired (zone-level, not status-level)
         self._last_chapter_name: str | None = None
 
@@ -180,7 +175,7 @@ class GameStateModule(StimulusModule):
             self._first_line_time = None
             self._gameplay_event_buffer.clear()
             self._gameplay_first_event_time = None
-            self._disengage_seen.clear()
+
             self._last_evaluated_snapshot = None
             self._current_snapshot = None
             self._snapshot_probability = self._gameplay_base_probability
@@ -280,7 +275,7 @@ class GameStateModule(StimulusModule):
         if not value:
             self._gameplay_event_buffer.clear()
             self._gameplay_first_event_time = None
-            self._disengage_seen.clear()
+
             self._last_evaluated_snapshot = None
             self._current_snapshot = None
             self._snapshot_probability = self._gameplay_base_probability
@@ -326,14 +321,6 @@ class GameStateModule(StimulusModule):
     def gameplay_event_batch_window(self, value: float) -> None:
         self._gameplay_event_batch_window = max(0.5, min(10.0, value))
 
-    @property
-    def gameplay_disengage_dedupe_window(self) -> float:
-        return self._gameplay_disengage_dedupe_window
-
-    @gameplay_disengage_dedupe_window.setter
-    def gameplay_disengage_dedupe_window(self, value: float) -> None:
-        self._gameplay_disengage_dedupe_window = max(2.0, min(30.0, value))
-
     def start(self) -> None:
         if self._running:
             print("[GameState] start() called but already running", flush=True)
@@ -376,7 +363,6 @@ class GameStateModule(StimulusModule):
         self._first_line_time = None
         self._gameplay_event_buffer.clear()
         self._gameplay_first_event_time = None
-        self._disengage_seen.clear()
         self._last_evaluated_snapshot = None
         self._current_snapshot = None
         self._snapshot_probability = self._gameplay_base_probability
@@ -517,9 +503,6 @@ class GameStateModule(StimulusModule):
         if etype == "enemy_engaged_player":
             label = f"{name} ({mtype})" if mtype else name
             return f"- Combat: {label} engaged!"
-        elif etype == "enemy_disengaged_player":
-            label = f"{name} ({mtype})" if mtype else name
-            return f"- Combat: {label} disengaged."
         elif etype == "enemy_died":
             label = f"{name} ({mtype})" if mtype else name
             return f"- Kill: {label} eliminated!"
@@ -537,18 +520,6 @@ class GameStateModule(StimulusModule):
         now = time.monotonic()
         etype = event.event_type
         p = event.payload
-
-        if etype == "enemy_disengaged_player":
-            ctx_id = p.get("enemy_ctx_id")
-            if ctx_id is not None:
-                last_seen = self._disengage_seen.get(ctx_id)
-                if last_seen is not None and (now - last_seen) < self._gameplay_disengage_dedupe_window:
-                    logger.debug(
-                        "Deduped enemy_disengaged_player ctx_id=%s (%.1fs since last)",
-                        ctx_id, now - last_seen,
-                    )
-                    return
-                self._disengage_seen[ctx_id] = now
 
         if etype == "chapter_status_changed":
             ch_name = p.get("chapter_name") or ""

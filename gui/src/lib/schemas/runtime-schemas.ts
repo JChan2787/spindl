@@ -221,7 +221,6 @@ export const StimuliConfigUpdatedSchema = z.object({
   game_state_gameplay_probability_ceiling: z.number().min(0.1).max(1.0),
   game_state_gameplay_dirty_hp_threshold: z.number().min(0.01).max(0.5),
   game_state_gameplay_event_batch_window: z.number().min(0.5).max(10.0),
-  game_state_gameplay_disengage_dedupe_window: z.number().min(2.0).max(30.0),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
   // NANO-121: Model cycling

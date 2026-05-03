@@ -120,7 +120,6 @@ def build_stimuli_hydration(cfg) -> dict:
         "game_state_gameplay_probability_ceiling": cfg.game_state_gameplay_probability_ceiling,
         "game_state_gameplay_dirty_hp_threshold": cfg.game_state_gameplay_dirty_hp_threshold,
         "game_state_gameplay_event_batch_window": cfg.game_state_gameplay_event_batch_window,
-        "game_state_gameplay_disengage_dedupe_window": cfg.game_state_gameplay_disengage_dedupe_window,
         # NANO-110: Addressing-others contexts
         "addressing_others_contexts": [
             {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
@@ -274,7 +273,6 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             game_state_gameplay_probability_ceiling = data.get("game_state_gameplay_probability_ceiling")
             game_state_gameplay_dirty_hp_threshold = data.get("game_state_gameplay_dirty_hp_threshold")
             game_state_gameplay_event_batch_window = data.get("game_state_gameplay_event_batch_window")
-            game_state_gameplay_disengage_dedupe_window = data.get("game_state_gameplay_disengage_dedupe_window")
 
             # NANO-121: Model cycling fields
             model_rotation_enabled = data.get("model_rotation_enabled")
@@ -393,9 +391,6 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             if game_state_gameplay_event_batch_window is not None:
                 game_state_gameplay_event_batch_window = float(game_state_gameplay_event_batch_window)
                 game_state_gameplay_event_batch_window = max(0.5, min(10.0, game_state_gameplay_event_batch_window))
-            if game_state_gameplay_disengage_dedupe_window is not None:
-                game_state_gameplay_disengage_dedupe_window = float(game_state_gameplay_disengage_dedupe_window)
-                game_state_gameplay_disengage_dedupe_window = max(2.0, min(30.0, game_state_gameplay_disengage_dedupe_window))
 
             server._orchestrator.update_stimuli_config(
                 enabled=enabled,
@@ -433,7 +428,6 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_gameplay_probability_ceiling=game_state_gameplay_probability_ceiling,
                 game_state_gameplay_dirty_hp_threshold=game_state_gameplay_dirty_hp_threshold,
                 game_state_gameplay_event_batch_window=game_state_gameplay_event_batch_window,
-                game_state_gameplay_disengage_dedupe_window=game_state_gameplay_disengage_dedupe_window,
                 model_rotation_enabled=model_rotation_enabled,
                 model_rotation_models=model_rotation_models,
                 model_rotation_api_key=model_rotation_api_key,

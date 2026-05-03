@@ -119,7 +119,6 @@ export interface StimuliConfig {
   game_state_gameplay_probability_ceiling: number;
   game_state_gameplay_dirty_hp_threshold: number;
   game_state_gameplay_event_batch_window: number;
-  game_state_gameplay_disengage_dedupe_window: number;
   // NANO-121: Model cycling
   model_rotation_enabled: boolean;
   model_rotation_models: string[];
@@ -468,7 +467,6 @@ const DEFAULT_STIMULI: StimuliConfig = {
   game_state_gameplay_probability_ceiling: 1.0,
   game_state_gameplay_dirty_hp_threshold: 0.10,
   game_state_gameplay_event_batch_window: 2.0,
-  game_state_gameplay_disengage_dedupe_window: 10.0,
   // NANO-121: Model cycling
   model_rotation_enabled: false,
   model_rotation_models: [],

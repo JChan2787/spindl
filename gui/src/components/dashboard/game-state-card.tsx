@@ -417,14 +417,6 @@ export function GameStateCard() {
     [updatePendingStimuli, emitChanges]
   );
 
-  const handleGameplayDisengageDedupeWindowChange = useCallback(
-    (value: number) => {
-      updatePendingStimuli({ game_state_gameplay_disengage_dedupe_window: value });
-      emitChanges({ game_state_gameplay_disengage_dedupe_window: value });
-    },
-    [updatePendingStimuli, emitChanges]
-  );
-
   // Poll game-state status when dialogue OR gameplay is enabled
   const anyGameStateActive = effectiveConfig.game_state_dialogue_enabled || effectiveConfig.game_state_gameplay_enabled;
   useEffect(() => {
@@ -785,17 +777,6 @@ export function GameStateCard() {
               unit="s"
             />
 
-            <Slider
-              label="Disengage Dedupe Window"
-              value={effectiveConfig.game_state_gameplay_disengage_dedupe_window}
-              min={2.0}
-              max={30.0}
-              step={1.0}
-              icon={<Timer className="h-3 w-3" />}
-              onChange={handleGameplayDisengageDedupeWindowChange}
-              disabled={!effectiveConfig.game_state_gameplay_enabled}
-              unit="s"
-            />
           </div>
       </CardContent>
     </Card>

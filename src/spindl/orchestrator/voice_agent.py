@@ -673,7 +673,6 @@ class VoiceAgentOrchestrator:
                 gameplay_probability_ceiling=stimuli_cfg.game_state_gameplay_probability_ceiling,
                 gameplay_dirty_hp_threshold=stimuli_cfg.game_state_gameplay_dirty_hp_threshold,
                 gameplay_event_batch_window=stimuli_cfg.game_state_gameplay_event_batch_window,
-                gameplay_disengage_dedupe_window=stimuli_cfg.game_state_gameplay_disengage_dedupe_window,
             )
             game_state._dialogue_store = self._dialogue_store
             game_state.dialogue_prompt_templates = stimuli_cfg.game_state_dialogue_prompt_templates
@@ -2123,7 +2122,6 @@ class VoiceAgentOrchestrator:
         game_state_gameplay_probability_ceiling: Optional[float] = None,
         game_state_gameplay_dirty_hp_threshold: Optional[float] = None,
         game_state_gameplay_event_batch_window: Optional[float] = None,
-        game_state_gameplay_disengage_dedupe_window: Optional[float] = None,
         model_rotation_enabled: Optional[bool] = None,
         model_rotation_models: Optional[list[str]] = None,
         model_rotation_api_key: Optional[str] = None,
@@ -2317,9 +2315,6 @@ class VoiceAgentOrchestrator:
                     if game_state_gameplay_event_batch_window is not None:
                         module.gameplay_event_batch_window = game_state_gameplay_event_batch_window
                         cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
-                    if game_state_gameplay_disengage_dedupe_window is not None:
-                        module.gameplay_disengage_dedupe_window = game_state_gameplay_disengage_dedupe_window
-                        cfg.game_state_gameplay_disengage_dedupe_window = game_state_gameplay_disengage_dedupe_window
                     break
 
         # Update config even if game_state module isn't registered yet
@@ -2374,8 +2369,6 @@ class VoiceAgentOrchestrator:
             cfg.game_state_gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
         if game_state_gameplay_event_batch_window is not None:
             cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
-        if game_state_gameplay_disengage_dedupe_window is not None:
-            cfg.game_state_gameplay_disengage_dedupe_window = game_state_gameplay_disengage_dedupe_window
 
         # NANO-121: Model cycling for stimulus responses
         rotation_changed = False
