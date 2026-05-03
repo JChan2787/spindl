@@ -1,9 +1,13 @@
 """
-Game-state bridge stimulus module (NANO-116 Phase B.1).
+Game-state bridge stimulus module (NANO-116 Phase B.1, NANO-122 gameplay).
 
 Connects to the SPNDL-001 game-state bridge via TCP, buffers incoming
 events, and exposes them as stimuli for the StimuliEngine. Priority 50
 — same tier as Twitch (external integration).
+
+Two stimulus sub-paths:
+  1. Dialogue — buffered lines with dedup + drain cadence (NANO-116 B.2)
+  2. Gameplay — event-driven combat + periodic snapshot aggregate (NANO-122)
 
 Wire protocol: newline-delimited JSON on TCP 127.0.0.1:53817 (default).
 First event after connect must be bridge_ready with protocol_version
@@ -16,10 +20,11 @@ in get_stimulus(), template-formatted output.
 import asyncio
 import json
 import logging
+import random
 import threading
 import time
 from collections import deque
-from typing import Optional
+from typing import Any, Optional
 
 from ..base import StimulusModule
 from ..models import StimulusData, StimulusSource
@@ -40,6 +45,20 @@ _DEFAULT_PROMPT_TEMPLATE = (
 
 _RECONNECT_DELAY = 5.0
 _READ_BUFFER_SIZE = 65536
+
+# NANO-122: Event types that trigger immediate gameplay stimulus
+_GAMEPLAY_EVENT_TYPES = frozenset({
+    "enemy_engaged_player",
+    "enemy_disengaged_player",
+    "enemy_died",
+    "boss_battle_started",
+    "boss_battle_ended",
+    "chapter_status_changed",
+})
+
+# Snapshot dirty-check fields (NANO-122 Phase 2)
+_SNAPSHOT_DIRTY_FIELDS_BOOL = ("in_combat", "is_dead", "is_boss_battle")
+_SNAPSHOT_DIRTY_FIELDS_ENEMY_ROSTER = ("is_hackable", "is_confused")
 
 _DEFAULT_DIALOGUE_PROMPT_TEMPLATES: list[str] = [
     "**The following are in-game character dialogue lines from the game "
@@ -73,6 +92,14 @@ class GameStateModule(StimulusModule):
         dialogue_buffer_size: int = 30,
         dialogue_min_lines: int = 1,
         dialogue_drain_delay: float = 0.0,
+        # NANO-122: Gameplay stimulus config
+        gameplay_enabled: bool = False,
+        gameplay_base_probability: float = 0.20,
+        gameplay_escalation_step: float = 0.15,
+        gameplay_probability_ceiling: float = 1.0,
+        gameplay_dirty_hp_threshold: float = 0.10,
+        gameplay_event_batch_window: float = 2.0,
+        gameplay_disengage_dedupe_window: float = 10.0,
     ):
         self._host = host
         self._port = port
@@ -97,6 +124,29 @@ class GameStateModule(StimulusModule):
         self._dialogue_store = None
         self._summarizing = False
         self._dialogue_dropped_during_summary = 0
+
+        # NANO-122: Gameplay stimulus state
+        self._gameplay_enabled = gameplay_enabled
+        self._gameplay_base_probability = max(0.05, min(1.0, gameplay_base_probability))
+        self._gameplay_escalation_step = max(0.05, min(0.5, gameplay_escalation_step))
+        self._gameplay_probability_ceiling = max(0.1, min(1.0, gameplay_probability_ceiling))
+        self._gameplay_dirty_hp_threshold = max(0.01, min(0.5, gameplay_dirty_hp_threshold))
+        self._gameplay_event_batch_window = max(0.5, min(10.0, gameplay_event_batch_window))
+        self._gameplay_disengage_dedupe_window = max(2.0, min(30.0, gameplay_disengage_dedupe_window))
+
+        # Event-based gameplay buffer (Phase 1)
+        self._gameplay_event_buffer: list[GameEvent] = []
+        self._gameplay_first_event_time: float | None = None
+        # Dedupe: enemy_ctx_id → last seen monotonic time
+        self._disengage_seen: dict[int, float] = {}
+        # Chapter dedupe: last chapter_hash that fired
+        self._last_chapter_hash: int | None = None
+
+        # Snapshot aggregate (Phase 2)
+        self._last_evaluated_snapshot: dict[str, Any] | None = None
+        self._current_snapshot: dict[str, Any] | None = None
+        self._snapshot_probability: float = self._gameplay_base_probability
+        self._snapshot_roll_passed: bool = False
 
         self._connected = False
         self._running = False
@@ -128,6 +178,13 @@ class GameStateModule(StimulusModule):
             self._buffer.clear()
             self._dialogue_buffer.clear()
             self._first_line_time = None
+            self._gameplay_event_buffer.clear()
+            self._gameplay_first_event_time = None
+            self._disengage_seen.clear()
+            self._last_evaluated_snapshot = None
+            self._current_snapshot = None
+            self._snapshot_probability = self._gameplay_base_probability
+            self._snapshot_roll_passed = False
 
     @property
     def connected(self) -> bool:
@@ -211,6 +268,72 @@ class GameStateModule(StimulusModule):
     def dialogue_drain_delay(self, value: float) -> None:
         self._dialogue_drain_delay = max(0.0, value)
 
+    # -- NANO-122: Gameplay config properties --------------------------------
+
+    @property
+    def gameplay_enabled(self) -> bool:
+        return self._gameplay_enabled
+
+    @gameplay_enabled.setter
+    def gameplay_enabled(self, value: bool) -> None:
+        self._gameplay_enabled = value
+        if not value:
+            self._gameplay_event_buffer.clear()
+            self._gameplay_first_event_time = None
+            self._disengage_seen.clear()
+            self._last_evaluated_snapshot = None
+            self._current_snapshot = None
+            self._snapshot_probability = self._gameplay_base_probability
+            self._snapshot_roll_passed = False
+
+    @property
+    def gameplay_base_probability(self) -> float:
+        return self._gameplay_base_probability
+
+    @gameplay_base_probability.setter
+    def gameplay_base_probability(self, value: float) -> None:
+        self._gameplay_base_probability = max(0.05, min(1.0, value))
+
+    @property
+    def gameplay_escalation_step(self) -> float:
+        return self._gameplay_escalation_step
+
+    @gameplay_escalation_step.setter
+    def gameplay_escalation_step(self, value: float) -> None:
+        self._gameplay_escalation_step = max(0.05, min(0.5, value))
+
+    @property
+    def gameplay_probability_ceiling(self) -> float:
+        return self._gameplay_probability_ceiling
+
+    @gameplay_probability_ceiling.setter
+    def gameplay_probability_ceiling(self, value: float) -> None:
+        self._gameplay_probability_ceiling = max(0.1, min(1.0, value))
+
+    @property
+    def gameplay_dirty_hp_threshold(self) -> float:
+        return self._gameplay_dirty_hp_threshold
+
+    @gameplay_dirty_hp_threshold.setter
+    def gameplay_dirty_hp_threshold(self, value: float) -> None:
+        self._gameplay_dirty_hp_threshold = max(0.01, min(0.5, value))
+
+    @property
+    def gameplay_event_batch_window(self) -> float:
+        return self._gameplay_event_batch_window
+
+    @gameplay_event_batch_window.setter
+    def gameplay_event_batch_window(self, value: float) -> None:
+        self._gameplay_event_batch_window = max(0.5, min(10.0, value))
+
+    @property
+    def gameplay_disengage_dedupe_window(self) -> float:
+        return self._gameplay_disengage_dedupe_window
+
+    @gameplay_disengage_dedupe_window.setter
+    def gameplay_disengage_dedupe_window(self, value: float) -> None:
+        self._gameplay_disengage_dedupe_window = max(2.0, min(30.0, value))
+
     def start(self) -> None:
         if self._running:
             print("[GameState] start() called but already running", flush=True)
@@ -251,6 +374,14 @@ class GameStateModule(StimulusModule):
         self._buffer.clear()
         self._dialogue_buffer.clear()
         self._first_line_time = None
+        self._gameplay_event_buffer.clear()
+        self._gameplay_first_event_time = None
+        self._disengage_seen.clear()
+        self._last_evaluated_snapshot = None
+        self._current_snapshot = None
+        self._snapshot_probability = self._gameplay_base_probability
+        self._snapshot_roll_passed = False
+        self._last_chapter_hash = None
         self._last_sequence = -1
         self._thread = None
         logger.info("Game-state module stopped")
@@ -258,6 +389,31 @@ class GameStateModule(StimulusModule):
     def has_stimulus(self) -> bool:
         if not (self._enabled and self._running and not self._version_mismatch):
             return False
+        # Gameplay events take priority within the module (NANO-122)
+        if self._has_gameplay_event_stimulus():
+            return True
+        if self._has_gameplay_snapshot_stimulus():
+            return True
+        return self._has_dialogue_stimulus()
+
+    def get_stimulus(self) -> Optional[StimulusData]:
+        if not (self._enabled and self._running and not self._version_mismatch):
+            return None
+        # Gameplay events first, then snapshot, then dialogue
+        stim = self._get_gameplay_event_stimulus()
+        if stim:
+            return stim
+        stim = self._get_gameplay_snapshot_stimulus()
+        if stim:
+            return stim
+        return self._get_dialogue_stimulus()
+
+    def health_check(self) -> bool:
+        return self._connected and not self._version_mismatch
+
+    # -- Dialogue stimulus (NANO-116 B.2) ------------------------------------
+
+    def _has_dialogue_stimulus(self) -> bool:
         count = self._dialogue_buffer.count
         if count < self._dialogue_min_lines:
             return False
@@ -266,8 +422,8 @@ class GameStateModule(StimulusModule):
                 return False
         return True
 
-    def get_stimulus(self) -> Optional[StimulusData]:
-        if not self.has_stimulus():
+    def _get_dialogue_stimulus(self) -> Optional[StimulusData]:
+        if not self._has_dialogue_stimulus():
             return None
 
         lines = self._dialogue_buffer.drain()
@@ -287,9 +443,7 @@ class GameStateModule(StimulusModule):
                 formatted_lines.append(f"[{dl.speaker}]: {dl.text}")
 
         dialogue_block = "\n".join(formatted_lines)
-
         template = self._template_rotator.select() or self._dialogue_prompt_templates[0]
-
         user_input = template.format(dialogue=dialogue_block)
 
         print(f"[GameState] Dialogue drain: {len(lines)} lines, input_len={len(user_input)}", flush=True)
@@ -298,14 +452,255 @@ class GameStateModule(StimulusModule):
             source=StimulusSource.GAME_STATE,
             user_input=user_input,
             metadata={
+                "stimulus_type": "dialogue",
                 "event_count": len(lines),
                 "dialogue_lines": len(lines),
                 "game_id": "pragmata",
             },
         )
 
-    def health_check(self) -> bool:
-        return self._connected and not self._version_mismatch
+    # -- Gameplay event stimulus (NANO-122 Phase 1) --------------------------
+
+    def _has_gameplay_event_stimulus(self) -> bool:
+        if not self._gameplay_enabled:
+            return False
+        if not self._gameplay_event_buffer:
+            return False
+        if self._gameplay_first_event_time is None:
+            return False
+        return (time.monotonic() - self._gameplay_first_event_time) >= self._gameplay_event_batch_window
+
+    def _get_gameplay_event_stimulus(self) -> Optional[StimulusData]:
+        if not self._has_gameplay_event_stimulus():
+            return None
+
+        events = list(self._gameplay_event_buffer)
+        self._gameplay_event_buffer.clear()
+        self._gameplay_first_event_time = None
+        if not events:
+            return None
+
+        lines = []
+        for ev in events:
+            line = self._format_gameplay_event(ev)
+            if line:
+                lines.append(line)
+
+        if not lines:
+            return None
+
+        events_block = "\n".join(lines)
+        user_input = self._prompt_template.format(events=events_block)
+
+        print(
+            f"[GameState] Gameplay event drain: {len(events)} events, "
+            f"input_len={len(user_input)}",
+            flush=True,
+        )
+
+        return StimulusData(
+            source=StimulusSource.GAME_STATE,
+            user_input=user_input,
+            metadata={
+                "stimulus_type": "gameplay_event",
+                "event_count": len(events),
+                "game_id": "pragmata",
+            },
+        )
+
+    def _format_gameplay_event(self, event: GameEvent) -> Optional[str]:
+        p = event.payload
+        etype = event.event_type
+        name = p.get("enemy_display_name") or p.get("enemy_name") or p.get("enemy_type") or "unknown enemy"
+        mtype = p.get("member_type_name")
+
+        if etype == "enemy_engaged_player":
+            label = f"{name} ({mtype})" if mtype else name
+            return f"- Combat: {label} engaged!"
+        elif etype == "enemy_disengaged_player":
+            label = f"{name} ({mtype})" if mtype else name
+            return f"- Combat: {label} disengaged."
+        elif etype == "enemy_died":
+            label = f"{name} ({mtype})" if mtype else name
+            return f"- Kill: {label} eliminated!"
+        elif etype == "boss_battle_started":
+            return "- Boss battle started!"
+        elif etype == "boss_battle_ended":
+            return "- Boss battle ended!"
+        elif etype == "chapter_status_changed":
+            ch_name = p.get("chapter_name") or f"chapter_{p.get('chapter_hash', '?')}"
+            return f"- Area transition: entering {ch_name}."
+        return None
+
+    def _accept_gameplay_event(self, event: GameEvent) -> None:
+        """Route a gameplay event into the batch buffer with dedupe."""
+        now = time.monotonic()
+        etype = event.event_type
+        p = event.payload
+
+        if etype == "enemy_disengaged_player":
+            ctx_id = p.get("enemy_ctx_id")
+            if ctx_id is not None:
+                last_seen = self._disengage_seen.get(ctx_id)
+                if last_seen is not None and (now - last_seen) < self._gameplay_disengage_dedupe_window:
+                    logger.debug(
+                        "Deduped enemy_disengaged_player ctx_id=%s (%.1fs since last)",
+                        ctx_id, now - last_seen,
+                    )
+                    return
+                self._disengage_seen[ctx_id] = now
+
+        if etype == "chapter_status_changed":
+            ch_hash = p.get("chapter_hash")
+            if ch_hash is not None and ch_hash == self._last_chapter_hash:
+                logger.debug("Deduped chapter_status_changed hash=%s", ch_hash)
+                return
+            self._last_chapter_hash = ch_hash
+
+        self._gameplay_event_buffer.append(event)
+        if self._gameplay_first_event_time is None:
+            self._gameplay_first_event_time = now
+
+        logger.debug(
+            "Gameplay event buffered: type=%s, batch_size=%d",
+            etype, len(self._gameplay_event_buffer),
+        )
+
+    # -- Gameplay snapshot stimulus (NANO-122 Phase 2) -----------------------
+
+    def _has_gameplay_snapshot_stimulus(self) -> bool:
+        if not self._gameplay_enabled:
+            return False
+        if self._current_snapshot is None:
+            return False
+        if not self._is_snapshot_dirty():
+            self._snapshot_roll_passed = False
+            return False
+        if self._roll_snapshot_probability():
+            self._snapshot_roll_passed = True
+            return True
+        self._snapshot_roll_passed = False
+        return False
+
+    def _get_gameplay_snapshot_stimulus(self) -> Optional[StimulusData]:
+        if not self._snapshot_roll_passed:
+            return None
+        self._snapshot_roll_passed = False
+        if not self._gameplay_enabled or self._current_snapshot is None:
+            return None
+
+        snap = self._current_snapshot
+        self._last_evaluated_snapshot = dict(snap)
+        if "enemies" in snap:
+            self._last_evaluated_snapshot["enemies"] = [dict(e) for e in snap["enemies"]]
+        self._snapshot_probability = self._gameplay_base_probability
+
+        report = self._format_snapshot_report(snap)
+        if not report:
+            return None
+
+        user_input = self._prompt_template.format(events=report)
+
+        print(
+            f"[GameState] Snapshot aggregate fired, input_len={len(user_input)}",
+            flush=True,
+        )
+
+        return StimulusData(
+            source=StimulusSource.GAME_STATE,
+            user_input=user_input,
+            metadata={
+                "stimulus_type": "gameplay_snapshot",
+                "game_id": "pragmata",
+            },
+        )
+
+    def _is_snapshot_dirty(self) -> bool:
+        cur = self._current_snapshot
+        prev = self._last_evaluated_snapshot
+        if cur is None:
+            return False
+        if prev is None:
+            return True
+
+        for field in _SNAPSHOT_DIRTY_FIELDS_BOOL:
+            if cur.get(field) != prev.get(field):
+                return True
+
+        cur_enemies = cur.get("enemies", [])
+        prev_enemies = prev.get("enemies", [])
+        if len(cur_enemies) != len(prev_enemies):
+            return True
+
+        prev_by_id: dict[int, dict] = {}
+        for e in prev_enemies:
+            eid = e.get("enemy_id", id(e))
+            prev_by_id[eid] = e
+
+        for e in cur_enemies:
+            eid = e.get("enemy_id", id(e))
+            pe = prev_by_id.get(eid)
+            if pe is None:
+                return True
+            for bf in _SNAPSHOT_DIRTY_FIELDS_ENEMY_ROSTER:
+                if e.get(bf) != pe.get(bf):
+                    return True
+            cur_hp = e.get("hp_ratio", 0.0)
+            prev_hp = pe.get("hp_ratio", 0.0)
+            if abs(cur_hp - prev_hp) > self._gameplay_dirty_hp_threshold:
+                return True
+
+        return False
+
+    def _roll_snapshot_probability(self) -> bool:
+        if random.random() < self._snapshot_probability:
+            return True
+        self._snapshot_probability = min(
+            self._snapshot_probability + self._gameplay_escalation_step,
+            self._gameplay_probability_ceiling,
+        )
+        logger.debug(
+            "Snapshot probability escalated to %.2f", self._snapshot_probability,
+        )
+        return False
+
+    def _format_snapshot_report(self, snap: dict[str, Any]) -> Optional[str]:
+        lines: list[str] = []
+
+        hp_ratio = snap.get("hp_ratio", 1.0)
+        hp_pct = round(hp_ratio * 100)
+        weapon = snap.get("weapon_name") or "unknown weapon"
+        in_combat = snap.get("in_combat", False)
+        is_dead = snap.get("is_dead", False)
+
+        status = "DEAD" if is_dead else ("in combat" if in_combat else "exploring")
+        lines.append(f"- Hugh: {hp_pct}% HP, {weapon} equipped, {status}")
+
+        enemies = snap.get("enemies", [])
+        engaged = [e for e in enemies if not e.get("is_dead", False)]
+        if engaged:
+            parts: list[str] = []
+            for e in engaged:
+                ename = e.get("display_name") or e.get("name") or "unknown"
+                ehp = round(e.get("hp_ratio", 1.0) * 100)
+                tags: list[str] = []
+                if e.get("is_hackable"):
+                    tags.append("hackable")
+                if e.get("is_confused"):
+                    tags.append("confused")
+                suffix = f", {', '.join(tags)}" if tags else ""
+                parts.append(f"{ename} ({ehp}% HP{suffix})")
+            lines.append(f"- Enemies ({len(engaged)} active): {', '.join(parts)}")
+
+        is_boss = snap.get("is_boss_battle", False)
+        if is_boss:
+            lines.append("- **BOSS BATTLE ACTIVE**")
+
+        return "**Current gameplay state:**\n" + "\n".join(lines) if lines else None
+
+    def notify_stimulus_fired(self) -> None:
+        """Called by the engine after this module's stimulus reaches the LLM."""
+        self._snapshot_probability = self._gameplay_base_probability
 
     # -- Internal async machinery ------------------------------------------
 
@@ -437,32 +832,35 @@ class GameStateModule(StimulusModule):
         self._buffer_event(event)
 
     def _buffer_event(self, event: dict) -> None:
-        """Convert validated event dict to GameEvent and append to buffer.
+        """Convert validated event dict to GameEvent and route to buffers.
 
-        Also routes dialogue events to the dialogue-specific buffer
-        (NANO-116 B.2) and updates the gameplay snapshot from non-dialogue
-        events so dialogue lines capture situational context.
+        Routing:
+          - Dialogue events → DialogueBuffer (NANO-116 B.2)
+          - Gameplay combat events → gameplay event buffer (NANO-122 Phase 1)
+          - Snapshots → dialogue context + full snapshot store (NANO-122 Phase 2)
+          - All events → generic buffer (B.1 log/debug)
         """
         if not self._enabled:
             return
 
         event_type = event["event_type"]
+        payload = event.get("payload", {})
 
-        # Update gameplay snapshot from non-dialogue events (B.2)
+        # Update dialogue gameplay snapshot from non-dialogue events (B.2)
         if event_type == "snapshot":
-            payload = event.get("payload", {})
-            player = payload.get("player", {})
             self._dialogue_buffer.update_gameplay_snapshot(
                 chapter_hash=payload.get("chapter_hash"),
-                combat_active=payload.get("combat_active", False),
-                enemy_count=payload.get("enemy_count", 0),
-                hp_ratio=player.get("hp_ratio"),
+                combat_active=payload.get("in_combat", False),
+                enemy_count=payload.get("enemy_count_engage", 0),
+                hp_ratio=payload.get("hp_ratio"),
                 timestamp=event.get("timestamp", ""),
             )
-        elif event_type in ("enemy_engaged", "enemy_disengaged"):
-            payload = event.get("payload", {})
+            # NANO-122: Store full snapshot for aggregate stimulus
+            if self._gameplay_enabled:
+                self._current_snapshot = dict(payload)
+        elif event_type in ("enemy_engaged_player", "enemy_disengaged_player"):
             self._dialogue_buffer.update_gameplay_snapshot(
-                combat_active=event_type == "enemy_engaged",
+                combat_active=event_type == "enemy_engaged_player",
                 enemy_count=payload.get("enemy_count", 0),
                 timestamp=event.get("timestamp", ""),
             )
@@ -481,21 +879,27 @@ class GameStateModule(StimulusModule):
                     self._first_line_time = time.monotonic()
                 self._dialogue_buffer.accept_event(event)
 
-        # Generic buffer (B.1 — all events)
+        # NANO-122: Route gameplay combat events to gameplay buffer
         game_event = GameEvent(
             event_type=event_type,
             event_source=event["event_source"],
             timestamp=event["timestamp"],
             sequence=event["sequence"],
-            payload=event.get("payload", {}),
+            payload=payload,
             game_id=event.get("game_id"),
             save_slot_hint=event.get("save_slot_hint"),
         )
+
+        if self._gameplay_enabled and event_type in _GAMEPLAY_EVENT_TYPES:
+            self._accept_gameplay_event(game_event)
+
+        # Generic buffer (B.1 — all events)
         self._buffer.append(game_event)
         logger.debug(
-            "Buffered event: type=%s, seq=%d, buffer_len=%d, dialogue_len=%d",
+            "Buffered event: type=%s, seq=%d, buffer_len=%d, dialogue_len=%d, gameplay_len=%d",
             game_event.event_type,
             game_event.sequence,
             len(self._buffer),
             self._dialogue_buffer.count,
+            len(self._gameplay_event_buffer),
         )

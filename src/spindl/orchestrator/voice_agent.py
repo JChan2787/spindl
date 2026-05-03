@@ -667,6 +667,13 @@ class VoiceAgentOrchestrator:
                 dialogue_buffer_size=stimuli_cfg.game_state_dialogue_buffer_size,
                 dialogue_min_lines=stimuli_cfg.game_state_dialogue_min_lines,
                 dialogue_drain_delay=stimuli_cfg.game_state_dialogue_drain_delay,
+                gameplay_enabled=stimuli_cfg.game_state_gameplay_enabled,
+                gameplay_base_probability=stimuli_cfg.game_state_gameplay_base_probability,
+                gameplay_escalation_step=stimuli_cfg.game_state_gameplay_escalation_step,
+                gameplay_probability_ceiling=stimuli_cfg.game_state_gameplay_probability_ceiling,
+                gameplay_dirty_hp_threshold=stimuli_cfg.game_state_gameplay_dirty_hp_threshold,
+                gameplay_event_batch_window=stimuli_cfg.game_state_gameplay_event_batch_window,
+                gameplay_disengage_dedupe_window=stimuli_cfg.game_state_gameplay_disengage_dedupe_window,
             )
             game_state._dialogue_store = self._dialogue_store
             game_state.dialogue_prompt_templates = stimuli_cfg.game_state_dialogue_prompt_templates
@@ -2110,6 +2117,13 @@ class VoiceAgentOrchestrator:
         game_state_dialogue_summarizer_model: Optional[str] = None,
         game_state_dialogue_summarizer_api_key: Optional[str] = None,
         game_state_dialogue_summarizer_persona: Optional[str] = None,
+        game_state_gameplay_enabled: Optional[bool] = None,
+        game_state_gameplay_base_probability: Optional[float] = None,
+        game_state_gameplay_escalation_step: Optional[float] = None,
+        game_state_gameplay_probability_ceiling: Optional[float] = None,
+        game_state_gameplay_dirty_hp_threshold: Optional[float] = None,
+        game_state_gameplay_event_batch_window: Optional[float] = None,
+        game_state_gameplay_disengage_dedupe_window: Optional[float] = None,
         model_rotation_enabled: Optional[bool] = None,
         model_rotation_models: Optional[list[str]] = None,
         model_rotation_api_key: Optional[str] = None,
@@ -2284,6 +2298,28 @@ class VoiceAgentOrchestrator:
                     if game_state_dialogue_drain_delay is not None:
                         module.dialogue_drain_delay = game_state_dialogue_drain_delay
                         cfg.game_state_dialogue_drain_delay = game_state_dialogue_drain_delay
+                    # NANO-122: Gameplay stimulus config
+                    if game_state_gameplay_enabled is not None:
+                        module.gameplay_enabled = game_state_gameplay_enabled
+                        cfg.game_state_gameplay_enabled = game_state_gameplay_enabled
+                    if game_state_gameplay_base_probability is not None:
+                        module.gameplay_base_probability = game_state_gameplay_base_probability
+                        cfg.game_state_gameplay_base_probability = game_state_gameplay_base_probability
+                    if game_state_gameplay_escalation_step is not None:
+                        module.gameplay_escalation_step = game_state_gameplay_escalation_step
+                        cfg.game_state_gameplay_escalation_step = game_state_gameplay_escalation_step
+                    if game_state_gameplay_probability_ceiling is not None:
+                        module.gameplay_probability_ceiling = game_state_gameplay_probability_ceiling
+                        cfg.game_state_gameplay_probability_ceiling = game_state_gameplay_probability_ceiling
+                    if game_state_gameplay_dirty_hp_threshold is not None:
+                        module.gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
+                        cfg.game_state_gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
+                    if game_state_gameplay_event_batch_window is not None:
+                        module.gameplay_event_batch_window = game_state_gameplay_event_batch_window
+                        cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
+                    if game_state_gameplay_disengage_dedupe_window is not None:
+                        module.gameplay_disengage_dedupe_window = game_state_gameplay_disengage_dedupe_window
+                        cfg.game_state_gameplay_disengage_dedupe_window = game_state_gameplay_disengage_dedupe_window
                     break
 
         # Update config even if game_state module isn't registered yet
@@ -2325,6 +2361,21 @@ class VoiceAgentOrchestrator:
             cfg.game_state_dialogue_summarizer_persona = game_state_dialogue_summarizer_persona
             if self._dialogue_summarizer:
                 self._dialogue_summarizer.persona_prompt = game_state_dialogue_summarizer_persona
+        # NANO-122: Gameplay stimulus config (fallback if module not registered)
+        if game_state_gameplay_enabled is not None:
+            cfg.game_state_gameplay_enabled = game_state_gameplay_enabled
+        if game_state_gameplay_base_probability is not None:
+            cfg.game_state_gameplay_base_probability = game_state_gameplay_base_probability
+        if game_state_gameplay_escalation_step is not None:
+            cfg.game_state_gameplay_escalation_step = game_state_gameplay_escalation_step
+        if game_state_gameplay_probability_ceiling is not None:
+            cfg.game_state_gameplay_probability_ceiling = game_state_gameplay_probability_ceiling
+        if game_state_gameplay_dirty_hp_threshold is not None:
+            cfg.game_state_gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
+        if game_state_gameplay_event_batch_window is not None:
+            cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
+        if game_state_gameplay_disengage_dedupe_window is not None:
+            cfg.game_state_gameplay_disengage_dedupe_window = game_state_gameplay_disengage_dedupe_window
 
         # NANO-121: Model cycling for stimulus responses
         rotation_changed = False

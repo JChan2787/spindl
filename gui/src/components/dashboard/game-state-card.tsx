@@ -143,6 +143,10 @@ export function GameStateCard() {
   const [localDialoguePrompts, setLocalDialoguePrompts] = useState<string[]>(effectiveConfig.game_state_dialogue_prompt_templates);
   const dialoguePromptsSyncedRef = useRef<string[]>(effectiveConfig.game_state_dialogue_prompt_templates);
 
+  // NANO-122: Gameplay prompt template local state
+  const [localGameplayPrompt, setLocalGameplayPrompt] = useState(effectiveConfig.game_state_prompt_template);
+  const gameplayPromptSyncedRef = useRef(effectiveConfig.game_state_prompt_template);
+
   const [localSummarizerPersona, setLocalSummarizerPersona] = useState(effectiveConfig.game_state_dialogue_summarizer_persona);
   const summarizerPersonaSyncedRef = useRef(effectiveConfig.game_state_dialogue_summarizer_persona);
 
@@ -174,10 +178,15 @@ export function GameStateCard() {
       setLocalSummarizerApiKey(effectiveConfig.game_state_dialogue_summarizer_api_key);
       summarizerApiKeySyncedRef.current = effectiveConfig.game_state_dialogue_summarizer_api_key;
     }
+    if (effectiveConfig.game_state_prompt_template !== gameplayPromptSyncedRef.current) {
+      setLocalGameplayPrompt(effectiveConfig.game_state_prompt_template);
+      gameplayPromptSyncedRef.current = effectiveConfig.game_state_prompt_template;
+    }
   }, [
     effectiveConfig.game_state_dialogue_prompt_templates,
     effectiveConfig.game_state_dialogue_summarizer_persona,
     effectiveConfig.game_state_dialogue_summarizer_api_key,
+    effectiveConfig.game_state_prompt_template,
   ]);
 
   const dialoguePromptsMissingPlaceholder = localDialoguePrompts.map(
@@ -242,6 +251,17 @@ export function GameStateCard() {
       summarizerPersonaSyncedRef.current = localSummarizerPersona;
     }
   }, [localSummarizerPersona, updatePendingStimuli, emitChanges]);
+
+  const gameplayPromptMissingPlaceholder = localGameplayPrompt.trim().length > 0 && !localGameplayPrompt.includes("{events}");
+
+  const handleGameplayPromptBlur = useCallback(() => {
+    if (gameplayPromptMissingPlaceholder) return;
+    if (localGameplayPrompt !== gameplayPromptSyncedRef.current) {
+      updatePendingStimuli({ game_state_prompt_template: localGameplayPrompt });
+      emitChanges({ game_state_prompt_template: localGameplayPrompt });
+      gameplayPromptSyncedRef.current = localGameplayPrompt;
+    }
+  }, [localGameplayPrompt, gameplayPromptMissingPlaceholder, updatePendingStimuli, emitChanges]);
 
   const launcherCloud = useLauncherStore((s) => s.llmCloud);
   const fallbackKey = launcherCloud.provider === "openrouter" && launcherCloud.apiKey
@@ -348,14 +368,72 @@ export function GameStateCard() {
     [updatePendingStimuli, emitChanges]
   );
 
-  // Poll game-state status only when dialogue is enabled (toggle is on)
+  // NANO-122: Gameplay stimulus handlers
+  const handleGameplayEnabledChange = useCallback(
+    (checked: boolean) => {
+      updatePendingStimuli({ game_state_gameplay_enabled: checked });
+      emitChanges({ game_state_gameplay_enabled: checked });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleGameplayBaseProbabilityChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_gameplay_base_probability: value });
+      emitChanges({ game_state_gameplay_base_probability: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleGameplayEscalationStepChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_gameplay_escalation_step: value });
+      emitChanges({ game_state_gameplay_escalation_step: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleGameplayProbabilityCeilingChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_gameplay_probability_ceiling: value });
+      emitChanges({ game_state_gameplay_probability_ceiling: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleGameplayDirtyHpThresholdChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_gameplay_dirty_hp_threshold: value });
+      emitChanges({ game_state_gameplay_dirty_hp_threshold: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleGameplayEventBatchWindowChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_gameplay_event_batch_window: value });
+      emitChanges({ game_state_gameplay_event_batch_window: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleGameplayDisengageDedupeWindowChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ game_state_gameplay_disengage_dedupe_window: value });
+      emitChanges({ game_state_gameplay_disengage_dedupe_window: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  // Poll game-state status when dialogue OR gameplay is enabled
+  const anyGameStateActive = effectiveConfig.game_state_dialogue_enabled || effectiveConfig.game_state_gameplay_enabled;
   useEffect(() => {
-    if (!effectiveConfig.game_state_dialogue_enabled) return;
+    if (!anyGameStateActive) return;
     const poll = () => socket.emit("request_game_state_status", {});
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
-  }, [effectiveConfig.game_state_dialogue_enabled, socket]);
+  }, [anyGameStateActive, socket]);
 
   useEffect(() => {
     const handler = (data: GameStateStatus) => setGameStateStatus(data);
@@ -464,6 +542,28 @@ export function GameStateCard() {
                   )}
                 </div>
               ))}
+            </div>
+
+            {/* NANO-122: Gameplay prompt template */}
+            <div className="space-y-1">
+              <Label className="flex items-center gap-2 text-xs">
+                <Gamepad2 className="h-3 w-3" />
+                Gameplay Prompt Template
+              </Label>
+              <Textarea
+                value={localGameplayPrompt}
+                onChange={(e) => setLocalGameplayPrompt(e.target.value)}
+                onBlur={handleGameplayPromptBlur}
+                rows={3}
+                className={`text-xs resize-none ${gameplayPromptMissingPlaceholder ? "border-red-500" : ""}`}
+                placeholder="Template for gameplay event/snapshot injection (must contain {events})..."
+                aria-invalid={gameplayPromptMissingPlaceholder}
+              />
+              {gameplayPromptMissingPlaceholder && (
+                <p className="text-xs text-red-500 mt-0.5">
+                  Template must contain {"{events}"}.
+                </p>
+              )}
             </div>
 
             {/* Summarizer persona */}
@@ -594,6 +694,108 @@ export function GameStateCard() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* NANO-122: Gameplay Reactions */}
+          <div className="border-t pt-4 mt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="flex items-center gap-2 text-sm">
+                <Gamepad2 className="h-3.5 w-3.5" />
+                Gameplay Reactions
+              </Label>
+              <button
+                onClick={() => bridgeVerified && handleGameplayEnabledChange(!effectiveConfig.game_state_gameplay_enabled)}
+                disabled={!bridgeVerified}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  !bridgeVerified
+                    ? "bg-muted opacity-50 cursor-not-allowed"
+                    : effectiveConfig.game_state_gameplay_enabled
+                      ? "bg-primary"
+                      : "bg-muted"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    effectiveConfig.game_state_gameplay_enabled && bridgeVerified ? "translate-x-4" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {gameStateStatus?.gameplay_enabled && (
+              <div className="text-xs text-muted-foreground flex gap-3">
+                <span>Events buffered: {gameStateStatus.gameplay_event_buffer_count}</span>
+                <span>Snapshot prob: {(gameStateStatus.gameplay_snapshot_probability * 100).toFixed(0)}%</span>
+              </div>
+            )}
+
+            <Slider
+              label="Base Probability"
+              value={effectiveConfig.game_state_gameplay_base_probability}
+              min={0.05}
+              max={1.0}
+              step={0.05}
+              icon={<Layers className="h-3 w-3" />}
+              onChange={handleGameplayBaseProbabilityChange}
+              disabled={!effectiveConfig.game_state_gameplay_enabled}
+            />
+
+            <Slider
+              label="Escalation Step"
+              value={effectiveConfig.game_state_gameplay_escalation_step}
+              min={0.05}
+              max={0.5}
+              step={0.05}
+              icon={<Layers className="h-3 w-3" />}
+              onChange={handleGameplayEscalationStepChange}
+              disabled={!effectiveConfig.game_state_gameplay_enabled}
+            />
+
+            <Slider
+              label="Probability Ceiling"
+              value={effectiveConfig.game_state_gameplay_probability_ceiling}
+              min={0.1}
+              max={1.0}
+              step={0.05}
+              icon={<Layers className="h-3 w-3" />}
+              onChange={handleGameplayProbabilityCeilingChange}
+              disabled={!effectiveConfig.game_state_gameplay_enabled}
+            />
+
+            <Slider
+              label="Enemy HP Dirty Threshold"
+              value={effectiveConfig.game_state_gameplay_dirty_hp_threshold}
+              min={0.01}
+              max={0.5}
+              step={0.01}
+              icon={<Layers className="h-3 w-3" />}
+              onChange={handleGameplayDirtyHpThresholdChange}
+              disabled={!effectiveConfig.game_state_gameplay_enabled}
+            />
+
+            <Slider
+              label="Event Batch Window"
+              value={effectiveConfig.game_state_gameplay_event_batch_window}
+              min={0.5}
+              max={10.0}
+              step={0.5}
+              icon={<Timer className="h-3 w-3" />}
+              onChange={handleGameplayEventBatchWindowChange}
+              disabled={!effectiveConfig.game_state_gameplay_enabled}
+              unit="s"
+            />
+
+            <Slider
+              label="Disengage Dedupe Window"
+              value={effectiveConfig.game_state_gameplay_disengage_dedupe_window}
+              min={2.0}
+              max={30.0}
+              step={1.0}
+              icon={<Timer className="h-3 w-3" />}
+              onChange={handleGameplayDisengageDedupeWindowChange}
+              disabled={!effectiveConfig.game_state_gameplay_enabled}
+              unit="s"
+            />
           </div>
       </CardContent>
     </Card>

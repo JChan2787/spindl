@@ -622,6 +622,14 @@ export interface SetStimuliConfigPayload {
   game_state_dialogue_summarizer_model?: string;
   game_state_dialogue_summarizer_api_key?: string;
   game_state_dialogue_summarizer_persona?: string;
+  // NANO-122: Gameplay stimulus
+  game_state_gameplay_enabled?: boolean;
+  game_state_gameplay_base_probability?: number;
+  game_state_gameplay_escalation_step?: number;
+  game_state_gameplay_probability_ceiling?: number;
+  game_state_gameplay_dirty_hp_threshold?: number;
+  game_state_gameplay_event_batch_window?: number;
+  game_state_gameplay_disengage_dedupe_window?: number;
   // NANO-121: Model cycling
   model_rotation_enabled?: boolean;
   model_rotation_models?: string[];
@@ -637,6 +645,10 @@ export interface GameStateStatus {
   enabled: boolean;
   dialogue_enabled: boolean;
   current_summary: string;
+  // NANO-122: Gameplay stimulus status
+  gameplay_enabled: boolean;
+  gameplay_event_buffer_count: number;
+  gameplay_snapshot_probability: number;
 }
 
 // NANO-116: Game-state connection test result

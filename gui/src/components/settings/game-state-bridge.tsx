@@ -105,6 +105,9 @@ export function GameStateBridge() {
           enabled: false,
           dialogue_enabled: false,
           current_summary: "",
+          gameplay_enabled: false,
+          gameplay_event_buffer_count: 0,
+          gameplay_snapshot_probability: 0,
         });
         try { localStorage.setItem("game_bridge_verified", "true"); } catch {}
       }

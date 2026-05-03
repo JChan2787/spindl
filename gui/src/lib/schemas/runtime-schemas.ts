@@ -214,6 +214,14 @@ export const StimuliConfigUpdatedSchema = z.object({
   game_state_dialogue_summarizer_model: z.string(),
   game_state_dialogue_summarizer_api_key: z.string(),
   game_state_dialogue_summarizer_persona: z.string(),
+  // NANO-122: Gameplay stimulus
+  game_state_gameplay_enabled: z.boolean(),
+  game_state_gameplay_base_probability: z.number().min(0.05).max(1.0),
+  game_state_gameplay_escalation_step: z.number().min(0.05).max(0.5),
+  game_state_gameplay_probability_ceiling: z.number().min(0.1).max(1.0),
+  game_state_gameplay_dirty_hp_threshold: z.number().min(0.01).max(0.5),
+  game_state_gameplay_event_batch_window: z.number().min(0.5).max(10.0),
+  game_state_gameplay_disengage_dedupe_window: z.number().min(2.0).max(30.0),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
   // NANO-121: Model cycling

@@ -113,6 +113,14 @@ def build_stimuli_hydration(cfg) -> dict:
         "game_state_dialogue_summarizer_model": cfg.game_state_dialogue_summarizer_model,
         "game_state_dialogue_summarizer_api_key": cfg.game_state_dialogue_summarizer_api_key or "",
         "game_state_dialogue_summarizer_persona": cfg.game_state_dialogue_summarizer_persona or "",
+        # NANO-122: Gameplay stimulus
+        "game_state_gameplay_enabled": cfg.game_state_gameplay_enabled,
+        "game_state_gameplay_base_probability": cfg.game_state_gameplay_base_probability,
+        "game_state_gameplay_escalation_step": cfg.game_state_gameplay_escalation_step,
+        "game_state_gameplay_probability_ceiling": cfg.game_state_gameplay_probability_ceiling,
+        "game_state_gameplay_dirty_hp_threshold": cfg.game_state_gameplay_dirty_hp_threshold,
+        "game_state_gameplay_event_batch_window": cfg.game_state_gameplay_event_batch_window,
+        "game_state_gameplay_disengage_dedupe_window": cfg.game_state_gameplay_disengage_dedupe_window,
         # NANO-110: Addressing-others contexts
         "addressing_others_contexts": [
             {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
@@ -259,6 +267,15 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             game_state_dialogue_summarizer_api_key = data.get("game_state_dialogue_summarizer_api_key")
             game_state_dialogue_summarizer_persona = data.get("game_state_dialogue_summarizer_persona")
 
+            # NANO-122: Gameplay stimulus fields
+            game_state_gameplay_enabled = data.get("game_state_gameplay_enabled")
+            game_state_gameplay_base_probability = data.get("game_state_gameplay_base_probability")
+            game_state_gameplay_escalation_step = data.get("game_state_gameplay_escalation_step")
+            game_state_gameplay_probability_ceiling = data.get("game_state_gameplay_probability_ceiling")
+            game_state_gameplay_dirty_hp_threshold = data.get("game_state_gameplay_dirty_hp_threshold")
+            game_state_gameplay_event_batch_window = data.get("game_state_gameplay_event_batch_window")
+            game_state_gameplay_disengage_dedupe_window = data.get("game_state_gameplay_disengage_dedupe_window")
+
             # NANO-121: Model cycling fields
             model_rotation_enabled = data.get("model_rotation_enabled")
             model_rotation_models = data.get("model_rotation_models")
@@ -358,6 +375,28 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             if game_state_dialogue_summarizer_persona is not None:
                 game_state_dialogue_summarizer_persona = str(game_state_dialogue_summarizer_persona).strip()
 
+            # NANO-122: Gameplay stimulus type coercion
+            if game_state_gameplay_enabled is not None:
+                game_state_gameplay_enabled = bool(game_state_gameplay_enabled)
+            if game_state_gameplay_base_probability is not None:
+                game_state_gameplay_base_probability = float(game_state_gameplay_base_probability)
+                game_state_gameplay_base_probability = max(0.05, min(1.0, game_state_gameplay_base_probability))
+            if game_state_gameplay_escalation_step is not None:
+                game_state_gameplay_escalation_step = float(game_state_gameplay_escalation_step)
+                game_state_gameplay_escalation_step = max(0.05, min(0.5, game_state_gameplay_escalation_step))
+            if game_state_gameplay_probability_ceiling is not None:
+                game_state_gameplay_probability_ceiling = float(game_state_gameplay_probability_ceiling)
+                game_state_gameplay_probability_ceiling = max(0.1, min(1.0, game_state_gameplay_probability_ceiling))
+            if game_state_gameplay_dirty_hp_threshold is not None:
+                game_state_gameplay_dirty_hp_threshold = float(game_state_gameplay_dirty_hp_threshold)
+                game_state_gameplay_dirty_hp_threshold = max(0.01, min(0.5, game_state_gameplay_dirty_hp_threshold))
+            if game_state_gameplay_event_batch_window is not None:
+                game_state_gameplay_event_batch_window = float(game_state_gameplay_event_batch_window)
+                game_state_gameplay_event_batch_window = max(0.5, min(10.0, game_state_gameplay_event_batch_window))
+            if game_state_gameplay_disengage_dedupe_window is not None:
+                game_state_gameplay_disengage_dedupe_window = float(game_state_gameplay_disengage_dedupe_window)
+                game_state_gameplay_disengage_dedupe_window = max(2.0, min(30.0, game_state_gameplay_disengage_dedupe_window))
+
             server._orchestrator.update_stimuli_config(
                 enabled=enabled,
                 patience_enabled=patience_enabled,
@@ -388,6 +427,13 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_dialogue_summarizer_model=game_state_dialogue_summarizer_model,
                 game_state_dialogue_summarizer_api_key=game_state_dialogue_summarizer_api_key,
                 game_state_dialogue_summarizer_persona=game_state_dialogue_summarizer_persona,
+                game_state_gameplay_enabled=game_state_gameplay_enabled,
+                game_state_gameplay_base_probability=game_state_gameplay_base_probability,
+                game_state_gameplay_escalation_step=game_state_gameplay_escalation_step,
+                game_state_gameplay_probability_ceiling=game_state_gameplay_probability_ceiling,
+                game_state_gameplay_dirty_hp_threshold=game_state_gameplay_dirty_hp_threshold,
+                game_state_gameplay_event_batch_window=game_state_gameplay_event_batch_window,
+                game_state_gameplay_disengage_dedupe_window=game_state_gameplay_disengage_dedupe_window,
                 model_rotation_enabled=model_rotation_enabled,
                 model_rotation_models=model_rotation_models,
                 model_rotation_api_key=model_rotation_api_key,
@@ -670,6 +716,9 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             "enabled": False,
             "dialogue_enabled": False,
             "current_summary": "",
+            "gameplay_enabled": False,
+            "gameplay_event_buffer_count": 0,
+            "gameplay_snapshot_probability": 0.0,
         }
 
         if (
@@ -700,6 +749,9 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                         "enabled": module.enabled,
                         "dialogue_enabled": server._orchestrator._config.stimuli_config.game_state_dialogue_enabled,
                         "current_summary": current_summary,
+                        "gameplay_enabled": module.gameplay_enabled,
+                        "gameplay_event_buffer_count": len(module._gameplay_event_buffer),
+                        "gameplay_snapshot_probability": round(module._snapshot_probability, 2),
                     },
                     to=sid,
                 )

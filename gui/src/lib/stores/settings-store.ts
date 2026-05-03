@@ -112,13 +112,21 @@ export interface StimuliConfig {
   game_state_dialogue_summarizer_model: string;
   game_state_dialogue_summarizer_api_key: string;
   game_state_dialogue_summarizer_persona: string;
+  // NANO-122: Gameplay stimulus
+  game_state_gameplay_enabled: boolean;
+  game_state_gameplay_base_probability: number;
+  game_state_gameplay_escalation_step: number;
+  game_state_gameplay_probability_ceiling: number;
+  game_state_gameplay_dirty_hp_threshold: number;
+  game_state_gameplay_event_batch_window: number;
+  game_state_gameplay_disengage_dedupe_window: number;
   // NANO-121: Model cycling
   model_rotation_enabled: boolean;
   model_rotation_models: string[];
   model_rotation_api_key: string;
 }
 
-// Game-state bridge status (NANO-116)
+// Game-state bridge status (NANO-116, NANO-122)
 export interface GameStateStatus {
   connected: boolean;
   protocol_version: string | null;
@@ -127,6 +135,9 @@ export interface GameStateStatus {
   enabled: boolean;
   dialogue_enabled: boolean;
   current_summary: string;
+  gameplay_enabled: boolean;
+  gameplay_event_buffer_count: number;
+  gameplay_snapshot_probability: number;
 }
 
 // Twitch module status (NANO-056b)
@@ -450,6 +461,14 @@ const DEFAULT_STIMULI: StimuliConfig = {
   game_state_dialogue_summarizer_model: "anthropic/claude-sonnet-4-20250514",
   game_state_dialogue_summarizer_api_key: "",
   game_state_dialogue_summarizer_persona: "",
+  // NANO-122: Gameplay stimulus
+  game_state_gameplay_enabled: false,
+  game_state_gameplay_base_probability: 0.20,
+  game_state_gameplay_escalation_step: 0.15,
+  game_state_gameplay_probability_ceiling: 1.0,
+  game_state_gameplay_dirty_hp_threshold: 0.10,
+  game_state_gameplay_event_batch_window: 2.0,
+  game_state_gameplay_disengage_dedupe_window: 10.0,
   // NANO-121: Model cycling
   model_rotation_enabled: false,
   model_rotation_models: [],
