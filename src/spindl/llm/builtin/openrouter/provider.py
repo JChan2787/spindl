@@ -233,6 +233,7 @@ class OpenRouterProvider(LLMProvider):
             payload["presence_penalty"] = kwargs["presence_penalty"]
 
         # Make request
+        print(f"[OpenRouter] payload: model={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}", flush=True)
         try:
             response = requests.post(
                 f"{self._base_url}{CHAT_ENDPOINT}",
@@ -344,6 +345,7 @@ class OpenRouterProvider(LLMProvider):
             payload["response_format"] = kwargs["response_format"]
 
         # Make streaming request
+        print(f"[OpenRouter] stream payload: model={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}", flush=True)
         try:
             response = requests.post(
                 f"{self._base_url}{CHAT_ENDPOINT}",
