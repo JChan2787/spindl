@@ -408,6 +408,12 @@ class GameStateModule(StimulusModule):
                 return False
         return True
 
+    @staticmethod
+    def _format_dialogue_line(dl) -> str:
+        if dl.repeat_count > 1:
+            return f"[{dl.speaker}]: {dl.text} (x{dl.repeat_count})"
+        return f"[{dl.speaker}]: {dl.text}"
+
     def _get_dialogue_stimulus(self) -> Optional[StimulusData]:
         if not self._has_dialogue_stimulus():
             return None
@@ -421,14 +427,17 @@ class GameStateModule(StimulusModule):
             for dl in lines:
                 self._dialogue_store.record_dialogue_line(dl)
 
-        formatted_lines = []
-        for dl in lines:
-            if dl.repeat_count > 1:
-                formatted_lines.append(f"[{dl.speaker}]: {dl.text} (x{dl.repeat_count})")
-            else:
-                formatted_lines.append(f"[{dl.speaker}]: {dl.text}")
+        if len(lines) >= 2:
+            context_lines = [self._format_dialogue_line(dl) for dl in lines[:-1]]
+            latest_line = self._format_dialogue_line(lines[-1])
+            dialogue_block = (
+                "\n".join(context_lines)
+                + "\n\n**[Latest]**\n"
+                + latest_line
+            )
+        else:
+            dialogue_block = self._format_dialogue_line(lines[0])
 
-        dialogue_block = "\n".join(formatted_lines)
         template = self._template_rotator.select() or self._dialogue_prompt_templates[0]
         user_input = template.format(dialogue=dialogue_block)
 
@@ -475,7 +484,15 @@ class GameStateModule(StimulusModule):
         if not lines:
             return None
 
-        events_block = "\n".join(lines)
+        if len(lines) >= 2:
+            events_block = (
+                "\n".join(lines[:-1])
+                + "\n\n**[Latest]**\n"
+                + lines[-1]
+            )
+        else:
+            events_block = lines[0]
+
         user_input = self._prompt_template.format(events=events_block)
 
         print(
