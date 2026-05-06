@@ -2627,9 +2627,13 @@ class VoiceAgentOrchestrator:
             return False
         from pathlib import Path
         result = self._history_manager.load_session(Path(filepath))
-        # NANO-107: update session-scoped retrieval filter
-        if result and self._memory_store and self._history_manager.session_file:
-            self._memory_store.set_session_id(self._history_manager.session_file.stem)
+        if result:
+            # NANO-107: update session-scoped retrieval filter
+            if self._memory_store and self._history_manager.session_file:
+                self._memory_store.set_session_id(self._history_manager.session_file.stem)
+            # NANO-116 B.2: Rebind dialogue store to loaded session
+            if self._dialogue_store:
+                self._dialogue_store.ensure_store(self._history_manager.session_file)
         return result
 
     def create_new_session(self) -> bool:
