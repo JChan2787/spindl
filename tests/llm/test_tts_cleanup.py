@@ -9,10 +9,9 @@ Tests cover:
 - Strips markdown headers
 - Strips markdown list bullets (* and -)
 - Unwraps **bold emphasis** (keeps words)
-- Strips standalone *action markers*
-- Unwraps inline *emphasis* (keeps words)
+- Unwraps *italic/action markers* (keeps words)
 - Strips emojis
-- Strips (parenthetical asides)
+- Unwraps (parenthetical asides) (keeps words)
 - Unwraps "quoted speech" (keeps words)
 - Collapses whitespace
 - Handles combined formatting in a single response
@@ -58,7 +57,7 @@ class TestTTSCleanupPlugin:
         ctx = _make_context()
         self.plugin.process(ctx, "*laughs nervously* Hello there.")
         assert "tts_text" in ctx.metadata
-        assert ctx.metadata["tts_text"] == "Hello there."
+        assert ctx.metadata["tts_text"] == "laughs nervously Hello there."
 
     # --- Fenced code blocks ---
 
@@ -130,10 +129,10 @@ class TestTTSCleanupPlugin:
         self.plugin.process(ctx, "*sighs* I don't know.")
         assert ctx.metadata["tts_text"] == "sighs I don't know."
 
-    def test_strips_multiword_action_marker(self):
+    def test_unwraps_multiword_action_marker(self):
         ctx = _make_context()
         self.plugin.process(ctx, "*laughs nervously* That's funny.")
-        assert ctx.metadata["tts_text"] == "That's funny."
+        assert ctx.metadata["tts_text"] == "laughs nervously That's funny."
 
     def test_strips_action_at_end_single_word_unwraps(self):
         """Single-word *action* at end is unwrapped — TTS says 'winks', harmless."""
@@ -141,17 +140,17 @@ class TestTTSCleanupPlugin:
         self.plugin.process(ctx, "Hello there! *winks*")
         assert ctx.metadata["tts_text"] == "Hello there! winks"
 
-    def test_strips_multiword_action_after_ellipsis(self):
-        """Real pattern from blue_birb logs — multi-word action stripped."""
+    def test_unwraps_multiword_action_after_ellipsis(self):
+        """Real pattern from blue_birb logs — multi-word action unwrapped."""
         ctx = _make_context()
         self.plugin.process(ctx, "1, 2, 3... *punches air* Next!")
-        assert ctx.metadata["tts_text"] == "1, 2, 3... Next!"
+        assert ctx.metadata["tts_text"] == "1, 2, 3... punches air Next!"
 
-    def test_strips_multiword_paragraph_action(self):
-        """Real pattern — multi-word action on its own line."""
+    def test_unwraps_multiword_paragraph_action(self):
+        """Real pattern — multi-word action on its own line unwrapped."""
         ctx = _make_context()
         self.plugin.process(ctx, "*flutters angrily*\n\nWho are you?!")
-        assert ctx.metadata["tts_text"] == "Who are you?!"
+        assert ctx.metadata["tts_text"] == "flutters angrily Who are you?!"
 
     # --- Inline emphasis ---
 
@@ -179,15 +178,15 @@ class TestTTSCleanupPlugin:
 
     # --- Parentheticals ---
 
-    def test_strips_parenthetical_aside(self):
+    def test_unwraps_parenthetical_aside(self):
         ctx = _make_context()
         self.plugin.process(ctx, "Hello there. (she waves) Nice to meet you!")
-        assert ctx.metadata["tts_text"] == "Hello there. Nice to meet you!"
+        assert ctx.metadata["tts_text"] == "Hello there. she waves Nice to meet you!"
 
-    def test_strips_stage_direction_parenthetical(self):
+    def test_unwraps_stage_direction_parenthetical(self):
         ctx = _make_context()
         self.plugin.process(ctx, "(pauses) Well then.")
-        assert ctx.metadata["tts_text"] == "Well then."
+        assert ctx.metadata["tts_text"] == "pauses Well then."
 
     # --- Quoted speech ---
 
@@ -210,7 +209,7 @@ class TestTTSCleanupPlugin:
         ctx = _make_context()
         raw = "Ach, ye tryin' to test me, ye wee shite? I'll punch yer face intae the ground, ye numbskull! 1, 2, 3... *punches air* Yer testicles be next, ye wee scunner!"
         self.plugin.process(ctx, raw)
-        assert ctx.metadata["tts_text"] == "Ach, ye tryin' to test me, ye wee shite? I'll punch yer face intae the ground, ye numbskull! 1, 2, 3... Yer testicles be next, ye wee scunner!"
+        assert ctx.metadata["tts_text"] == "Ach, ye tryin' to test me, ye wee shite? I'll punch yer face intae the ground, ye numbskull! 1, 2, 3... punches air Yer testicles be next, ye wee scunner!"
 
     def test_real_pattern_spindle_wink(self):
         """Actual response from spindle conversation logs. Single-word *wink* unwraps."""
@@ -250,7 +249,7 @@ class TestTTSCleanupPlugin:
         assert "**" not in tts
         assert "*waves*" not in tts  # asterisks gone
         assert "😊" not in tts
-        assert "(she said softly)" not in tts
+        assert "she said softly" in tts
         # Verify content survived
         assert "Heading" in tts
         assert "Hello" in tts
