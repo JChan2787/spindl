@@ -24,7 +24,7 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ..base import StimulusModule
 from ..models import StimulusData, StimulusSource
@@ -104,6 +104,8 @@ class GameStateModule(StimulusModule):
         gameplay_probability_ceiling: float = 1.0,
         gameplay_dirty_hp_threshold: float = 0.10,
         gameplay_event_batch_window: float = 2.0,
+        # NANO-123 Phase 2: Engine idle callback for stale-line dropping
+        is_engine_idle: Optional[Callable[[], bool]] = None,
     ):
         self._host = host
         self._port = port
@@ -128,6 +130,12 @@ class GameStateModule(StimulusModule):
         self._dialogue_store = None
         self._summarizing = False
         self._dialogue_dropped_during_summary = 0
+
+        # NANO-123 Phase 2: Stale-line dropping.
+        # Only lines arriving while the engine is idle trigger a stimulus.
+        # Lines arriving while busy still go to DialogueBuffer/Store for context.
+        self._is_engine_idle = is_engine_idle
+        self._has_fresh_trigger = False
 
         # NANO-122/123: Gameplay state
         self._gameplay_enabled = gameplay_enabled
@@ -388,12 +396,13 @@ class GameStateModule(StimulusModule):
     # -- Dialogue stimulus (NANO-116 B.2) ------------------------------------
 
     def _has_dialogue_stimulus(self) -> bool:
-        count = self._dialogue_buffer.count
-        if count < self._dialogue_min_lines:
+        if self._dialogue_buffer.count < 1:
             return False
-        if self._dialogue_drain_delay > 0.0 and self._first_line_time is not None:
-            if (time.monotonic() - self._first_line_time) < self._dialogue_drain_delay:
-                return False
+        # NANO-123 Phase 2: Only fire if a line arrived while the engine was idle.
+        # When no idle callback is wired (tests, legacy), fall back to Phase 1
+        # behavior (any buffered line triggers).
+        if self._is_engine_idle is not None:
+            return self._has_fresh_trigger
         return True
 
     @staticmethod
@@ -408,6 +417,7 @@ class GameStateModule(StimulusModule):
 
         lines = self._dialogue_buffer.drain()
         self._first_line_time = None
+        self._has_fresh_trigger = False
         if not lines:
             return None
 
@@ -765,6 +775,12 @@ class GameStateModule(StimulusModule):
                 if self._first_line_time is None and event_type == "dialogue_line":
                     self._first_line_time = time.monotonic()
                 self._dialogue_buffer.accept_event(event)
+                # NANO-123 Phase 2: Only mark as trigger if engine is idle.
+                # Lines arriving while busy are context-only (DialogueStore
+                # gets them on next drain, CHARACTER_KNOWLEDGE stays fed).
+                if event_type == "dialogue_line":
+                    if self._is_engine_idle is None or self._is_engine_idle():
+                        self._has_fresh_trigger = True
 
         # NANO-122: Route gameplay combat events to gameplay buffer
         game_event = GameEvent(

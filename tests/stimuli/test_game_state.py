@@ -648,3 +648,183 @@ class TestNANO123Priority:
     def test_priority_above_50(self):
         module = GameStateModule()
         assert module.priority > 50
+
+
+# -- NANO-123 Phase 2: Stale-line dropping -----------------------------------
+
+
+class TestNANO123StaleLineDropping:
+    """NANO-123 Phase 2: Lines arriving while engine is busy don't trigger."""
+
+    def _make_module(self, idle: bool = True) -> GameStateModule:
+        module = GameStateModule(
+            enabled=True,
+            gameplay_enabled=True,
+            is_engine_idle=lambda: idle,
+        )
+        module._running = True
+        return module
+
+    def _make_dialogue_event(self, speaker="Diana", text="Watch out!", seq=1):
+        return {
+            "protocol_version": "0.1.2",
+            "event_type": "dialogue_line",
+            "event_source": "direct_hook",
+            "timestamp": "2026-05-06T10:00:00.000Z",
+            "sequence": seq,
+            "payload": {"speaker": speaker, "text": text, "source": "chatter"},
+        }
+
+    def test_line_while_idle_triggers(self):
+        module = self._make_module(idle=True)
+        module._buffer_event(self._make_dialogue_event())
+        assert module._has_fresh_trigger is True
+        assert module.has_stimulus() is True
+
+    def test_line_while_busy_no_trigger(self):
+        module = self._make_module(idle=False)
+        module._buffer_event(self._make_dialogue_event())
+        assert module._has_fresh_trigger is False
+        assert module.has_stimulus() is False
+
+    def test_line_while_busy_still_buffered(self):
+        module = self._make_module(idle=False)
+        module._buffer_event(self._make_dialogue_event())
+        assert module._dialogue_buffer.count == 1
+
+    def test_stale_lines_reach_store_on_next_drain(self):
+        from unittest.mock import MagicMock
+        store = MagicMock()
+        idle_state = [False]
+        module = GameStateModule(
+            enabled=True,
+            gameplay_enabled=True,
+            is_engine_idle=lambda: idle_state[0],
+        )
+        module._running = True
+        module._dialogue_store = store
+
+        module._buffer_event(self._make_dialogue_event(
+            speaker="Hugh", text="Stale line", seq=1))
+        assert module._has_fresh_trigger is False
+        assert store.record_dialogue_line.call_count == 0
+
+        idle_state[0] = True
+        module._buffer_event(self._make_dialogue_event(
+            speaker="Diana", text="Fresh line", seq=2))
+        assert module._has_fresh_trigger is True
+
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "[Diana]: Fresh line" in stimulus.user_input
+        assert "[Hugh]: Stale line" not in stimulus.user_input
+        assert store.record_dialogue_line.call_count == 2
+
+    def test_drain_resets_fresh_trigger(self):
+        module = self._make_module(idle=True)
+        module._buffer_event(self._make_dialogue_event())
+        assert module._has_fresh_trigger is True
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert module._has_fresh_trigger is False
+        assert module.has_stimulus() is False
+
+    def test_silence_after_busy_period(self):
+        """No fresh line after becoming idle = silence (correct behavior)."""
+        idle_state = [False]
+        module = GameStateModule(
+            enabled=True,
+            gameplay_enabled=True,
+            is_engine_idle=lambda: idle_state[0],
+        )
+        module._running = True
+
+        for i in range(5):
+            module._buffer_event(self._make_dialogue_event(
+                text=f"Line {i}", seq=i + 1))
+        assert module._dialogue_buffer.count == 5
+        assert module._has_fresh_trigger is False
+
+        idle_state[0] = True
+        assert module.has_stimulus() is False
+
+    def test_no_callback_falls_back_to_phase1(self):
+        """Without is_engine_idle callback, any buffered line triggers (legacy)."""
+        module = GameStateModule(enabled=True, gameplay_enabled=True)
+        module._running = True
+        module._buffer_event(self._make_dialogue_event())
+        assert module.has_stimulus() is True
+
+
+class TestNANO123StaleLinePriorityEvents:
+    """NANO-123 Phase 2: Boss/chapter events fire regardless of idle state."""
+
+    def _make_module(self, idle: bool = False) -> GameStateModule:
+        module = GameStateModule(
+            enabled=True,
+            gameplay_enabled=True,
+            is_engine_idle=lambda: idle,
+        )
+        module._running = True
+        return module
+
+    def test_boss_event_fires_while_busy(self):
+        module = self._make_module(idle=False)
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="boss_battle_started",
+                event_source="direct_hook",
+                timestamp="2026-05-06T10:00:00Z",
+                sequence=1,
+                payload={"boss_name": "Clavis"},
+            )
+        )
+        assert module.has_stimulus() is True
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert stimulus.metadata["stimulus_type"] == "priority_event"
+
+    def test_chapter_event_fires_while_busy(self):
+        module = self._make_module(idle=False)
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="chapter_status_changed",
+                event_source="direct_hook",
+                timestamp="2026-05-06T10:00:00Z",
+                sequence=1,
+                payload={"chapter_hash": "0xABC", "chapter_name": "Chapter 2"},
+            )
+        )
+        assert module.has_stimulus() is True
+
+
+class TestNANO123StaleLineCombatBundling:
+    """NANO-123 Phase 2: Combat snapshot still bundles with fresh combat line."""
+
+    def test_fresh_combat_line_bundles_snapshot(self):
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine, GameplaySnapshot
+        module = GameStateModule(
+            enabled=True,
+            gameplay_enabled=True,
+            is_engine_idle=lambda: True,
+        )
+        module._running = True
+        module._current_snapshot = {
+            "hp_ratio": 0.5,
+            "weapon_name": "Grip Gun",
+            "in_combat": True,
+            "is_dead": False,
+        }
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(
+                speaker="Diana", text="Hacking!", source="chatter",
+                event_source="direct_hook",
+                timestamp="2026-05-06T10:00:00Z", sequence=1,
+                gameplay_context=GameplaySnapshot(combat_active=True),
+            )
+        )
+        module._has_fresh_trigger = True
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "Current gameplay state" in stimulus.user_input
+        assert "Grip Gun" in stimulus.user_input

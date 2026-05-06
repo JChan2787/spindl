@@ -122,6 +122,15 @@ class StimuliEngine:
         """Whether stimulus firing is currently blocked by user typing."""
         return self._user_typing
 
+    def is_idle(self) -> bool:
+        """Whether the engine would allow a stimulus to fire right now.
+
+        Modules can use this to make arrival-time decisions (e.g. NANO-123
+        Phase 2 stale-line dropping). Advisory — the engine's own
+        _should_fire() is the authoritative gate at fire time.
+        """
+        return self._should_fire()
+
     @property
     def modules(self) -> list[StimulusModule]:
         """Snapshot of registered modules (sorted by priority, descending)."""

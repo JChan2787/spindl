@@ -673,6 +673,7 @@ class VoiceAgentOrchestrator:
                 gameplay_probability_ceiling=stimuli_cfg.game_state_gameplay_probability_ceiling,
                 gameplay_dirty_hp_threshold=stimuli_cfg.game_state_gameplay_dirty_hp_threshold,
                 gameplay_event_batch_window=stimuli_cfg.game_state_gameplay_event_batch_window,
+                is_engine_idle=self._stimuli_engine.is_idle,
             )
             game_state._dialogue_store = self._dialogue_store
             game_state.dialogue_prompt_templates = stimuli_cfg.game_state_dialogue_prompt_templates
