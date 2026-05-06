@@ -1,26 +1,26 @@
 """
-Game-state bridge stimulus module (NANO-116 Phase B.1, NANO-122 gameplay).
+Game-state bridge stimulus module (NANO-116 B.1, NANO-122, NANO-123).
 
 Connects to the SPNDL-001 game-state bridge via TCP, buffers incoming
-events, and exposes them as stimuli for the StimuliEngine. Priority 50
-— same tier as Twitch (external integration).
+events, and exposes them as stimuli for the StimuliEngine. Priority 60
+— above Twitch (50) so game events preempt chat during gameplay.
 
-Two stimulus sub-paths:
-  1. Dialogue — buffered lines with dedup + drain cadence (NANO-116 B.2)
-  2. Gameplay — event-driven combat + periodic snapshot aggregate (NANO-122)
+Stimulus sub-paths (NANO-123 restructure):
+  1. Boss/chapter events — independent, deterministic, highest internal priority
+  2. Dialogue — fire on 1 line, zero delay, latest-line-only user message.
+     During combat, bundles current gameplay snapshot as context.
+
+Killed paths (NANO-123): independent gameplay event stimulus and snapshot
+aggregate stimulus no longer fire. Accumulation logic stays for context.
 
 Wire protocol: newline-delimited JSON on TCP 127.0.0.1:53817 (default).
 First event after connect must be bridge_ready with protocol_version
 in payload. Consumer validates against vendored schema version.
-
-Follows the Twitch module pattern: bounded deque buffer, atomic drain
-in get_stimulus(), template-formatted output.
 """
 
 import asyncio
 import json
 import logging
-import random
 import threading
 import time
 from collections import deque
@@ -46,10 +46,17 @@ _DEFAULT_PROMPT_TEMPLATE = (
 _RECONNECT_DELAY = 5.0
 _READ_BUFFER_SIZE = 65536
 
-# NANO-122: Event types that trigger immediate gameplay stimulus
+# NANO-122: Event types routed to the gameplay buffer
 _GAMEPLAY_EVENT_TYPES = frozenset({
     "enemy_engaged_player",
     "enemy_died",
+    "boss_battle_started",
+    "boss_battle_ended",
+    "chapter_status_changed",
+})
+
+# NANO-123: High-signal events that fire independently (no probability, no batch)
+_PRIORITY_EVENT_TYPES = frozenset({
     "boss_battle_started",
     "boss_battle_ended",
     "chapter_status_changed",
@@ -70,15 +77,14 @@ _DEFAULT_DIALOGUE_PROMPT_TEMPLATES: list[str] = [
 
 class GameStateModule(StimulusModule):
     """
-    Game-state bridge stimulus source (NANO-116).
+    Game-state bridge stimulus source (NANO-116, NANO-123).
 
     Connects to the SPNDL-001 bridge TCP channel, validates events
-    against the vendored schema, and buffers them for the StimuliEngine.
-    Both dialogue and gameplay events enter the same buffer — tier-specific
-    filtering happens in later phases (B.2 dialogue pipeline, B.3 gameplay
-    window).
+    against the vendored schema, and produces stimuli for the engine.
 
-    Priority 50 — external integration tier.
+    Internal priority (NANO-123): boss/chapter events > dialogue.
+    Gameplay events and snapshots accumulate for context but do not
+    fire independently. Priority 60 — above Twitch (50).
     """
 
     def __init__(
@@ -123,7 +129,7 @@ class GameStateModule(StimulusModule):
         self._summarizing = False
         self._dialogue_dropped_during_summary = 0
 
-        # NANO-122: Gameplay stimulus state
+        # NANO-122/123: Gameplay state
         self._gameplay_enabled = gameplay_enabled
         self._gameplay_base_probability = max(0.05, min(1.0, gameplay_base_probability))
         self._gameplay_escalation_step = max(0.05, min(0.5, gameplay_escalation_step))
@@ -131,17 +137,14 @@ class GameStateModule(StimulusModule):
         self._gameplay_dirty_hp_threshold = max(0.01, min(0.5, gameplay_dirty_hp_threshold))
         self._gameplay_event_batch_window = max(0.5, min(10.0, gameplay_event_batch_window))
 
-        # Event-based gameplay buffer (Phase 1)
+        # Event buffer — accumulates all gameplay events. NANO-123: only
+        # boss/chapter events fire independently; the rest are context-only.
         self._gameplay_event_buffer: list[GameEvent] = []
         self._gameplay_first_event_time: float | None = None
-        # Chapter dedupe: last chapter name that fired (zone-level, not status-level)
         self._last_chapter_name: str | None = None
 
-        # Snapshot aggregate (Phase 2)
-        self._last_evaluated_snapshot: dict[str, Any] | None = None
+        # Snapshot — updated from bridge, read-only context for combat chatter bundling
         self._current_snapshot: dict[str, Any] | None = None
-        self._snapshot_probability: float = self._gameplay_base_probability
-        self._snapshot_roll_passed: bool = False
 
         self._connected = False
         self._running = False
@@ -160,7 +163,7 @@ class GameStateModule(StimulusModule):
 
     @property
     def priority(self) -> int:
-        return 50
+        return 60
 
     @property
     def enabled(self) -> bool:
@@ -175,11 +178,7 @@ class GameStateModule(StimulusModule):
             self._first_line_time = None
             self._gameplay_event_buffer.clear()
             self._gameplay_first_event_time = None
-
-            self._last_evaluated_snapshot = None
             self._current_snapshot = None
-            self._snapshot_probability = self._gameplay_base_probability
-            self._snapshot_roll_passed = False
 
     @property
     def connected(self) -> bool:
@@ -275,11 +274,7 @@ class GameStateModule(StimulusModule):
         if not value:
             self._gameplay_event_buffer.clear()
             self._gameplay_first_event_time = None
-
-            self._last_evaluated_snapshot = None
             self._current_snapshot = None
-            self._snapshot_probability = self._gameplay_base_probability
-            self._snapshot_roll_passed = False
 
     @property
     def gameplay_base_probability(self) -> float:
@@ -363,10 +358,7 @@ class GameStateModule(StimulusModule):
         self._first_line_time = None
         self._gameplay_event_buffer.clear()
         self._gameplay_first_event_time = None
-        self._last_evaluated_snapshot = None
         self._current_snapshot = None
-        self._snapshot_probability = self._gameplay_base_probability
-        self._snapshot_roll_passed = False
         self._last_chapter_name = None
         self._last_sequence = -1
         self._thread = None
@@ -375,21 +367,17 @@ class GameStateModule(StimulusModule):
     def has_stimulus(self) -> bool:
         if not (self._enabled and self._running and not self._version_mismatch):
             return False
-        # Gameplay events take priority within the module (NANO-122)
-        if self._has_gameplay_event_stimulus():
-            return True
-        if self._has_gameplay_snapshot_stimulus():
+        # NANO-123: Boss/chapter events first, then dialogue. No independent
+        # gameplay event or snapshot paths.
+        if self._has_priority_event_stimulus():
             return True
         return self._has_dialogue_stimulus()
 
     def get_stimulus(self) -> Optional[StimulusData]:
         if not (self._enabled and self._running and not self._version_mismatch):
             return None
-        # Gameplay events first, then snapshot, then dialogue
-        stim = self._get_gameplay_event_stimulus()
-        if stim:
-            return stim
-        stim = self._get_gameplay_snapshot_stimulus()
+        # NANO-123: Boss/chapter events first, then dialogue
+        stim = self._get_priority_event_stimulus()
         if stim:
             return stim
         return self._get_dialogue_stimulus()
@@ -427,19 +415,20 @@ class GameStateModule(StimulusModule):
             for dl in lines:
                 self._dialogue_store.record_dialogue_line(dl)
 
-        if len(lines) >= 2:
-            context_lines = [self._format_dialogue_line(dl) for dl in lines[:-1]]
-            latest_line = self._format_dialogue_line(lines[-1])
-            dialogue_block = (
-                "\n".join(context_lines)
-                + "\n\n**[Latest]**\n"
-                + latest_line
-            )
-        else:
-            dialogue_block = self._format_dialogue_line(lines[0])
+        # NANO-123: Only the latest line goes into the user message.
+        # Prior lines are already recorded to DialogueStore and will
+        # appear in CHARACTER_KNOWLEDGE through the normal injection path.
+        dialogue_block = self._format_dialogue_line(lines[-1])
 
         template = self._template_rotator.select() or self._dialogue_prompt_templates[0]
         user_input = template.format(dialogue=dialogue_block)
+
+        # NANO-123: Bundle current snapshot during combat
+        latest_ctx = lines[-1].gameplay_context
+        if latest_ctx.combat_active and self._current_snapshot is not None:
+            snapshot_report = self._format_snapshot_report(self._current_snapshot)
+            if snapshot_report:
+                user_input = user_input.rstrip() + "\n\n" + snapshot_report
 
         print(f"[GameState] Dialogue drain: {len(lines)} lines, input_len={len(user_input)}", flush=True)
 
@@ -451,32 +440,42 @@ class GameStateModule(StimulusModule):
                 "event_count": len(lines),
                 "dialogue_lines": len(lines),
                 "game_id": "pragmata",
+                "combat_snapshot_bundled": latest_ctx.combat_active and self._current_snapshot is not None,
             },
         )
 
-    # -- Gameplay event stimulus (NANO-122 Phase 1) --------------------------
+    # -- Priority event stimulus (NANO-123) -----------------------------------
+    # Boss start/end and chapter transitions fire independently with no
+    # batch window, no probability gate, and no delay. Checked before dialogue.
 
-    def _has_gameplay_event_stimulus(self) -> bool:
+    def _has_priority_event_stimulus(self) -> bool:
         if not self._gameplay_enabled:
             return False
+        return any(
+            ev.event_type in _PRIORITY_EVENT_TYPES
+            for ev in self._gameplay_event_buffer
+        )
+
+    def _get_priority_event_stimulus(self) -> Optional[StimulusData]:
+        if not self._gameplay_enabled:
+            return None
+        priority_events = [
+            ev for ev in self._gameplay_event_buffer
+            if ev.event_type in _PRIORITY_EVENT_TYPES
+        ]
+        if not priority_events:
+            return None
+
+        # Pop only priority events; leave non-priority events in buffer
+        self._gameplay_event_buffer = [
+            ev for ev in self._gameplay_event_buffer
+            if ev.event_type not in _PRIORITY_EVENT_TYPES
+        ]
         if not self._gameplay_event_buffer:
-            return False
-        if self._gameplay_first_event_time is None:
-            return False
-        return (time.monotonic() - self._gameplay_first_event_time) >= self._gameplay_event_batch_window
-
-    def _get_gameplay_event_stimulus(self) -> Optional[StimulusData]:
-        if not self._has_gameplay_event_stimulus():
-            return None
-
-        events = list(self._gameplay_event_buffer)
-        self._gameplay_event_buffer.clear()
-        self._gameplay_first_event_time = None
-        if not events:
-            return None
+            self._gameplay_first_event_time = None
 
         lines = []
-        for ev in events:
+        for ev in priority_events:
             line = self._format_gameplay_event(ev)
             if line:
                 lines.append(line)
@@ -484,19 +483,11 @@ class GameStateModule(StimulusModule):
         if not lines:
             return None
 
-        if len(lines) >= 2:
-            events_block = (
-                "\n".join(lines[:-1])
-                + "\n\n**[Latest]**\n"
-                + lines[-1]
-            )
-        else:
-            events_block = lines[0]
-
+        events_block = "\n".join(lines)
         user_input = self._prompt_template.format(events=events_block)
 
         print(
-            f"[GameState] Gameplay event drain: {len(events)} events, "
+            f"[GameState] Priority event fired: {len(priority_events)} events, "
             f"input_len={len(user_input)}",
             flush=True,
         )
@@ -505,8 +496,8 @@ class GameStateModule(StimulusModule):
             source=StimulusSource.GAME_STATE,
             user_input=user_input,
             metadata={
-                "stimulus_type": "gameplay_event",
-                "event_count": len(events),
+                "stimulus_type": "priority_event",
+                "event_count": len(priority_events),
                 "game_id": "pragmata",
             },
         )
@@ -555,103 +546,10 @@ class GameStateModule(StimulusModule):
             etype, len(self._gameplay_event_buffer),
         )
 
-    # -- Gameplay snapshot stimulus (NANO-122 Phase 2) -----------------------
-
-    def _has_gameplay_snapshot_stimulus(self) -> bool:
-        if not self._gameplay_enabled:
-            return False
-        if self._current_snapshot is None:
-            return False
-        if not self._is_snapshot_dirty():
-            self._snapshot_roll_passed = False
-            return False
-        if self._roll_snapshot_probability():
-            self._snapshot_roll_passed = True
-            return True
-        self._snapshot_roll_passed = False
-        return False
-
-    def _get_gameplay_snapshot_stimulus(self) -> Optional[StimulusData]:
-        if not self._snapshot_roll_passed:
-            return None
-        self._snapshot_roll_passed = False
-        if not self._gameplay_enabled or self._current_snapshot is None:
-            return None
-
-        snap = self._current_snapshot
-        self._last_evaluated_snapshot = dict(snap)
-        if snap.get("enemies"):
-            self._last_evaluated_snapshot["enemies"] = [dict(e) for e in snap["enemies"]]
-        self._snapshot_probability = self._gameplay_base_probability
-
-        report = self._format_snapshot_report(snap)
-        if not report:
-            return None
-
-        user_input = self._prompt_template.format(events=report)
-
-        print(
-            f"[GameState] Snapshot aggregate fired, input_len={len(user_input)}",
-            flush=True,
-        )
-
-        return StimulusData(
-            source=StimulusSource.GAME_STATE,
-            user_input=user_input,
-            metadata={
-                "stimulus_type": "gameplay_snapshot",
-                "game_id": "pragmata",
-            },
-        )
-
-    def _is_snapshot_dirty(self) -> bool:
-        cur = self._current_snapshot
-        prev = self._last_evaluated_snapshot
-        if cur is None:
-            return False
-        if prev is None:
-            return True
-
-        for field in _SNAPSHOT_DIRTY_FIELDS_BOOL:
-            if cur.get(field) != prev.get(field):
-                return True
-
-        cur_enemies = cur.get("enemies") or []
-        prev_enemies = prev.get("enemies") or []
-        if len(cur_enemies) != len(prev_enemies):
-            return True
-
-        prev_by_id: dict[int, dict] = {}
-        for e in prev_enemies:
-            eid = e.get("enemy_id", id(e))
-            prev_by_id[eid] = e
-
-        for e in cur_enemies:
-            eid = e.get("enemy_id", id(e))
-            pe = prev_by_id.get(eid)
-            if pe is None:
-                return True
-            for bf in _SNAPSHOT_DIRTY_FIELDS_ENEMY_ROSTER:
-                if e.get(bf) != pe.get(bf):
-                    return True
-            cur_hp = e.get("hp_ratio", 0.0)
-            prev_hp = pe.get("hp_ratio", 0.0)
-            if abs(cur_hp - prev_hp) > self._gameplay_dirty_hp_threshold:
-                return True
-
-        return False
-
-    def _roll_snapshot_probability(self) -> bool:
-        if random.random() < self._snapshot_probability:
-            return True
-        self._snapshot_probability = min(
-            self._snapshot_probability + self._gameplay_escalation_step,
-            self._gameplay_probability_ceiling,
-        )
-        logger.debug(
-            "Snapshot probability escalated to %.2f", self._snapshot_probability,
-        )
-        return False
+    # -- Snapshot formatting (used by combat chatter bundling, NANO-123) ------
+    # Independent snapshot stimulus path killed in NANO-123. The accumulation
+    # logic (_current_snapshot updates from bridge) stays — _format_snapshot_report
+    # is called from _get_dialogue_stimulus when combat_active is True.
 
     def _format_snapshot_report(self, snap: dict[str, Any]) -> Optional[str]:
         lines: list[str] = []
@@ -689,7 +587,7 @@ class GameStateModule(StimulusModule):
 
     def notify_stimulus_fired(self) -> None:
         """Called by the engine after this module's stimulus reaches the LLM."""
-        self._snapshot_probability = self._gameplay_base_probability
+        pass
 
     # -- Internal async machinery ------------------------------------------
 

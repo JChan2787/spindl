@@ -1,4 +1,4 @@
-"""Tests for GameStateModule (NANO-116 Phase B.1)."""
+"""Tests for GameStateModule (NANO-116 Phase B.1, NANO-123 restructure)."""
 
 import json
 import sys
@@ -117,7 +117,7 @@ class TestGameStateModuleProperties:
     def test_defaults(self):
         module = GameStateModule()
         assert module.name == "game_state"
-        assert module.priority == 50
+        assert module.priority == 60
         assert module.enabled is False
         assert module.host == "127.0.0.1"
         assert module.port == 53817
@@ -382,3 +382,269 @@ class TestGameStateModuleLifecycle:
 
         module._version_mismatch = True
         assert module.health_check() is False
+
+
+# -- NANO-123: Dialogue responsiveness & stimulus restructure tests --------
+
+
+class TestNANO123LatestLineOnly:
+    """NANO-123: Only the latest dialogue line appears in the user message."""
+
+    def _make_module(self) -> GameStateModule:
+        module = GameStateModule(enabled=True, gameplay_enabled=True)
+        module._running = True
+        return module
+
+    def test_single_line_in_user_message(self):
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine
+        module = self._make_module()
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(speaker="Diana", text="Watch out!", source="chatter",
+                         event_source="direct_hook",
+                         timestamp="2026-04-25T04:00:00Z", sequence=0)
+        )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "[Diana]: Watch out!" in stimulus.user_input
+
+    def test_multi_line_drain_only_latest_in_user_message(self):
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine
+        module = self._make_module()
+        for i, (speaker, text) in enumerate([
+            ("Hugh", "Take this!"),
+            ("Diana", "Just like that!"),
+            ("Hugh", "Time to dance."),
+            ("Diana", "Hacking online!"),
+        ]):
+            module._dialogue_buffer._buffer.append(
+                DialogueLine(speaker=speaker, text=text, source="chatter",
+                             event_source="direct_hook",
+                             timestamp=f"2026-04-25T04:00:0{i}Z", sequence=i)
+            )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "[Diana]: Hacking online!" in stimulus.user_input
+        assert "[Hugh]: Take this!" not in stimulus.user_input
+        assert "[Diana]: Just like that!" not in stimulus.user_input
+        assert "[Hugh]: Time to dance." not in stimulus.user_input
+
+
+class TestNANO123CombatSnapshotBundling:
+    """NANO-123: Combat chatter bundles current gameplay snapshot."""
+
+    def _make_module(self) -> GameStateModule:
+        module = GameStateModule(enabled=True, gameplay_enabled=True)
+        module._running = True
+        return module
+
+    def test_combat_chatter_includes_snapshot(self):
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine, GameplaySnapshot
+        module = self._make_module()
+        module._current_snapshot = {
+            "hp_ratio": 0.73,
+            "weapon_name": "Grip Gun",
+            "in_combat": True,
+            "is_dead": False,
+            "enemies": [
+                {"display_name": "Walker", "hp_ratio": 1.0, "is_dead": False},
+            ],
+        }
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(
+                speaker="Diana", text="Hacking online!", source="chatter",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:00Z", sequence=0,
+                gameplay_context=GameplaySnapshot(combat_active=True, enemy_count=1),
+            )
+        )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "[Diana]: Hacking online!" in stimulus.user_input
+        assert "**Current gameplay state:**" in stimulus.user_input
+        assert "Hugh: 73% HP" in stimulus.user_input
+        assert "Walker" in stimulus.user_input
+        assert stimulus.metadata["combat_snapshot_bundled"] is True
+
+    def test_exploration_chatter_no_snapshot(self):
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine, GameplaySnapshot
+        module = self._make_module()
+        module._current_snapshot = {
+            "hp_ratio": 1.0, "weapon_name": "Grip Gun",
+            "in_combat": False, "is_dead": False,
+        }
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(
+                speaker="Diana", text="Look at that.", source="chatter",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:00Z", sequence=0,
+                gameplay_context=GameplaySnapshot(combat_active=False),
+            )
+        )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "**Current gameplay state:**" not in stimulus.user_input
+        assert stimulus.metadata["combat_snapshot_bundled"] is False
+
+
+class TestNANO123PriorityEvents:
+    """NANO-123: Boss/chapter events fire independently above dialogue."""
+
+    def _make_module(self) -> GameStateModule:
+        module = GameStateModule(enabled=True, gameplay_enabled=True)
+        module._running = True
+        return module
+
+    def test_boss_event_fires_independently(self):
+        module = self._make_module()
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="boss_battle_started",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:00Z",
+                sequence=1,
+                payload={},
+                game_id="pragmata",
+            )
+        )
+        assert module.has_stimulus() is True
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "Boss battle started" in stimulus.user_input
+        assert stimulus.metadata["stimulus_type"] == "priority_event"
+
+    def test_chapter_event_fires_independently(self):
+        module = self._make_module()
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="chapter_status_changed",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:00Z",
+                sequence=1,
+                payload={"chapter_name": "The Audit"},
+                game_id="pragmata",
+            )
+        )
+        assert module.has_stimulus() is True
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "The Audit" in stimulus.user_input
+
+    def test_priority_event_preempts_dialogue(self):
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine
+        module = self._make_module()
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(speaker="Diana", text="Watch out!", source="chatter",
+                         event_source="direct_hook",
+                         timestamp="2026-04-25T04:00:00Z", sequence=0)
+        )
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="boss_battle_started",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:01Z",
+                sequence=1,
+                payload={},
+                game_id="pragmata",
+            )
+        )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "Boss battle started" in stimulus.user_input
+        assert module._dialogue_buffer.count == 1
+
+    def test_non_priority_events_do_not_fire(self):
+        module = self._make_module()
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="enemy_engaged_player",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:00Z",
+                sequence=1,
+                payload={"enemy_name": "Walker"},
+                game_id="pragmata",
+            )
+        )
+        assert module.has_stimulus() is False
+
+    def test_priority_extraction_leaves_non_priority_in_buffer(self):
+        module = self._make_module()
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="enemy_engaged_player",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:00Z",
+                sequence=1,
+                payload={"enemy_name": "Walker"},
+                game_id="pragmata",
+            )
+        )
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="boss_battle_started",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:01Z",
+                sequence=2,
+                payload={},
+                game_id="pragmata",
+            )
+        )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "Boss battle started" in stimulus.user_input
+        assert len(module._gameplay_event_buffer) == 1
+        assert module._gameplay_event_buffer[0].event_type == "enemy_engaged_player"
+
+
+class TestNANO123KilledPaths:
+    """NANO-123: Independent gameplay event/snapshot paths no longer fire."""
+
+    def _make_module(self) -> GameStateModule:
+        module = GameStateModule(enabled=True, gameplay_enabled=True)
+        module._running = True
+        return module
+
+    def test_gameplay_events_alone_no_stimulus(self):
+        module = self._make_module()
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="enemy_engaged_player",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:00Z",
+                sequence=1,
+                payload={"enemy_name": "Walker"},
+                game_id="pragmata",
+            )
+        )
+        module._gameplay_event_buffer.append(
+            GameEvent(
+                event_type="enemy_died",
+                event_source="direct_hook",
+                timestamp="2026-04-25T04:00:01Z",
+                sequence=2,
+                payload={"enemy_name": "Walker"},
+                game_id="pragmata",
+            )
+        )
+        module._gameplay_first_event_time = 0.0
+        assert module.has_stimulus() is False
+
+    def test_snapshot_alone_no_stimulus(self):
+        module = self._make_module()
+        module._current_snapshot = {
+            "hp_ratio": 0.5, "weapon_name": "Grip Gun",
+            "in_combat": True, "is_dead": False,
+        }
+        assert module.has_stimulus() is False
+
+    def test_no_probability_gates(self):
+        module = self._make_module()
+        assert not hasattr(module, "_snapshot_roll_passed")
+        assert not hasattr(module, "_last_evaluated_snapshot")
+
+
+class TestNANO123Priority:
+    """NANO-123: GameStateModule priority above Twitch."""
+
+    def test_priority_above_50(self):
+        module = GameStateModule()
+        assert module.priority > 50

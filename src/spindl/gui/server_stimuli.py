@@ -745,7 +745,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                         "current_summary": current_summary,
                         "gameplay_enabled": module.gameplay_enabled,
                         "gameplay_event_buffer_count": len(module._gameplay_event_buffer),
-                        "gameplay_snapshot_probability": round(module._snapshot_probability, 2),
+                        "gameplay_snapshot_probability": 0.0,
                     },
                     to=sid,
                 )
