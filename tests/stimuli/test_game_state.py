@@ -828,3 +828,236 @@ class TestNANO123StaleLineCombatBundling:
         assert stimulus is not None
         assert "Current gameplay state" in stimulus.user_input
         assert "Grip Gun" in stimulus.user_input
+
+
+class TestNANO124SelfBargeIn:
+    """NANO-124: Probabilistic self-barge-in during active TTS."""
+
+    def _make_module(
+        self, idle: bool = False, barge_in_enabled: bool = True,
+        trigger_calls: list | None = None,
+    ) -> GameStateModule:
+        def mock_trigger():
+            if trigger_calls is not None:
+                trigger_calls.append(True)
+
+        module = GameStateModule(
+            enabled=True,
+            gameplay_enabled=True,
+            is_engine_idle=lambda: idle,
+            barge_in_enabled=barge_in_enabled,
+            trigger_barge_in=mock_trigger,
+        )
+        module._running = True
+        return module
+
+    def _make_dialogue_event(self, speaker="Diana", text="Watch out!", seq=1):
+        return {
+            "protocol_version": "0.1.2",
+            "event_type": "dialogue_line",
+            "event_source": "direct_hook",
+            "timestamp": "2026-05-06T10:00:00.000Z",
+            "sequence": seq,
+            "payload": {"speaker": speaker, "text": text, "source": "chatter"},
+        }
+
+    def test_disabled_preserves_phase2_behavior(self):
+        """With barge-in disabled, busy lines don't trigger (Phase 2)."""
+        module = self._make_module(idle=False, barge_in_enabled=False)
+        module._buffer_event(self._make_dialogue_event())
+        assert module._has_fresh_trigger is False
+
+    def test_idle_bypasses_barge_in_logic(self):
+        """When engine is idle, normal trigger fires — no probability roll."""
+        module = self._make_module(idle=True, barge_in_enabled=True)
+        module._buffer_event(self._make_dialogue_event())
+        assert module._has_fresh_trigger is True
+        assert module._barge_in_arrival_count == 0
+
+    def test_first_arrival_10_percent(self):
+        """First line during TTS has 10% chance."""
+        from unittest.mock import patch
+        trigger_calls = []
+        module = self._make_module(trigger_calls=trigger_calls)
+
+        with patch("spindl.stimuli.game_state.module.random") as mock_rng:
+            mock_rng.random.return_value = 0.05
+            module._buffer_event(self._make_dialogue_event(seq=1))
+            assert module._has_fresh_trigger is True
+            assert module._barge_in_triggered is True
+            assert len(trigger_calls) == 1
+
+    def test_first_arrival_miss(self):
+        """First line with roll > 10% doesn't trigger."""
+        from unittest.mock import patch
+        trigger_calls = []
+        module = self._make_module(trigger_calls=trigger_calls)
+
+        with patch("spindl.stimuli.game_state.module.random") as mock_rng:
+            mock_rng.random.return_value = 0.15
+            module._buffer_event(self._make_dialogue_event(seq=1))
+            assert module._has_fresh_trigger is False
+            assert module._barge_in_triggered is False
+            assert len(trigger_calls) == 0
+            assert module._barge_in_arrival_count == 1
+
+    def test_escalation_second_arrival(self):
+        """Second arrival has 20% chance."""
+        from unittest.mock import patch
+        trigger_calls = []
+        module = self._make_module(trigger_calls=trigger_calls)
+        module._barge_in_arrival_count = 1
+
+        with patch("spindl.stimuli.game_state.module.random") as mock_rng:
+            mock_rng.random.return_value = 0.15
+            module._buffer_event(self._make_dialogue_event(seq=2))
+            assert module._has_fresh_trigger is True
+            assert module._barge_in_count == 1
+
+    def test_escalation_caps_at_last_value(self):
+        """Arrivals beyond the curve length use the last value (90%)."""
+        from unittest.mock import patch
+        module = self._make_module()
+        module._barge_in_arrival_count = 10
+
+        with patch("spindl.stimuli.game_state.module.random") as mock_rng:
+            mock_rng.random.return_value = 0.85
+            module._buffer_event(self._make_dialogue_event(seq=11))
+            assert module._has_fresh_trigger is True
+
+    def test_fatigue_dampens_after_one_barge_in(self):
+        """After 1 barge-in, curve dampened by 60%: first arrival = 10% * 0.60 = 6%."""
+        from unittest.mock import patch
+        module = self._make_module()
+        module._barge_in_count = 1
+
+        with patch("spindl.stimuli.game_state.module.random") as mock_rng:
+            mock_rng.random.return_value = 0.05
+            module._buffer_event(self._make_dialogue_event(seq=1))
+            assert module._has_fresh_trigger is True
+
+        module2 = self._make_module()
+        module2._barge_in_count = 1
+
+        with patch("spindl.stimuli.game_state.module.random") as mock_rng:
+            mock_rng.random.return_value = 0.08
+            module2._buffer_event(self._make_dialogue_event(seq=1))
+            assert module2._has_fresh_trigger is False
+
+    def test_fatigue_clamps_at_last_multiplier(self):
+        """After 3+ barge-ins, fatigue stays at last multiplier (0.30).
+
+        With arrival_idx=0 (first arrival): 0.10 * 0.30 = 0.03.
+        Roll of 0.05 > 0.03 = miss.
+        """
+        from unittest.mock import patch
+        module = self._make_module()
+        module._barge_in_count = 3
+        module._barge_in_arrival_count = 0
+
+        with patch("spindl.stimuli.game_state.module.random") as mock_rng:
+            mock_rng.random.return_value = 0.05
+            result = module._roll_barge_in()
+            assert result is False
+
+    def test_reset_on_tts_completed(self):
+        """Both layers reset when TTS completes."""
+        module = self._make_module()
+        module._barge_in_arrival_count = 5
+        module._barge_in_count = 2
+        module._barge_in_triggered = True
+
+        module.on_tts_completed()
+
+        assert module._barge_in_arrival_count == 0
+        assert module._barge_in_count == 0
+        assert module._barge_in_triggered is False
+
+    def test_barge_in_template_used(self):
+        """Barge-in drain uses barge-in template, not normal rotator."""
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine, GameplaySnapshot
+        module = self._make_module()
+        module._barge_in_prompt_templates = ["BARGE: {dialogue}"]
+        module._barge_in_template_rotator.items = ["BARGE: {dialogue}"]
+        module._barge_in_triggered = True
+        module._has_fresh_trigger = True
+
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(
+                speaker="Hugh", text="Look out!", source="chatter",
+                event_source="direct_hook",
+                timestamp="2026-05-06T10:00:00Z", sequence=1,
+                gameplay_context=GameplaySnapshot(),
+            )
+        )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert stimulus.user_input.startswith("BARGE:")
+        assert stimulus.metadata["barge_in"] is True
+        assert stimulus.metadata["stimulus_type"] == "dialogue_barge_in"
+
+    def test_normal_drain_uses_normal_template(self):
+        """Normal drain (not barge-in) uses regular template."""
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine, GameplaySnapshot
+        module = self._make_module(idle=True)
+        module._barge_in_triggered = False
+        module._has_fresh_trigger = True
+
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(
+                speaker="Hugh", text="Look out!", source="chatter",
+                event_source="direct_hook",
+                timestamp="2026-05-06T10:00:00Z", sequence=1,
+                gameplay_context=GameplaySnapshot(),
+            )
+        )
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert stimulus.metadata["barge_in"] is False
+        assert stimulus.metadata["stimulus_type"] == "dialogue"
+
+    def test_drain_resets_arrival_count(self):
+        """After barge-in drain, arrival count resets for next TTS window."""
+        from spindl.stimuli.game_state.dialogue_buffer import DialogueLine, GameplaySnapshot
+        module = self._make_module()
+        module._barge_in_triggered = True
+        module._has_fresh_trigger = True
+        module._barge_in_arrival_count = 3
+
+        module._dialogue_buffer._buffer.append(
+            DialogueLine(
+                speaker="Diana", text="Move!", source="chatter",
+                event_source="direct_hook",
+                timestamp="2026-05-06T10:00:00Z", sequence=1,
+                gameplay_context=GameplaySnapshot(),
+            )
+        )
+        module.get_stimulus()
+        assert module._barge_in_arrival_count == 0
+
+    def test_priority_events_unaffected(self):
+        """Boss/chapter events still bypass everything — no probability roll."""
+        module = self._make_module(idle=False, barge_in_enabled=True)
+        module._buffer_event({
+            "protocol_version": "0.1.2",
+            "event_type": "boss_battle_started",
+            "event_source": "direct_hook",
+            "timestamp": "2026-05-06T10:00:00.000Z",
+            "sequence": 1,
+            "payload": {"boss_name": "Terraformer"},
+        })
+        assert module._has_fresh_trigger is False
+        assert module.has_stimulus() is True
+
+    def test_barge_in_disabled_setter_resets_state(self):
+        """Disabling barge-in via setter clears all state."""
+        module = self._make_module()
+        module._barge_in_arrival_count = 5
+        module._barge_in_count = 2
+        module._barge_in_triggered = True
+
+        module.barge_in_enabled = False
+
+        assert module._barge_in_arrival_count == 0
+        assert module._barge_in_count == 0
+        assert module._barge_in_triggered is False

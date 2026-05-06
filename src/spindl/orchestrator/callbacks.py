@@ -1133,6 +1133,40 @@ class OrchestratorCallbacks:
         if self._on_barge_in_triggered is not None:
             self._on_barge_in_triggered()
 
+    def trigger_self_barge_in(self) -> None:
+        """Handle game-event self-interruption during TTS (NANO-124).
+
+        Called by GameStateModule when the barge-in probability roll
+        succeeds. Reuses the same truncation logic as audio barge-in
+        but does not set a state trigger — the LLM doesn't need to
+        know it interrupted itself; the barge-in prompt template
+        carries all context.
+        """
+        with self._delivery_lock:
+            delivered = list(self._delivered_sentences)
+
+        if delivered and self._last_response:
+            truncated = " ".join(delivered)
+            if len(truncated) < len(self._last_response):
+                logger.info(
+                    "[NANO-124] Self-barge-in truncation: %d/%d chars delivered (%d sentences)",
+                    len(truncated), len(self._last_response), len(delivered),
+                )
+                self._last_response = truncated
+
+                if self._history_manager is not None:
+                    self._history_manager.amend_last_assistant_content(truncated)
+
+                if self._event_bus is not None:
+                    from ..core.events import BargeInTruncatedEvent
+                    self._event_bus.emit(BargeInTruncatedEvent(
+                        truncated_text=truncated,
+                        delivered_sentences=len(delivered),
+                    ))
+
+        if self._on_barge_in_triggered is not None:
+            self._on_barge_in_triggered()
+
     def _emit_state_change(self, from_state: str, to_state: str, trigger: str) -> None:
         """
         Emit a synthetic state change event.

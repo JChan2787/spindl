@@ -120,6 +120,11 @@ def build_stimuli_hydration(cfg) -> dict:
         "game_state_gameplay_probability_ceiling": cfg.game_state_gameplay_probability_ceiling,
         "game_state_gameplay_dirty_hp_threshold": cfg.game_state_gameplay_dirty_hp_threshold,
         "game_state_gameplay_event_batch_window": cfg.game_state_gameplay_event_batch_window,
+        # NANO-124: Self-barge-in
+        "game_state_barge_in_enabled": cfg.game_state_barge_in_enabled,
+        "game_state_barge_in_escalation": cfg.game_state_barge_in_escalation,
+        "game_state_barge_in_fatigue": cfg.game_state_barge_in_fatigue,
+        "game_state_barge_in_prompt_templates": cfg.game_state_barge_in_prompt_templates,
         # NANO-110: Addressing-others contexts
         "addressing_others_contexts": [
             {"id": ctx.id, "label": ctx.label, "prompt": ctx.prompt}
@@ -274,6 +279,12 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             game_state_gameplay_dirty_hp_threshold = data.get("game_state_gameplay_dirty_hp_threshold")
             game_state_gameplay_event_batch_window = data.get("game_state_gameplay_event_batch_window")
 
+            # NANO-124: Self-barge-in fields
+            game_state_barge_in_enabled = data.get("game_state_barge_in_enabled")
+            game_state_barge_in_escalation = data.get("game_state_barge_in_escalation")
+            game_state_barge_in_fatigue = data.get("game_state_barge_in_fatigue")
+            game_state_barge_in_prompt_templates = data.get("game_state_barge_in_prompt_templates")
+
             # NANO-121: Model cycling fields
             model_rotation_enabled = data.get("model_rotation_enabled")
             model_rotation_models = data.get("model_rotation_models")
@@ -392,6 +403,51 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_gameplay_event_batch_window = float(game_state_gameplay_event_batch_window)
                 game_state_gameplay_event_batch_window = max(0.5, min(10.0, game_state_gameplay_event_batch_window))
 
+            # NANO-124: Self-barge-in type coercion
+            if game_state_barge_in_enabled is not None:
+                game_state_barge_in_enabled = bool(game_state_barge_in_enabled)
+            if game_state_barge_in_escalation is not None:
+                if not isinstance(game_state_barge_in_escalation, list):
+                    game_state_barge_in_escalation = None
+                else:
+                    game_state_barge_in_escalation = [
+                        max(0.0, min(1.0, float(v))) for v in game_state_barge_in_escalation
+                    ]
+            if game_state_barge_in_fatigue is not None:
+                if not isinstance(game_state_barge_in_fatigue, list):
+                    game_state_barge_in_fatigue = None
+                else:
+                    game_state_barge_in_fatigue = [
+                        max(0.0, min(1.0, float(v))) for v in game_state_barge_in_fatigue
+                    ]
+            if game_state_barge_in_prompt_templates is not None:
+                if not isinstance(game_state_barge_in_prompt_templates, list):
+                    game_state_barge_in_prompt_templates = None
+                else:
+                    cleaned_bi: list[str] = []
+                    for t in game_state_barge_in_prompt_templates:
+                        s = str(t).strip()
+                        if not s:
+                            continue
+                        if "{dialogue}" not in s:
+                            await sio.emit(
+                                "stimuli_config_error",
+                                {
+                                    "field": "game_state_barge_in_prompt_templates",
+                                    "message": (
+                                        "Every barge-in prompt template must "
+                                        "contain the {dialogue} placeholder."
+                                    ),
+                                },
+                                to=sid,
+                            )
+                            return
+                        cleaned_bi.append(s)
+                    if not cleaned_bi:
+                        game_state_barge_in_prompt_templates = None
+                    else:
+                        game_state_barge_in_prompt_templates = cleaned_bi
+
             server._orchestrator.update_stimuli_config(
                 enabled=enabled,
                 patience_enabled=patience_enabled,
@@ -428,6 +484,10 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 game_state_gameplay_probability_ceiling=game_state_gameplay_probability_ceiling,
                 game_state_gameplay_dirty_hp_threshold=game_state_gameplay_dirty_hp_threshold,
                 game_state_gameplay_event_batch_window=game_state_gameplay_event_batch_window,
+                game_state_barge_in_enabled=game_state_barge_in_enabled,
+                game_state_barge_in_escalation=game_state_barge_in_escalation,
+                game_state_barge_in_fatigue=game_state_barge_in_fatigue,
+                game_state_barge_in_prompt_templates=game_state_barge_in_prompt_templates,
                 model_rotation_enabled=model_rotation_enabled,
                 model_rotation_models=model_rotation_models,
                 model_rotation_api_key=model_rotation_api_key,

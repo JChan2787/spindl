@@ -1,6 +1,7 @@
 """Configuration models for VoiceAgentOrchestrator (NANO-089: Pydantic validation layer)."""
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -489,6 +490,11 @@ class StimuliConfig(BaseModel):
     twitch_app_id: str = ""
     twitch_app_secret: str = ""
     twitch_buffer_size: int = Field(default=10, ge=1, le=50)
+
+    @field_validator("twitch_channel", "twitch_app_id", "twitch_app_secret", mode="before")
+    @classmethod
+    def _coerce_none_to_empty(cls, v: Any) -> str:
+        return "" if v is None else v
     twitch_max_message_length: int = Field(default=300, ge=50, le=1000)
     twitch_prompt_template: str = (
         "**You just received new messages in Twitch chat.** "
@@ -546,6 +552,23 @@ class StimuliConfig(BaseModel):
     game_state_gameplay_dirty_hp_threshold: float = Field(default=0.10, ge=0.01, le=0.5)
     game_state_gameplay_event_batch_window: float = Field(default=2.0, ge=0.5, le=10.0)
 
+    # NANO-124: Self-barge-in probability system
+    game_state_barge_in_enabled: bool = False
+    game_state_barge_in_escalation: list[float] = Field(
+        default_factory=lambda: [0.10, 0.20, 0.40, 0.70, 0.90]
+    )
+    game_state_barge_in_fatigue: list[float] = Field(
+        default_factory=lambda: [1.00, 0.60, 0.30]
+    )
+    game_state_barge_in_prompt_templates: list[str] = Field(
+        default_factory=lambda: [
+            "**Something just happened in the game while you were talking.** "
+            "React to this new line instead of continuing your previous thought.\n"
+            "\n"
+            "{dialogue}\n"
+        ]
+    )
+
     # Addressing-others contexts (NANO-110)
     addressing_others_contexts: list[AddressingContext] = Field(
         default_factory=_default_addressing_contexts,
@@ -556,6 +579,18 @@ class StimuliConfig(BaseModel):
     model_rotation_models: list[str] = Field(default_factory=list)
     model_rotation_api_key: str = ""
 
+    @staticmethod
+    def _resolve_env(value: str) -> str:
+        """Expand ${VAR_NAME} patterns with env var values."""
+        if not value or not isinstance(value, str):
+            return value or ""
+        import re
+        return re.sub(
+            r"\$\{([^}]+)\}",
+            lambda m: os.environ.get(m.group(1), m.group(0)),
+            value,
+        )
+
     @classmethod
     def from_dict(cls, data: dict) -> "StimuliConfig":
         """Parse stimuli config from YAML dict."""
@@ -565,6 +600,7 @@ class StimuliConfig(BaseModel):
         game_state = data.get("game_state", {})
         dialogue = game_state.get("dialogue", {})
         gameplay = game_state.get("gameplay", {})
+        barge_in = dialogue.get("tts_barge_in", {})
         model_rotation = data.get("model_rotation", {})
 
         # Parse addressing-others contexts (NANO-110)
@@ -594,8 +630,8 @@ class StimuliConfig(BaseModel):
             ),
             twitch_enabled=twitch.get("enabled", defaults.twitch_enabled),
             twitch_channel=twitch.get("channel", defaults.twitch_channel),
-            twitch_app_id=twitch.get("app_id", defaults.twitch_app_id),
-            twitch_app_secret=twitch.get("app_secret", defaults.twitch_app_secret),
+            twitch_app_id=cls._resolve_env(twitch.get("app_id", defaults.twitch_app_id)),
+            twitch_app_secret=cls._resolve_env(twitch.get("app_secret", defaults.twitch_app_secret)),
             twitch_buffer_size=twitch.get(
                 "buffer_size", defaults.twitch_buffer_size
             ),
@@ -682,6 +718,18 @@ class StimuliConfig(BaseModel):
             ),
             game_state_gameplay_event_batch_window=gameplay.get(
                 "event_batch_window", defaults.game_state_gameplay_event_batch_window
+            ),
+            game_state_barge_in_enabled=barge_in.get(
+                "enabled", defaults.game_state_barge_in_enabled
+            ),
+            game_state_barge_in_escalation=barge_in.get(
+                "escalation", defaults.game_state_barge_in_escalation
+            ),
+            game_state_barge_in_fatigue=barge_in.get(
+                "fatigue", defaults.game_state_barge_in_fatigue
+            ),
+            game_state_barge_in_prompt_templates=barge_in.get(
+                "prompt_templates", defaults.game_state_barge_in_prompt_templates
             ),
             addressing_others_contexts=contexts,
             model_rotation_enabled=model_rotation.get(
@@ -1309,6 +1357,15 @@ class OrchestratorConfig(BaseModel):
         gsg["probability_ceiling"] = self.stimuli_config.game_state_gameplay_probability_ceiling
         gsg["dirty_hp_threshold"] = self.stimuli_config.game_state_gameplay_dirty_hp_threshold
         gsg["event_batch_window"] = self.stimuli_config.game_state_gameplay_event_batch_window
+
+        # NANO-124: Self-barge-in config (nested under dialogue)
+        if "tts_barge_in" not in gsd:
+            gsd["tts_barge_in"] = {}
+        gsb = gsd["tts_barge_in"]
+        gsb["enabled"] = self.stimuli_config.game_state_barge_in_enabled
+        gsb["escalation"] = self.stimuli_config.game_state_barge_in_escalation
+        gsb["fatigue"] = self.stimuli_config.game_state_barge_in_fatigue
+        gsb["prompt_templates"] = self.stimuli_config.game_state_barge_in_prompt_templates
 
         # Addressing-others contexts (NANO-110, nested under stimuli)
         if "addressing_others" not in stim:

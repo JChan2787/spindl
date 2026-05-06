@@ -1,5 +1,5 @@
 """
-Game-state bridge stimulus module (NANO-116 B.1, NANO-122, NANO-123).
+Game-state bridge stimulus module (NANO-116 B.1, NANO-122, NANO-123, NANO-124).
 
 Connects to the SPNDL-001 game-state bridge via TCP, buffers incoming
 events, and exposes them as stimuli for the StimuliEngine. Priority 60
@@ -9,6 +9,12 @@ Stimulus sub-paths (NANO-123 restructure):
   1. Boss/chapter events — independent, deterministic, highest internal priority
   2. Dialogue — fire on 1 line, zero delay, latest-line-only user message.
      During combat, bundles current gameplay snapshot as context.
+
+Self-barge-in (NANO-124): when TTS is active and a dialogue line arrives,
+a two-layer probability system (escalating pressure + interrupt fatigue)
+decides whether to interrupt the current TTS and react to the new line.
+The module triggers TTS stop via callback, reusing the existing barge-in
+plumbing. Both layers reset when a TTS output completes without interruption.
 
 Killed paths (NANO-123): independent gameplay event stimulus and snapshot
 aggregate stimulus no longer fire. Accumulation logic stays for context.
@@ -21,6 +27,7 @@ in payload. Consumer validates against vendored schema version.
 import asyncio
 import json
 import logging
+import random
 import threading
 import time
 from collections import deque
@@ -74,6 +81,16 @@ _DEFAULT_DIALOGUE_PROMPT_TEMPLATES: list[str] = [
     "{dialogue}\n"
 ]
 
+_DEFAULT_BARGE_IN_PROMPT_TEMPLATES: list[str] = [
+    "**Something just happened in the game while you were talking.** "
+    "React to this new line instead of continuing your previous thought.\n"
+    "\n"
+    "{dialogue}\n"
+]
+
+_DEFAULT_BARGE_IN_ESCALATION: list[float] = [0.10, 0.20, 0.40, 0.70, 0.90]
+_DEFAULT_BARGE_IN_FATIGUE: list[float] = [1.00, 0.60, 0.30]
+
 
 class GameStateModule(StimulusModule):
     """
@@ -106,6 +123,11 @@ class GameStateModule(StimulusModule):
         gameplay_event_batch_window: float = 2.0,
         # NANO-123 Phase 2: Engine idle callback for stale-line dropping
         is_engine_idle: Optional[Callable[[], bool]] = None,
+        # NANO-124: Self-barge-in probability system
+        barge_in_enabled: bool = False,
+        barge_in_escalation: Optional[list[float]] = None,
+        barge_in_fatigue: Optional[list[float]] = None,
+        trigger_barge_in: Optional[Callable[[], None]] = None,
     ):
         self._host = host
         self._port = port
@@ -136,6 +158,20 @@ class GameStateModule(StimulusModule):
         # Lines arriving while busy still go to DialogueBuffer/Store for context.
         self._is_engine_idle = is_engine_idle
         self._has_fresh_trigger = False
+
+        # NANO-124: Self-barge-in probability system.
+        # Layer 1 (escalating): each dialogue_line during TTS increases chance.
+        # Layer 2 (fatigue): each actual barge-in dampens the curve.
+        # Both reset when TTS completes without interruption.
+        self._barge_in_enabled = barge_in_enabled
+        self._barge_in_escalation = list(barge_in_escalation or _DEFAULT_BARGE_IN_ESCALATION)
+        self._barge_in_fatigue = list(barge_in_fatigue or _DEFAULT_BARGE_IN_FATIGUE)
+        self._trigger_barge_in = trigger_barge_in
+        self._barge_in_arrival_count = 0
+        self._barge_in_count = 0
+        self._barge_in_triggered = False
+        self._barge_in_prompt_templates: list[str] = list(_DEFAULT_BARGE_IN_PROMPT_TEMPLATES)
+        self._barge_in_template_rotator = WeightedRotator(self._barge_in_prompt_templates)
 
         # NANO-122/123: Gameplay state
         self._gameplay_enabled = gameplay_enabled
@@ -324,6 +360,43 @@ class GameStateModule(StimulusModule):
     def gameplay_event_batch_window(self, value: float) -> None:
         self._gameplay_event_batch_window = max(0.5, min(10.0, value))
 
+    # -- NANO-124: Self-barge-in config properties ------------------------------
+
+    @property
+    def barge_in_enabled(self) -> bool:
+        return self._barge_in_enabled
+
+    @barge_in_enabled.setter
+    def barge_in_enabled(self, value: bool) -> None:
+        self._barge_in_enabled = value
+        if not value:
+            self._reset_barge_in_state()
+
+    @property
+    def barge_in_escalation(self) -> list[float]:
+        return self._barge_in_escalation
+
+    @barge_in_escalation.setter
+    def barge_in_escalation(self, value: list[float]) -> None:
+        self._barge_in_escalation = list(value) if value else list(_DEFAULT_BARGE_IN_ESCALATION)
+
+    @property
+    def barge_in_fatigue(self) -> list[float]:
+        return self._barge_in_fatigue
+
+    @barge_in_fatigue.setter
+    def barge_in_fatigue(self, value: list[float]) -> None:
+        self._barge_in_fatigue = list(value) if value else list(_DEFAULT_BARGE_IN_FATIGUE)
+
+    @property
+    def barge_in_prompt_templates(self) -> list[str]:
+        return self._barge_in_prompt_templates
+
+    @barge_in_prompt_templates.setter
+    def barge_in_prompt_templates(self, value: list[str]) -> None:
+        self._barge_in_prompt_templates = value if value else list(_DEFAULT_BARGE_IN_PROMPT_TEMPLATES)
+        self._barge_in_template_rotator.items = self._barge_in_prompt_templates
+
     def start(self) -> None:
         if self._running:
             print("[GameState] start() called but already running", flush=True)
@@ -430,7 +503,14 @@ class GameStateModule(StimulusModule):
         # appear in CHARACTER_KNOWLEDGE through the normal injection path.
         dialogue_block = self._format_dialogue_line(lines[-1])
 
-        template = self._template_rotator.select() or self._dialogue_prompt_templates[0]
+        # NANO-124: Use barge-in template if this drain was triggered by self-barge-in
+        is_barge_in = self._barge_in_triggered
+        if is_barge_in:
+            template = self._barge_in_template_rotator.select() or self._barge_in_prompt_templates[0]
+            self._barge_in_triggered = False
+            self._barge_in_arrival_count = 0
+        else:
+            template = self._template_rotator.select() or self._dialogue_prompt_templates[0]
         user_input = template.format(dialogue=dialogue_block)
 
         # NANO-123: Bundle current snapshot during combat
@@ -446,13 +526,60 @@ class GameStateModule(StimulusModule):
             source=StimulusSource.GAME_STATE,
             user_input=user_input,
             metadata={
-                "stimulus_type": "dialogue",
+                "stimulus_type": "dialogue_barge_in" if is_barge_in else "dialogue",
                 "event_count": len(lines),
                 "dialogue_lines": len(lines),
                 "game_id": "pragmata",
                 "combat_snapshot_bundled": latest_ctx.combat_active and self._current_snapshot is not None,
+                "barge_in": is_barge_in,
             },
         )
+
+    # -- NANO-124: Self-barge-in probability -----------------------------------
+
+    def _roll_barge_in(self) -> bool:
+        """Roll the two-layer probability check for self-barge-in.
+
+        Layer 1 (escalating): each arrival during TTS increases chance.
+        Layer 2 (fatigue): each actual barge-in dampens the curve.
+        Arrival count increments regardless of roll outcome.
+
+        Returns True if the roll succeeds and TTS should be interrupted.
+        """
+        arrival_idx = min(self._barge_in_arrival_count, len(self._barge_in_escalation) - 1)
+        base_prob = self._barge_in_escalation[arrival_idx]
+
+        fatigue_idx = min(self._barge_in_count, len(self._barge_in_fatigue) - 1)
+        fatigue_mult = self._barge_in_fatigue[fatigue_idx]
+
+        final_prob = base_prob * fatigue_mult
+
+        self._barge_in_arrival_count += 1
+
+        roll = random.random()
+        success = roll < final_prob
+
+        logger.debug(
+            "[NANO-124] Barge-in roll: arrival=%d, base=%.0f%%, "
+            "fatigue=%d, mult=%.0f%%, final=%.1f%%, roll=%.3f → %s",
+            arrival_idx, base_prob * 100,
+            fatigue_idx, fatigue_mult * 100,
+            final_prob * 100, roll,
+            "BARGE-IN" if success else "drop",
+        )
+
+        return success
+
+    def _reset_barge_in_state(self) -> None:
+        """Reset both probability layers. Called when TTS completes naturally."""
+        self._barge_in_arrival_count = 0
+        self._barge_in_count = 0
+        self._barge_in_triggered = False
+        logger.debug("[NANO-124] Barge-in state reset (TTS completed)")
+
+    def on_tts_completed(self) -> None:
+        """EventBus callback: TTS finished without interruption."""
+        self._reset_barge_in_state()
 
     # -- Priority event stimulus (NANO-123) -----------------------------------
     # Boss start/end and chapter transitions fire independently with no
@@ -778,9 +905,24 @@ class GameStateModule(StimulusModule):
                 # NANO-123 Phase 2: Only mark as trigger if engine is idle.
                 # Lines arriving while busy are context-only (DialogueStore
                 # gets them on next drain, CHARACTER_KNOWLEDGE stays fed).
+                # NANO-124: If barge-in is enabled and engine is busy, roll
+                # probability — on success, trigger TTS stop and mark for
+                # barge-in template.
                 if event_type == "dialogue_line":
                     if self._is_engine_idle is None or self._is_engine_idle():
                         self._has_fresh_trigger = True
+                    elif self._barge_in_enabled and self._trigger_barge_in is not None:
+                        if self._roll_barge_in():
+                            self._barge_in_count += 1
+                            self._barge_in_triggered = True
+                            self._has_fresh_trigger = True
+                            self._trigger_barge_in()
+                            logger.info(
+                                "[NANO-124] Self-barge-in triggered "
+                                "(arrival=%d, total_barges=%d)",
+                                self._barge_in_arrival_count,
+                                self._barge_in_count,
+                            )
 
         # NANO-122: Route gameplay combat events to gameplay buffer
         game_event = GameEvent(

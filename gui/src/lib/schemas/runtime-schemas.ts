@@ -221,6 +221,11 @@ export const StimuliConfigUpdatedSchema = z.object({
   game_state_gameplay_probability_ceiling: z.number().min(0.1).max(1.0),
   game_state_gameplay_dirty_hp_threshold: z.number().min(0.01).max(0.5),
   game_state_gameplay_event_batch_window: z.number().min(0.5).max(10.0),
+  // NANO-124: Self-barge-in
+  game_state_barge_in_enabled: z.boolean(),
+  game_state_barge_in_escalation: z.array(z.number().min(0).max(1)),
+  game_state_barge_in_fatigue: z.array(z.number().min(0).max(1)),
+  game_state_barge_in_prompt_templates: z.array(z.string()).min(1),
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: z.array(AddressingContextSchema).default([{ id: "ctx_0", label: "Others", prompt: "" }]),
   // NANO-121: Model cycling

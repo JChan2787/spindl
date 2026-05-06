@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Gamepad2, Wifi, WifiOff, Layers, MessageSquare, Key, Brain, BookOpen, Timer, ListFilter, Plus, X } from "lucide-react";
+import { Gamepad2, Wifi, WifiOff, Layers, MessageSquare, Key, Brain, BookOpen, Timer, ListFilter, Plus, X, Zap } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -417,6 +417,44 @@ export function GameStateCard() {
     [updatePendingStimuli, emitChanges]
   );
 
+  // NANO-124: Self-barge-in handlers
+  const handleBargeInEnabledChange = useCallback(
+    (checked: boolean) => {
+      updatePendingStimuli({ game_state_barge_in_enabled: checked });
+      emitChanges({ game_state_barge_in_enabled: checked });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const [localBargeInPrompt, setLocalBargeInPrompt] = useState(
+    effectiveConfig.game_state_barge_in_prompt_templates?.[0] ?? ""
+  );
+  const bargeInPromptSyncedRef = useRef(
+    effectiveConfig.game_state_barge_in_prompt_templates?.[0] ?? ""
+  );
+
+  useEffect(() => {
+    const incoming = effectiveConfig.game_state_barge_in_prompt_templates?.[0] ?? "";
+    if (incoming !== bargeInPromptSyncedRef.current) {
+      setLocalBargeInPrompt(incoming);
+      bargeInPromptSyncedRef.current = incoming;
+    }
+  }, [effectiveConfig.game_state_barge_in_prompt_templates]);
+
+  const bargeInPromptMissingPlaceholder = localBargeInPrompt.trim().length > 0 && !localBargeInPrompt.includes("{dialogue}");
+
+  const handleBargeInPromptBlur = useCallback(() => {
+    if (bargeInPromptMissingPlaceholder) return;
+    if (localBargeInPrompt !== bargeInPromptSyncedRef.current) {
+      const trimmed = localBargeInPrompt.trim();
+      if (trimmed) {
+        updatePendingStimuli({ game_state_barge_in_prompt_templates: [trimmed] });
+        emitChanges({ game_state_barge_in_prompt_templates: [trimmed] });
+        bargeInPromptSyncedRef.current = trimmed;
+      }
+    }
+  }, [localBargeInPrompt, bargeInPromptMissingPlaceholder, updatePendingStimuli, emitChanges]);
+
   // Poll game-state status when dialogue OR gameplay is enabled
   const anyGameStateActive = effectiveConfig.game_state_dialogue_enabled || effectiveConfig.game_state_gameplay_enabled;
   useEffect(() => {
@@ -534,6 +572,55 @@ export function GameStateCard() {
                   )}
                 </div>
               ))}
+            </div>
+
+            {/* NANO-124: Self-barge-in */}
+            <div className="space-y-2 border-t border-zinc-700 pt-3 mt-3">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2 text-sm">
+                  <Zap className="h-3.5 w-3.5" />
+                  Self-Barge-In
+                </Label>
+                <button
+                  onClick={() => handleBargeInEnabledChange(!effectiveConfig.game_state_barge_in_enabled)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    effectiveConfig.game_state_barge_in_enabled
+                      ? "bg-primary"
+                      : "bg-muted"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      effectiveConfig.game_state_barge_in_enabled ? "translate-x-4" : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                When enabled, incoming game dialogue can interrupt active TTS with escalating probability.
+              </p>
+              {effectiveConfig.game_state_barge_in_enabled && (
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2 text-xs">
+                    <Zap className="h-3 w-3" />
+                    Barge-In Prompt Template
+                  </Label>
+                  <Textarea
+                    value={localBargeInPrompt}
+                    onChange={(e) => setLocalBargeInPrompt(e.target.value)}
+                    onBlur={handleBargeInPromptBlur}
+                    rows={3}
+                    className={`text-xs resize-none ${bargeInPromptMissingPlaceholder ? "border-red-500" : ""}`}
+                    placeholder="Template for self-barge-in injection (must contain {dialogue})..."
+                    aria-invalid={bargeInPromptMissingPlaceholder}
+                  />
+                  {bargeInPromptMissingPlaceholder && (
+                    <p className="text-xs text-red-500 mt-0.5">
+                      Template must contain {"{dialogue}"}.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* NANO-122: Gameplay prompt template */}

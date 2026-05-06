@@ -21,6 +21,7 @@ from ..core.event_bus import EventBus
 from ..core.context_manager import ContextManager
 from ..core.events import (
     AudioLevelEvent,
+    EventType,
     MicLevelEvent,
     StateChangedEvent,
     TTSStartedEvent,
@@ -674,18 +675,30 @@ class VoiceAgentOrchestrator:
                 gameplay_dirty_hp_threshold=stimuli_cfg.game_state_gameplay_dirty_hp_threshold,
                 gameplay_event_batch_window=stimuli_cfg.game_state_gameplay_event_batch_window,
                 is_engine_idle=self._stimuli_engine.is_idle,
+                barge_in_enabled=stimuli_cfg.game_state_barge_in_enabled,
+                barge_in_escalation=stimuli_cfg.game_state_barge_in_escalation,
+                barge_in_fatigue=stimuli_cfg.game_state_barge_in_fatigue,
+                trigger_barge_in=self._handle_self_barge_in,
             )
             game_state._dialogue_store = self._dialogue_store
             game_state.dialogue_prompt_templates = stimuli_cfg.game_state_dialogue_prompt_templates
+            game_state.barge_in_prompt_templates = stimuli_cfg.game_state_barge_in_prompt_templates
+            # NANO-124: Subscribe to TTS_COMPLETED for probability layer reset
+            if self._event_bus:
+                self._event_bus.subscribe(
+                    EventType.TTS_COMPLETED,
+                    lambda evt: game_state.on_tts_completed(),
+                )
             self._stimuli_engine.register_module(game_state)
             self._game_state_module = game_state
             logger.info(
                 "Game-state module registered (target=%s:%d, enabled=%s, "
-                "dialogue_buffer=%d)",
+                "dialogue_buffer=%d, barge_in=%s)",
                 stimuli_cfg.game_state_host,
                 stimuli_cfg.game_state_port,
                 stimuli_cfg.game_state_enabled,
                 stimuli_cfg.game_state_dialogue_buffer_size,
+                stimuli_cfg.game_state_barge_in_enabled,
             )
         else:
             self._game_state_module = None
@@ -1009,6 +1022,18 @@ class VoiceAgentOrchestrator:
     def _handle_barge_in(self) -> None:
         """Handle barge-in by stopping playback."""
         self._playback.stop()
+
+    def _handle_self_barge_in(self) -> None:
+        """Handle game-event self-barge-in (NANO-124).
+
+        Stops playback, truncates history via callbacks, and transitions
+        the state machine back to LISTENING so the engine can fire the
+        new stimulus on the next tick. Audio barge-in doesn't need this
+        because VAD handles the state transition directly.
+        """
+        self._callbacks.trigger_self_barge_in()
+        self._playback.stop()
+        self._state_machine.finish_system_speaking()
 
     def set_addressing_others(self, context_id: str) -> None:
         """
@@ -2123,6 +2148,10 @@ class VoiceAgentOrchestrator:
         game_state_gameplay_probability_ceiling: Optional[float] = None,
         game_state_gameplay_dirty_hp_threshold: Optional[float] = None,
         game_state_gameplay_event_batch_window: Optional[float] = None,
+        game_state_barge_in_enabled: Optional[bool] = None,
+        game_state_barge_in_escalation: Optional[list[float]] = None,
+        game_state_barge_in_fatigue: Optional[list[float]] = None,
+        game_state_barge_in_prompt_templates: Optional[list[str]] = None,
         model_rotation_enabled: Optional[bool] = None,
         model_rotation_models: Optional[list[str]] = None,
         model_rotation_api_key: Optional[str] = None,
@@ -2316,6 +2345,19 @@ class VoiceAgentOrchestrator:
                     if game_state_gameplay_event_batch_window is not None:
                         module.gameplay_event_batch_window = game_state_gameplay_event_batch_window
                         cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
+                    # NANO-124: Self-barge-in config
+                    if game_state_barge_in_enabled is not None:
+                        module.barge_in_enabled = game_state_barge_in_enabled
+                        cfg.game_state_barge_in_enabled = game_state_barge_in_enabled
+                    if game_state_barge_in_escalation is not None:
+                        module.barge_in_escalation = game_state_barge_in_escalation
+                        cfg.game_state_barge_in_escalation = game_state_barge_in_escalation
+                    if game_state_barge_in_fatigue is not None:
+                        module.barge_in_fatigue = game_state_barge_in_fatigue
+                        cfg.game_state_barge_in_fatigue = game_state_barge_in_fatigue
+                    if game_state_barge_in_prompt_templates is not None:
+                        module.barge_in_prompt_templates = game_state_barge_in_prompt_templates
+                        cfg.game_state_barge_in_prompt_templates = game_state_barge_in_prompt_templates
                     break
 
         # Update config even if game_state module isn't registered yet
@@ -2370,6 +2412,15 @@ class VoiceAgentOrchestrator:
             cfg.game_state_gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
         if game_state_gameplay_event_batch_window is not None:
             cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
+        # NANO-124: Self-barge-in config (fallback if module not registered)
+        if game_state_barge_in_enabled is not None:
+            cfg.game_state_barge_in_enabled = game_state_barge_in_enabled
+        if game_state_barge_in_escalation is not None:
+            cfg.game_state_barge_in_escalation = game_state_barge_in_escalation
+        if game_state_barge_in_fatigue is not None:
+            cfg.game_state_barge_in_fatigue = game_state_barge_in_fatigue
+        if game_state_barge_in_prompt_templates is not None:
+            cfg.game_state_barge_in_prompt_templates = game_state_barge_in_prompt_templates
 
         # NANO-121: Model cycling for stimulus responses
         rotation_changed = False
