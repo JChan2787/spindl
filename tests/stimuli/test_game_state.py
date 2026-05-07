@@ -874,27 +874,27 @@ class TestNANO124SelfBargeIn:
         assert module._has_fresh_trigger is True
         assert module._barge_in_arrival_count == 0
 
-    def test_first_arrival_10_percent(self):
-        """First line during TTS has 10% chance."""
+    def test_first_arrival_1_percent(self):
+        """First line during TTS has 1% chance (default curve)."""
         from unittest.mock import patch
         trigger_calls = []
         module = self._make_module(trigger_calls=trigger_calls)
 
         with patch("spindl.stimuli.game_state.module.random") as mock_rng:
-            mock_rng.random.return_value = 0.05
+            mock_rng.random.return_value = 0.005
             module._buffer_event(self._make_dialogue_event(seq=1))
             assert module._has_fresh_trigger is True
             assert module._barge_in_triggered is True
             assert len(trigger_calls) == 1
 
     def test_first_arrival_miss(self):
-        """First line with roll > 10% doesn't trigger."""
+        """First line with roll > 1% doesn't trigger."""
         from unittest.mock import patch
         trigger_calls = []
         module = self._make_module(trigger_calls=trigger_calls)
 
         with patch("spindl.stimuli.game_state.module.random") as mock_rng:
-            mock_rng.random.return_value = 0.15
+            mock_rng.random.return_value = 0.02
             module._buffer_event(self._make_dialogue_event(seq=1))
             assert module._has_fresh_trigger is False
             assert module._barge_in_triggered is False
@@ -902,37 +902,37 @@ class TestNANO124SelfBargeIn:
             assert module._barge_in_arrival_count == 1
 
     def test_escalation_second_arrival(self):
-        """Second arrival has 20% chance."""
+        """Second arrival has 1.5% chance (default curve index 1)."""
         from unittest.mock import patch
         trigger_calls = []
         module = self._make_module(trigger_calls=trigger_calls)
         module._barge_in_arrival_count = 1
 
         with patch("spindl.stimuli.game_state.module.random") as mock_rng:
-            mock_rng.random.return_value = 0.15
+            mock_rng.random.return_value = 0.01
             module._buffer_event(self._make_dialogue_event(seq=2))
             assert module._has_fresh_trigger is True
             assert module._barge_in_count == 1
 
     def test_escalation_caps_at_last_value(self):
-        """Arrivals beyond the curve length use the last value (90%)."""
+        """Arrivals beyond the curve length use the last value (40%)."""
         from unittest.mock import patch
         module = self._make_module()
-        module._barge_in_arrival_count = 10
+        module._barge_in_arrival_count = 25
 
         with patch("spindl.stimuli.game_state.module.random") as mock_rng:
-            mock_rng.random.return_value = 0.85
-            module._buffer_event(self._make_dialogue_event(seq=11))
+            mock_rng.random.return_value = 0.35
+            module._buffer_event(self._make_dialogue_event(seq=26))
             assert module._has_fresh_trigger is True
 
     def test_fatigue_dampens_after_one_barge_in(self):
-        """After 1 barge-in, curve dampened by 60%: first arrival = 10% * 0.60 = 6%."""
+        """After 1 barge-in, curve dampened by 60%: first arrival = 1% * 0.60 = 0.6%."""
         from unittest.mock import patch
         module = self._make_module()
         module._barge_in_count = 1
 
         with patch("spindl.stimuli.game_state.module.random") as mock_rng:
-            mock_rng.random.return_value = 0.05
+            mock_rng.random.return_value = 0.004
             module._buffer_event(self._make_dialogue_event(seq=1))
             assert module._has_fresh_trigger is True
 
@@ -940,15 +940,15 @@ class TestNANO124SelfBargeIn:
         module2._barge_in_count = 1
 
         with patch("spindl.stimuli.game_state.module.random") as mock_rng:
-            mock_rng.random.return_value = 0.08
+            mock_rng.random.return_value = 0.008
             module2._buffer_event(self._make_dialogue_event(seq=1))
             assert module2._has_fresh_trigger is False
 
     def test_fatigue_clamps_at_last_multiplier(self):
         """After 3+ barge-ins, fatigue stays at last multiplier (0.30).
 
-        With arrival_idx=0 (first arrival): 0.10 * 0.30 = 0.03.
-        Roll of 0.05 > 0.03 = miss.
+        With arrival_idx=0 (first arrival): 0.01 * 0.30 = 0.003.
+        Roll of 0.005 > 0.003 = miss.
         """
         from unittest.mock import patch
         module = self._make_module()
@@ -956,7 +956,7 @@ class TestNANO124SelfBargeIn:
         module._barge_in_arrival_count = 0
 
         with patch("spindl.stimuli.game_state.module.random") as mock_rng:
-            mock_rng.random.return_value = 0.05
+            mock_rng.random.return_value = 0.005
             result = module._roll_barge_in()
             assert result is False
 

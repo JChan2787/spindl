@@ -1026,14 +1026,15 @@ class VoiceAgentOrchestrator:
     def _handle_self_barge_in(self) -> None:
         """Handle game-event self-barge-in (NANO-124).
 
-        Stops playback, truncates history via callbacks, and transitions
-        the state machine back to LISTENING so the engine can fire the
-        new stimulus on the next tick. Audio barge-in doesn't need this
-        because VAD handles the state transition directly.
+        Truncates history, transitions the state machine back to LISTENING,
+        then stops playback. Order matters: finish_system_speaking() must
+        run while state is still SYSTEM_SPEAKING — playback.stop() fires
+        on_interrupt which can cause state confusion if the transition
+        hasn't happened yet.
         """
         self._callbacks.trigger_self_barge_in()
-        self._playback.stop()
         self._state_machine.finish_system_speaking()
+        self._playback.stop()
 
     def set_addressing_others(self, context_id: str) -> None:
         """

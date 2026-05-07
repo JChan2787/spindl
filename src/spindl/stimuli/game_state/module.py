@@ -88,7 +88,12 @@ _DEFAULT_BARGE_IN_PROMPT_TEMPLATES: list[str] = [
     "{dialogue}\n"
 ]
 
-_DEFAULT_BARGE_IN_ESCALATION: list[float] = [0.10, 0.20, 0.40, 0.70, 0.90]
+_DEFAULT_BARGE_IN_ESCALATION: list[float] = [
+    0.01, 0.015, 0.02, 0.025, 0.05,
+    0.06, 0.067, 0.07, 0.075, 0.1,
+    0.12, 0.15, 0.18, 0.2, 0.23,
+    0.25, 0.27, 0.3, 0.33, 0.4,
+]
 _DEFAULT_BARGE_IN_FATIGUE: list[float] = [1.00, 0.60, 0.30]
 
 

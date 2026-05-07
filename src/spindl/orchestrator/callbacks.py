@@ -1216,7 +1216,7 @@ class OrchestratorCallbacks:
                 self._on_pause_listening()
 
             self._processing_start_time = time.time()
-            current_state = "idle"  # Track state for synthetic transitions
+            current_state = "listening" if use_state_machine else "idle"
 
             try:
                 # Store as transcription (matches normal flow)

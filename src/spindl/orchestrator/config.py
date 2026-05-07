@@ -555,7 +555,12 @@ class StimuliConfig(BaseModel):
     # NANO-124: Self-barge-in probability system
     game_state_barge_in_enabled: bool = False
     game_state_barge_in_escalation: list[float] = Field(
-        default_factory=lambda: [0.10, 0.20, 0.40, 0.70, 0.90]
+        default_factory=lambda: [
+            0.01, 0.015, 0.02, 0.025, 0.05,
+            0.06, 0.067, 0.07, 0.075, 0.1,
+            0.12, 0.15, 0.18, 0.2, 0.23,
+            0.25, 0.27, 0.3, 0.33, 0.4,
+        ]
     )
     game_state_barge_in_fatigue: list[float] = Field(
         default_factory=lambda: [1.00, 0.60, 0.30]

@@ -474,7 +474,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   game_state_gameplay_event_batch_window: 2.0,
   // NANO-124: Self-barge-in
   game_state_barge_in_enabled: false,
-  game_state_barge_in_escalation: [0.10, 0.20, 0.40, 0.70, 0.90],
+  game_state_barge_in_escalation: [0.01, 0.015, 0.02, 0.025, 0.05, 0.06, 0.067, 0.07, 0.075, 0.1, 0.12, 0.15, 0.18, 0.2, 0.23, 0.25, 0.27, 0.3, 0.33, 0.4],
   game_state_barge_in_fatigue: [1.00, 0.60, 0.30],
   game_state_barge_in_prompt_templates: [
     "**Something just happened in the game while you were talking.** React to this new line instead of continuing your previous thought.\n\n{dialogue}\n"
