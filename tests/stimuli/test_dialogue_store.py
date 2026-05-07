@@ -212,7 +212,7 @@ class TestDialogueStoreInjection:
         store.record_dialogue_line(_make_line(speaker="Diana", text="New line after summary", seq=20))
 
         content = store.get_injection_content(token_budget=200)
-        assert "Pixl's read on the characters" in content
+        assert "Accumulated character knowledge from dialogue:" in content
         assert "Summary of 20 NPC conversations." in content
         assert "New line after summary" in content
 

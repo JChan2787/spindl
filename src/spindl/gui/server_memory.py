@@ -105,6 +105,7 @@ def register_memory_handlers(server: "GUIServer") -> None:
                         "relevance_threshold": config.memory_config.relevance_threshold,
                         "dedup_threshold": config.memory_config.dedup_threshold,
                         "distance_metric": config.memory_config.distance_metric,
+                        "cross_activation": config.memory_config.cross_activation,
                         "reflection_interval": config.memory_config.reflection_interval,
                         "reflection_prompt": config.memory_config.reflection_prompt,
                         "reflection_system_message": config.memory_config.reflection_system_message,
@@ -155,6 +156,33 @@ def register_memory_handlers(server: "GUIServer") -> None:
         await sio.emit(
             "distance_metric_updated",
             {"success": True, "distance_metric": metric, "persisted": persisted},
+        )
+
+    @sio.event
+    async def set_cross_activation(sid: str, data: dict) -> None:
+        """Toggle RAG→Codex cross-activation (NANO-127)."""
+        enabled = bool(data.get("enabled", False))
+        if not server._orchestrator:
+            return
+
+        config = server._orchestrator._config
+        config.memory_config.cross_activation = enabled
+
+        if server._orchestrator._cross_activator:
+            server._orchestrator._cross_activator.enabled = enabled
+
+        persisted = False
+        if server._config_path:
+            try:
+                config.save_to_yaml(server._config_path)
+                persisted = True
+            except Exception as e:
+                print(f"[GUI] Failed to persist cross_activation: {e}", flush=True)
+
+        print(f"[GUI] Cross-activation set to: {enabled} (persisted={persisted})", flush=True)
+        await sio.emit(
+            "cross_activation_updated",
+            {"success": True, "enabled": enabled, "persisted": persisted},
         )
 
     @sio.event

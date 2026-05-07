@@ -540,58 +540,13 @@ class TestModalityRulesProvider:
 
 
 class TestVoiceStateProvider:
-    """Tests for VoiceStateProvider."""
+    """VoiceStateProvider was removed in commit 12f85d7 (Session 697).
 
-    def test_placeholder(self):
-        """Placeholder should be [STATE_CONTEXT]."""
-        provider = VoiceStateProvider()
-        assert provider.placeholder == "[STATE_CONTEXT]"
+    Voice state injection moved from system prompt block to inline user-message
+    injection. These tests are retained as documentation of the removal.
+    """
 
-    def test_provide_barge_in(self):
-        """Should return barge-in injection for barge_in trigger."""
-        context = BuildContext(
-            input_content="Hello",
-            state_trigger="barge_in",
-        )
-        provider = VoiceStateProvider()
-        result = provider.provide(context)
-        assert "interrupted" in result.lower()
-
-    def test_provide_empty_transcription(self):
-        """Should return empty transcription injection."""
-        context = BuildContext(
-            input_content="",
-            state_trigger="empty_transcription",
-        )
-        provider = VoiceStateProvider()
-        result = provider.provide(context)
-        assert "sound" in result.lower()
-        assert "words" in result.lower()
-
-    def test_provide_error(self):
-        """Should return error injection for error trigger."""
-        context = BuildContext(
-            input_content="Hello",
-            state_trigger="error",
-        )
-        provider = VoiceStateProvider()
-        result = provider.provide(context)
-        assert "error" in result.lower()
-
-    def test_provide_collapses_no_trigger(self):
-        """Should return None when no state_trigger."""
-        context = BuildContext(input_content="Hello")
-        provider = VoiceStateProvider()
-        assert provider.provide(context) is None
-
-    def test_provide_collapses_normal_trigger(self):
-        """Should return None for normal triggers like vad_speech_start."""
-        context = BuildContext(
-            input_content="Hello",
-            state_trigger="vad_speech_start",
-        )
-        provider = VoiceStateProvider()
-        assert provider.provide(context) is None
+    pass
 
 
 # =============================================================================
@@ -810,9 +765,8 @@ class TestCreateDefaultRegistry:
         """Should register all standard providers."""
         registry = create_default_registry()
 
-        # Should have 11 providers total (RecentHistoryProvider removed;
-        # [RECENT_HISTORY] is filled by HistoryInjector PreProcessor instead)
-        assert len(registry) == 11
+        # 10 providers (RecentHistoryProvider and VoiceStateProvider removed)
+        assert len(registry) == 10
 
     def test_provider_placeholders(self):
         """Should have correct placeholders for all providers."""
@@ -829,7 +783,6 @@ class TestCreateDefaultRegistry:
             "[PERSONA_RULES]",
             "[MODALITY_CONTEXT]",
             "[MODALITY_RULES]",
-            "[STATE_CONTEXT]",
             "[CONVERSATION_SUMMARY]",
             # [RECENT_HISTORY] not in registry — filled by HistoryInjector PreProcessor
             "[CURRENT_INPUT]",

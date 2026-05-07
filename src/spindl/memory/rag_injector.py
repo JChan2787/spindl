@@ -16,6 +16,7 @@ import logging
 from typing import Optional
 
 from ..llm.plugins.base import PipelineContext, PreProcessor
+from ..utils.tokens import count_tokens
 from .memory_store import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -132,7 +133,7 @@ class RAGInjector(PreProcessor):
         rag_text = self._format_memories(results)
 
         context.metadata["rag_content"] = rag_text
-        context.metadata["rag_tokens_estimate"] = len(rag_text) // 4
+        context.metadata["rag_tokens_estimate"] = count_tokens(rag_text)
         context.metadata["rag_results"] = results
 
         # NANO-107: reinforce memories that actually made it into the prompt

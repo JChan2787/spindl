@@ -553,8 +553,8 @@ class OpenRouterProvider(LLMProvider):
         if not self._initialized:
             raise RuntimeError("OpenRouterProvider not initialized. Call initialize() first.")
 
-        # 4 characters per token is a reasonable average across tokenizers
-        return max(1, len(text) // 4)
+        from spindl.utils.tokens import count_tokens as _count
+        return max(1, _count(text))
 
     def health_check(self) -> bool:
         """

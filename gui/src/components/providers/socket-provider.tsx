@@ -935,6 +935,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
       }
     });
 
+    socket.on("cross_activation_updated", () => {});
+
     socket.on("memory_migrated", (event) => {
       if (event.success && event.collection) {
         socket.emit("request_memories", { collection: event.collection as MemoryCollectionType });
@@ -1036,6 +1038,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
       socket.off("memory_search_results");
       socket.off("flashcards_cleared");
       socket.off("distance_metric_updated");
+      socket.off("cross_activation_updated");
       socket.off("memory_migrated");
       disconnectSocket();
     };

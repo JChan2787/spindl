@@ -1465,6 +1465,7 @@ export interface ServerToClientEvents {
   memory_search_results: (event: MemorySearchResultsEvent) => void;
   flashcards_cleared: (event: FlashcardsClearedEvent) => void;
   distance_metric_updated: (event: { success: boolean; distance_metric?: string; persisted?: boolean; error?: string }) => void;
+  cross_activation_updated: (event: { success: boolean; enabled?: boolean; persisted?: boolean }) => void;
   memory_migrated: (event: { success: boolean; collection?: string; old_id?: string; new_id?: string; error?: string }) => void;
   // NANO-069: Audio output level for portrait
   audio_level: (event: AudioLevelEvent) => void;
@@ -1609,5 +1610,6 @@ export interface ClientToServerEvents {
   search_memories: (payload: SearchMemoriesPayload) => void;
   clear_flashcards: (payload: ClearFlashcardsPayload) => void;
   set_distance_metric: (payload: { distance_metric: string }) => void;
+  set_cross_activation: (payload: { enabled: boolean }) => void;
   migrate_memory: (payload: { collection: string; id: string }) => void;
 }

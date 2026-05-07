@@ -509,28 +509,8 @@ def test_amend_polluted_content_persists_sanitized_to_disk(tmp_path):
     assert assistant.get("barge_in_truncated") is True
 
 
-# ---------- Option A regression coverage: VoiceStateProvider no longer quotes ----------
-
-
-def test_voice_state_provider_barge_in_does_not_quote_last_message():
-    """Option A: barge-in injection is neutral; no verbatim quote of prior output."""
-    from spindl.llm.build_context import BuildContext
-    from spindl.llm.providers.voice_state_provider import VoiceStateProvider
-
-    context = BuildContext(
-        input_content="",
-        state_trigger="barge_in",
-        last_assistant_message=(
-            "### Rules\n- be polite\nOh really? That's a bold move."
-        ),
-    )
-    provider = VoiceStateProvider()
-    result = provider.provide(context)
-
-    # Injection exists and conveys the interruption
-    assert result is not None
-    assert "interrupted" in result.lower()
-    # But it does NOT re-inline the polluted prior text
-    assert "You were saying" not in result
-    assert "### Rules" not in result
-    assert "bold move" not in result
+# ---------- Option A regression coverage ----------
+# VoiceStateProvider was removed in commit 12f85d7 (Session 697).
+# Voice state injection moved to inline user-message injection.
+# Original test removed — VoiceStateProvider.provide() references
+# BuildContext.voice_state_overrides which no longer exists.

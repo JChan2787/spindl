@@ -237,13 +237,13 @@ class TestSetBlockConfig:
     async def test_no_orchestrator_pre_launch(self, server: GUIServer) -> None:
         """set_block_config saves to cache without orchestrator (NANO-064b)."""
         emitted = await _dispatch(
-            server, "set_block_config", {"disabled": ["voice_state"]}
+            server, "set_block_config", {"disabled": ["audience_chat"]}
         )
         assert len(emitted) == 1
         event, payload, _ = emitted[0]
         assert event == "block_config_updated"
         assert payload["success"] is True
-        assert "voice_state" in payload["disabled"]
+        assert "audience_chat" in payload["disabled"]
 
 
 # =============================================================================

@@ -343,6 +343,9 @@ class MemoryConfig(BaseModel):
     # Distance metric for ChromaDB collections (NANO-126)
     distance_metric: str = Field(default="l2", pattern="^(l2|cosine)$")
 
+    # Multi-hop RAG→Codex cross-activation (NANO-127)
+    cross_activation: bool = False
+
     # Retrieval scoring weights (NANO-107)
     scoring_w_relevance: float = Field(default=0.5, ge=0.0, le=1.0)
     scoring_w_recency: float = Field(default=0.2, ge=0.0, le=1.0)
@@ -385,6 +388,7 @@ class MemoryConfig(BaseModel):
             session_summary_max_tokens=data.get("session_summary_max_tokens", 500),
             dedup_threshold=data.get("dedup_threshold", 0.30),
             distance_metric=data.get("distance_metric", "l2"),
+            cross_activation=data.get("cross_activation", False),
             curation=CurationConfig.from_dict(curation_data),
             live_mode=data.get("live_mode", True),
             scoring_w_relevance=data.get("scoring_w_relevance", 0.5),
@@ -1252,6 +1256,7 @@ class OrchestratorConfig(BaseModel):
         mem["scoring_w_frequency"] = self.memory_config.scoring_w_frequency
         mem["scoring_decay_base"] = self.memory_config.scoring_decay_base
         mem["distance_metric"] = self.memory_config.distance_metric
+        mem["cross_activation"] = self.memory_config.cross_activation
 
         # Curation (nested under memory)
         if "curation" not in mem:

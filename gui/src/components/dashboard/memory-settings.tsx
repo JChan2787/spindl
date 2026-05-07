@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Brain, Target, Layers, Shield, RotateCcw, Filter, RefreshCw, ChevronDown, ChevronRight, FileText, Ruler } from "lucide-react";
+import { Brain, Target, Layers, Shield, RotateCcw, Filter, RefreshCw, ChevronDown, ChevronRight, FileText, Ruler, Link } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useSettingsStore, selectEffectiveMemoryConfig } from "@/lib/stores";
@@ -245,6 +245,12 @@ export function MemorySettings() {
     [updatePendingMemory, socket]
   );
 
+  const handleCrossActivationToggle = useCallback(() => {
+    const next = !effectiveConfig.cross_activation;
+    updatePendingMemory({ cross_activation: next });
+    socket.emit("set_cross_activation", { enabled: next });
+  }, [effectiveConfig.cross_activation, updatePendingMemory, socket]);
+
   const handleReflectionIntervalChange = useCallback(
     (value: number) => {
       updatePendingMemory({ reflection_interval: value });
@@ -429,6 +435,29 @@ export function MemorySettings() {
               : "L2 Euclidean distance (default). Switch to Cosine for better recall with normalized embeddings."}
           </p>
         </div>
+
+        {/* NANO-127: Cross-Activation Toggle */}
+        <div className="flex items-center justify-between">
+          <Label className="flex items-center gap-2 text-sm">
+            <Link className="h-3 w-3" />
+            Cross-Activate Codex
+          </Label>
+          <button
+            onClick={handleCrossActivationToggle}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              effectiveConfig.cross_activation ? "bg-primary" : "bg-muted"
+            }`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                effectiveConfig.cross_activation ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          When enabled, recalled memories will also trigger matching Codex entries via keyword scan.
+        </p>
 
         <EditableSlider
           label="Relevance Threshold"

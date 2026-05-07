@@ -1041,6 +1041,8 @@ class GUIServer:
                     "reflection_prompt": config.memory_config.reflection_prompt,
                     "reflection_system_message": config.memory_config.reflection_system_message,
                     "reflection_delimiter": config.memory_config.reflection_delimiter,
+                    "distance_metric": config.memory_config.distance_metric,
+                    "cross_activation": config.memory_config.cross_activation,
                     "enabled": config.memory_config.enabled,
                     "curation": {
                         "enabled": config.memory_config.curation.enabled,

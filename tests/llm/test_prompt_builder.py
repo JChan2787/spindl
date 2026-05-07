@@ -120,7 +120,7 @@ class TestPromptBuilderConstructor:
         """Accept default registry with all providers."""
         registry = create_default_registry()
         builder = PromptBuilder(providers=registry)
-        assert len(builder._providers) == 11  # 11 default providers (RecentHistoryProvider removed)
+        assert len(builder._providers) == 10  # 10 default providers (RecentHistory + VoiceState removed)
 
 
 # =============================================================================

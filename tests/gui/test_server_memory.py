@@ -35,6 +35,8 @@ def mock_memory_store() -> MagicMock:
         {"id": "mem-1", "content": "User likes coffee", "metadata": {"type": "general", "timestamp": "2026-02-07T12:00:00Z"}},
         {"id": "mem-2", "content": "User prefers dark mode", "metadata": {"type": "general", "timestamp": "2026-02-07T12:01:00Z"}},
     ]
+    store.get_all_inactive.return_value = []
+    store._distance_metric = "l2"
     store.add_general.return_value = "new-mem-id"
     store.delete.return_value = True
     store.clear_flash_cards.return_value = None

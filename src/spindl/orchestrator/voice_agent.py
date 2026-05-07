@@ -43,6 +43,7 @@ from ..llm.plugins import (
     TwitchHistoryInjector,
     create_codex_plugins,
 )
+from ..llm.plugins.cross_activator import CrossActivatorPlugin
 from ..llm.plugins.dialogue_knowledge import DialogueKnowledgeInjector
 from ..llm.plugins.reasoning_extractor import ReasoningExtractor
 from ..llm.providers.registry import create_default_registry as create_prompt_provider_registry
@@ -120,6 +121,7 @@ class VoiceAgentOrchestrator:
 
         # Codex system (NANO-037) - stored for hot-reload (NANO-036)
         self._codex_manager = None
+        self._cross_activator: Optional[CrossActivatorPlugin] = None
 
         # Runtime generation parameter overrides (NANO-053)
         self._runtime_generation_overrides: Optional[dict] = None
@@ -466,18 +468,27 @@ class VoiceAgentOrchestrator:
         # Tools: Initialize tool registry and executor (NANO-024)
         self._setup_tools()
 
+        # NANO-127: Cross-activator — multi-hop RAG→Codex
+        cross_activator = CrossActivatorPlugin(
+            codex_manager=self._codex_manager,
+            enabled=self._config.memory_config.cross_activation,
+        )
+        self._cross_activator = cross_activator
+
         # PreProcessors (order matters!)
         # 1. SummarizationTrigger - checks if summarization needed
         # 2. CodexActivator - activate codex entries based on user input (NANO-037)
         # 3. RAGInjector - query memories, stage for injection (NANO-043)
-        # 4. BudgetEnforcer - enforces hard limits (includes codex + RAG tokens)
-        # 5. HistoryInjector - injects remaining history into messages
-        # 6. TwitchHistoryInjector - stages audience transcript for injection (NANO-115)
-        # 7. DialogueKnowledgeInjector - stages character knowledge for injection (NANO-116 B.2)
+        # 4. CrossActivator - multi-hop RAG→Codex cross-activation (NANO-127)
+        # 5. BudgetEnforcer - enforces hard limits (includes codex + RAG tokens)
+        # 6. HistoryInjector - injects remaining history into messages
+        # 7. TwitchHistoryInjector - stages audience transcript for injection (NANO-115)
+        # 8. DialogueKnowledgeInjector - stages character knowledge for injection (NANO-116 B.2)
         self._pipeline.register_pre_processor(summarizer)
         self._pipeline.register_pre_processor(codex_activator)
         if rag_injector:
             self._pipeline.register_pre_processor(rag_injector)
+        self._pipeline.register_pre_processor(cross_activator)
         self._pipeline.register_pre_processor(budget_enforcer)
         self._pipeline.register_pre_processor(history_injector)
         self._pipeline.register_pre_processor(twitch_history_injector)

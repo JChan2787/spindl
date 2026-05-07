@@ -23,17 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import tiktoken
-
 from .dialogue_buffer import DialogueLine
+from ...utils.tokens import count_tokens as _count_tokens
 
 logger = logging.getLogger(__name__)
-
-_tiktoken_enc = tiktoken.get_encoding("cl100k_base")
-
-
-def _count_tokens(text: str) -> int:
-    return len(_tiktoken_enc.encode(text))
 
 
 class DialogueStore:

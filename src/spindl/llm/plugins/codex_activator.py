@@ -13,6 +13,7 @@ from typing import Optional
 
 from .base import PipelineContext, PreProcessor
 from ...codex import CodexManager, ActivationResult
+from ...utils.tokens import count_tokens
 
 
 logger = logging.getLogger(__name__)
@@ -85,9 +86,7 @@ class CodexActivatorPlugin(PreProcessor):
         # insertion_order and priority still control ordering within the block
         codex_content = self._manager.get_activated_content(results)
 
-        # Estimate tokens (rough: 4 chars per token average)
-        # This is used by BudgetEnforcer for quick budget check
-        token_estimate = len(codex_content) // 4 if codex_content else 0
+        token_estimate = count_tokens(codex_content) if codex_content else 0
 
         # Store in metadata for pipeline to inject
         context.metadata["codex_results"] = results
