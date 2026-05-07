@@ -113,10 +113,9 @@ class RAGInjector(PreProcessor):
 
         # Filter by distance threshold — discard semantically distant results.
         # User-facing threshold: 0.0 = accept everything, 1.0 = only exact matches.
-        # Internally converted to L2 max-distance for the comparison.
+        # Internally converted to max-distance for the active metric.
         if self._relevance_threshold is not None:
             max_dist = threshold_to_max_distance(self._relevance_threshold, self._distance_metric)
-            before_count = len(results)
             results = [
                 r for r in results if r["distance"] <= max_dist
             ]
