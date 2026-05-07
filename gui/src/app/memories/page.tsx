@@ -376,6 +376,7 @@ export default function MemoriesPage() {
                     onCancel={store.cancelEdit}
                     onDelete={handleDeleteMemory}
                     onPromote={handlePromote}
+                    onMigrate={handleMigrate}
                     isSaving={isSaving}
                   />
                 ) : null}
@@ -517,6 +518,7 @@ export default function MemoriesPage() {
                   onCancel={store.cancelEdit}
                   onDelete={handleDeleteMemory}
                   onPromote={handlePromote}
+                  onMigrate={handleMigrate}
                   isSaving={isSaving}
                 />
               </div>
@@ -561,6 +563,7 @@ export default function MemoriesPage() {
                     onCancel={store.cancelEdit}
                     onDelete={handleDeleteMemory}
                     onPromote={handlePromote}
+                    onMigrate={handleMigrate}
                     isSaving={isSaving}
                   />
                 ) : null}
