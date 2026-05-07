@@ -25,7 +25,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Eye, Pencil, Trash2, ArrowUpCircle, X, Save, Loader2 } from "lucide-react";
+import { Eye, Pencil, Trash2, ArrowUpCircle, ArrowRightCircle, X, Save, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { MemoryDocument, MemoryCollectionType } from "@/types/events";
 
@@ -41,6 +41,7 @@ interface MemoryDetailPanelProps {
   onCancel: () => void;
   onDelete: () => void;
   onPromote: (deleteSource: boolean) => void;
+  onMigrate?: () => void;
   isSaving: boolean;
 }
 
@@ -71,9 +72,11 @@ export function MemoryDetailPanel({
   onCancel,
   onDelete,
   onPromote,
+  onMigrate,
   isSaving,
 }: MemoryDetailPanelProps) {
   const [promoteDialogOpen, setPromoteDialogOpen] = useState(false);
+  const [migrateDialogOpen, setMigrateDialogOpen] = useState(false);
 
   // Empty state
   if (!memory && !isEditing) {
@@ -89,8 +92,10 @@ export function MemoryDetailPanel({
     );
   }
 
-  const canPromote = collection === "flashcards" || collection === "summaries";
-  const canEdit = collection === "global" || collection === "general";
+  const isInactive = memory?.active === false;
+  const canPromote = (collection === "flashcards" || collection === "summaries") && !isInactive;
+  const canEdit = (collection === "global" || collection === "general") && !isInactive;
+  const canMigrate = isInactive && !!onMigrate;
   const canSave = editContent.trim().length > 0 && !isSaving;
 
   return (
@@ -135,6 +140,42 @@ export function MemoryDetailPanel({
                 >
                   <Pencil className="h-4 w-4" />
                 </Button>
+              )}
+              {canMigrate && (
+                <Dialog open={migrateDialogOpen} onOpenChange={setMigrateDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8">
+                      <ArrowRightCircle className="h-4 w-4 mr-1" />
+                      Migrate
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Migrate Memory</DialogTitle>
+                      <DialogDescription>
+                        This memory uses the {memory?.distance_metric?.toUpperCase()} metric which is
+                        currently inactive. Migrating will re-embed it into the active metric&apos;s
+                        collection and remove it from the inactive one.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setMigrateDialogOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          onMigrate!();
+                          setMigrateDialogOpen(false);
+                        }}
+                      >
+                        Migrate
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               )}
               {canPromote && (
                 <Dialog open={promoteDialogOpen} onOpenChange={setPromoteDialogOpen}>
@@ -254,6 +295,17 @@ export function MemoryDetailPanel({
                   <span className="font-mono text-xs truncate max-w-[200px]">
                     {memory.metadata.session_id}
                   </span>
+                </div>
+              )}
+              {memory.distance_metric && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Metric</span>
+                  <Badge
+                    variant={memory.active === false ? "destructive" : "outline"}
+                    className="text-xs px-1.5 py-0"
+                  >
+                    {memory.distance_metric.toUpperCase()}{memory.active === false ? " (inactive)" : ""}
+                  </Badge>
                 </div>
               )}
               <div className="flex justify-between">

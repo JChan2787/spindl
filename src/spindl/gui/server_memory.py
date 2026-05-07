@@ -258,10 +258,13 @@ def register_memory_handlers(server: "GUIServer") -> None:
             return
 
         try:
-            counts = server._orchestrator.memory_store.counts
+            store = server._orchestrator.memory_store
+            counts = store.counts
+            inactive = store.inactive_counts
+            metric = store._distance_metric
             await sio.emit(
                 "memory_counts",
-                {**counts, "enabled": True},
+                {**counts, "enabled": True, "inactive_counts": inactive, "distance_metric": metric},
                 to=sid,
             )
         except Exception as e:
@@ -289,10 +292,24 @@ def register_memory_handlers(server: "GUIServer") -> None:
             return
 
         try:
-            memories = server._orchestrator.memory_store.get_all(collection)
+            store = server._orchestrator.memory_store
+            metric = store._distance_metric
+            other_metric = "cosine" if metric == "l2" else "l2"
+
+            active_memories = store.get_all(collection)
+            for m in active_memories:
+                m["active"] = True
+                m["distance_metric"] = metric
+
+            inactive_memories = store.get_all_inactive(collection)
+            for m in inactive_memories:
+                m["active"] = False
+                m["distance_metric"] = other_metric
+
+            combined = active_memories + inactive_memories
             await sio.emit(
                 "memory_list",
-                {"collection": collection, "memories": memories},
+                {"collection": collection, "memories": combined},
                 to=sid,
             )
         except Exception as e:

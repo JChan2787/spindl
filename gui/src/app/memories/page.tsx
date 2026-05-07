@@ -204,6 +204,16 @@ export default function MemoriesPage() {
     socket.emit("clear_flashcards", {});
   }, [socket]);
 
+  const handleMigrate = useCallback(() => {
+    if (store.selectedMemory && store.selectedCollection) {
+      socket.emit("migrate_memory", {
+        collection: store.selectedCollection,
+        id: store.selectedMemory.id,
+      });
+      store.selectMemory(null, null);
+    }
+  }, [socket, store]);
+
   // Determine right panel content
   const isSaving = store.lastAction.type !== null && store.lastAction.success === null;
   const showAddForm = store.isNewMemory;
@@ -246,7 +256,7 @@ export default function MemoriesPage() {
           }`}
         >
           {store.lastAction.success
-            ? `Memory ${store.lastAction.type === "promote" ? "escalated" : store.lastAction.type === "clear" ? "flash cards cleared" : `${store.lastAction.type}ed`} successfully`
+            ? `Memory ${store.lastAction.type === "promote" ? "escalated" : store.lastAction.type === "clear" ? "flash cards cleared" : store.lastAction.type === "migrate" ? "migrated" : `${store.lastAction.type}ed`} successfully`
             : `Error: ${store.lastAction.error || "Unknown error"}`}
         </div>
       )}
@@ -305,6 +315,7 @@ export default function MemoriesPage() {
             onCancel={store.cancelEdit}
             onDelete={handleDeleteMemory}
             onPromote={handlePromote}
+            onMigrate={handleMigrate}
             isSaving={isSaving}
           />
         </div>
@@ -452,13 +463,18 @@ export default function MemoriesPage() {
                                       store.selectedMemory?.id === group.summary.id
                                         ? "border-primary bg-accent"
                                         : "border-blue-500/20 bg-blue-500/5"
-                                    }`}
+                                    }${group.summary.active === false ? " opacity-40" : ""}`}
                                     onClick={() => store.selectMemory(group.summary!, "summaries")}
                                   >
                                     <div className="flex items-center gap-2 mb-1">
                                       <Badge variant="outline" className="text-xs px-1.5 py-0 bg-blue-500/10 text-blue-400 border-blue-500/20">
                                         Summary
                                       </Badge>
+                                      {group.summary.active === false && (
+                                        <Badge variant="destructive" className="text-xs px-1.5 py-0">
+                                          Inactive ({group.summary.distance_metric?.toUpperCase() ?? "?"})
+                                        </Badge>
+                                      )}
                                     </div>
                                     <p className="text-sm leading-relaxed text-muted-foreground">
                                       {group.summary.content.length > 200

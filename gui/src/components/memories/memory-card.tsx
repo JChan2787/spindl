@@ -46,6 +46,7 @@ export function MemoryCard({ memory, collection, isSelected, onSelect, distance 
   const timestamp = formatTimestamp(memory.metadata?.timestamp);
   const sourceBadge = getSourceBadge(memory.metadata?.source);
   const sessionId = memory.metadata?.session_id;
+  const isInactive = memory.active === false;
 
   return (
     <button
@@ -55,11 +56,16 @@ export function MemoryCard({ memory, collection, isSelected, onSelect, distance 
         isSelected
           ? "border-primary bg-accent"
           : "border-transparent"
-      }`}
+      }${isInactive ? " opacity-40" : ""}`}
     >
       <p className="text-sm leading-relaxed break-words">{preview}</p>
 
       <div className="flex items-center gap-2 mt-2 flex-wrap">
+        {isInactive && (
+          <Badge variant="destructive" className="text-xs px-1.5 py-0">
+            Inactive ({memory.distance_metric?.toUpperCase() ?? "?"})
+          </Badge>
+        )}
         {timestamp && (
           <span className="text-xs text-muted-foreground">{timestamp}</span>
         )}

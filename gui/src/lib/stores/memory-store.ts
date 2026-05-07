@@ -40,7 +40,7 @@ interface MemoryStoreState {
 
   // Action feedback (auto-clear toast pattern)
   lastAction: {
-    type: "add" | "edit" | "delete" | "promote" | "clear" | null;
+    type: "add" | "edit" | "delete" | "promote" | "clear" | "migrate" | null;
     success: boolean | null;
     error: string | null;
   };
@@ -74,7 +74,7 @@ interface MemoryStoreState {
   clearAllFlashcards: () => void;
 
   // Actions - Action feedback
-  setActionResult: (type: "add" | "edit" | "delete" | "promote" | "clear", success: boolean, error?: string) => void;
+  setActionResult: (type: "add" | "edit" | "delete" | "promote" | "clear" | "migrate", success: boolean, error?: string) => void;
   clearActionResult: () => void;
 }
 

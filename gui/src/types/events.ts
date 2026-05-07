@@ -810,6 +810,8 @@ export interface MemoryDocument {
     promoted_at?: string;
     [key: string]: unknown;
   };
+  active?: boolean;
+  distance_metric?: "l2" | "cosine";
 }
 
 export interface MemorySearchResult extends MemoryDocument {
@@ -826,6 +828,8 @@ export interface MemoryCountsEvent {
   summaries: number;
   enabled: boolean;
   error?: string;
+  inactive_counts?: { global: number; general: number; flashcards: number; summaries: number };
+  distance_metric?: "l2" | "cosine";
 }
 
 export interface MemoryListEvent {
