@@ -207,6 +207,9 @@ class OrchestratorCallbacks:
         self._is_addressing_others: Optional[Callable[[], bool]] = None
         self._consume_addressing_others_prompt: Optional[Callable[[], Optional[str]]] = None
 
+        # NANO-125: Mic passthrough state getter (set by orchestrator)
+        self._is_mic_passthrough: Optional[Callable[[], bool]] = None
+
         # Processing state
         self._processing_thread: Optional[threading.Thread] = None
         self._last_transcription: Optional[str] = None
@@ -267,6 +270,13 @@ class OrchestratorCallbacks:
                 # NANO-110: Suppress voice pipeline while addressing others
                 if self._is_addressing_others and self._is_addressing_others():
                     logger.info("[NANO-110] Voice input suppressed — addressing others")
+                    if self._on_empty_transcription is not None:
+                        self._on_empty_transcription()
+                    return
+
+                # NANO-125: Suppress voice pipeline during mic passthrough
+                if self._is_mic_passthrough and self._is_mic_passthrough():
+                    logger.debug("[NANO-125] Voice input suppressed — mic passthrough")
                     if self._on_empty_transcription is not None:
                         self._on_empty_transcription()
                     return

@@ -567,6 +567,26 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             {"active": False, "context_id": None},
         )
 
+    # ============================================================
+    # NANO-125: Mic Passthrough — Socket Handlers
+    # ============================================================
+
+    @sio.event
+    async def mic_passthrough_on(sid: str, data: dict) -> None:
+        """Stream Deck toggles mic passthrough ON (NANO-125)."""
+        if not server._orchestrator:
+            return
+        server._orchestrator.set_mic_passthrough(True)
+        await sio.emit("mic_passthrough_state", {"active": True})
+
+    @sio.event
+    async def mic_passthrough_off(sid: str, data: dict) -> None:
+        """Stream Deck toggles mic passthrough OFF (NANO-125)."""
+        if not server._orchestrator:
+            return
+        server._orchestrator.set_mic_passthrough(False)
+        await sio.emit("mic_passthrough_state", {"active": False})
+
     @sio.event
     async def request_patience_progress(sid: str, data: dict) -> None:
         """Client requests current PATIENCE progress (NANO-056)."""

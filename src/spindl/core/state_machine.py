@@ -73,6 +73,7 @@ class AgentCallbacks:
     on_barge_in: Optional[Callable[[], None]] = None
     on_processing_complete: Optional[Callable[[], None]] = None
     on_system_speech_end: Optional[Callable[[], None]] = None
+    should_suppress_input: Optional[Callable[[], bool]] = None
 
 
 class AudioStateMachine:
@@ -191,6 +192,9 @@ class AudioStateMachine:
     def _handle_speech_start(self, event: SpeechEvent) -> None:
         """Handle VAD speech_start event."""
         with self._lock:
+            if self._callbacks.should_suppress_input and self._callbacks.should_suppress_input():
+                return
+
             if self._state == AgentState.LISTENING:
                 # User started speaking - transition to USER_SPEAKING
                 # Seed audio buffer with pre-roll (audio from BEFORE VAD triggered)

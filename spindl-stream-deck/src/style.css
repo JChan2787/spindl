@@ -98,6 +98,30 @@ body {
   }
 }
 
+/* ── Mic passthrough toggle (NANO-125) ────────────────── */
+
+.deck-btn.mic-passthrough {
+  border-color: #44403c;
+  margin-top: 4px;
+}
+
+.deck-btn.mic-passthrough.active {
+  background: #d97706;
+  border-color: #f59e0b;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.3);
+  animation: pulse-amber 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-amber {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(245, 158, 11, 0.5);
+  }
+}
+
 /* ── Drag grip (top bar) ────────────────────────────── */
 
 .drag-grip {

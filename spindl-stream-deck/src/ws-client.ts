@@ -24,9 +24,14 @@ export interface AddressingOthersState {
   context_id: string | null;
 }
 
+export interface MicPassthroughState {
+  active: boolean;
+}
+
 export type OnContextsUpdated = (contexts: AddressingContext[]) => void;
 export type OnStateChanged = (state: AddressingOthersState) => void;
 export type OnConnectionChanged = (connected: boolean) => void;
+export type OnMicPassthroughChanged = (state: MicPassthroughState) => void;
 
 // ── Client ───────────────────────────────────────────────────────────
 
@@ -37,6 +42,7 @@ let socket: Socket | null = null;
 let onContextsUpdated: OnContextsUpdated | null = null;
 let onStateChanged: OnStateChanged | null = null;
 let onConnectionChanged: OnConnectionChanged | null = null;
+let onMicPassthroughChanged: OnMicPassthroughChanged | null = null;
 
 export function connect(port: number = DEFAULT_PORT): void {
   if (socket?.connected) return;
@@ -80,6 +86,12 @@ export function connect(port: number = DEFAULT_PORT): void {
     onStateChanged?.(state);
   });
 
+  // NANO-125: Receive mic passthrough state broadcast
+  socket.on("mic_passthrough_state", (state: MicPassthroughState) => {
+    console.log(`[StreamDeck] Mic passthrough: active=${state.active}`);
+    onMicPassthroughChanged?.(state);
+  });
+
   // Hydrate contexts from config_loaded (sent on connect when orchestrator is running)
   socket.on("config_loaded", (event: { settings?: { stimuli?: StimuliConfigEvent } }) => {
     const contexts = event.settings?.stimuli?.addressing_others_contexts;
@@ -105,6 +117,14 @@ export function emitAddressingStop(): void {
   socket?.emit("addressing_others_stop", {});
 }
 
+export function emitMicPassthroughOn(): void {
+  socket?.emit("mic_passthrough_on", {});
+}
+
+export function emitMicPassthroughOff(): void {
+  socket?.emit("mic_passthrough_off", {});
+}
+
 // ── Callback registration ────────────────────────────────────────────
 
 export function setOnContextsUpdated(cb: OnContextsUpdated): void {
@@ -117,4 +137,8 @@ export function setOnStateChanged(cb: OnStateChanged): void {
 
 export function setOnConnectionChanged(cb: OnConnectionChanged): void {
   onConnectionChanged = cb;
+}
+
+export function setOnMicPassthroughChanged(cb: OnMicPassthroughChanged): void {
+  onMicPassthroughChanged = cb;
 }

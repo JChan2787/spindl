@@ -150,6 +150,9 @@ class VoiceAgentOrchestrator:
         self._addressing_others_context_id: Optional[str] = None
         self._addressing_others_prompt: Optional[str] = None  # one-shot for next pipeline call
 
+        # Mic passthrough — suppresses STT without affecting stimuli (NANO-125)
+        self._mic_passthrough: bool = False
+
         # VTubeStudio driver (NANO-060)
         self._vts_driver: Optional[VTSDriver] = None
 
@@ -584,6 +587,9 @@ class VoiceAgentOrchestrator:
         self._callbacks._is_addressing_others = lambda: self._addressing_others
         self._callbacks._consume_addressing_others_prompt = self._consume_addressing_others_prompt
 
+        # NANO-125: Wire mic passthrough state getter
+        self._callbacks._is_mic_passthrough = lambda: self._mic_passthrough
+
         # NANO-121: Model cycling for stimulus responses
         self._model_rotator = None
         if stimuli_cfg.model_rotation_models:
@@ -616,6 +622,7 @@ class VoiceAgentOrchestrator:
             on_barge_in=self._callbacks.on_barge_in,
             on_processing_complete=None,  # Not needed
             on_system_speech_end=None,  # Handled via playback callbacks
+            should_suppress_input=lambda: self._mic_passthrough,
         )
 
         # Stimuli engine: autonomous stimulus system (NANO-056)
@@ -1127,6 +1134,20 @@ class VoiceAgentOrchestrator:
         prompt = self._addressing_others_prompt
         self._addressing_others_prompt = None
         return prompt
+
+    @property
+    def mic_passthrough(self) -> bool:
+        """Whether mic passthrough is active (NANO-125)."""
+        return self._mic_passthrough
+
+    def set_mic_passthrough(self, active: bool) -> None:
+        """Toggle mic passthrough -- suppresses STT, stimuli stays live (NANO-125)."""
+        self._mic_passthrough = active
+        if active:
+            self.pause_listening()
+        else:
+            self.resume_listening()
+        logger.info("[NANO-125] Mic passthrough %s", "ON" if active else "OFF")
 
     def _on_empty_transcription(self) -> None:
         """Handle empty transcription (noise/silence detected as speech)."""
