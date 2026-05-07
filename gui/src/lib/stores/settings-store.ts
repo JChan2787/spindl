@@ -33,6 +33,7 @@ interface MemoryConfig {
   top_k: number;
   relevance_threshold: number | null;
   dedup_threshold: number | null;
+  distance_metric: "l2" | "cosine";
   reflection_interval: number;
   reflection_prompt: string | null;
   reflection_system_message: string | null;
@@ -395,6 +396,7 @@ const DEFAULT_MEMORY: MemoryConfig = {
   top_k: 5,
   relevance_threshold: 0.25,
   dedup_threshold: 0.30,
+  distance_metric: "l2",
   reflection_interval: 20,
   reflection_prompt: null,
   reflection_system_message: null,

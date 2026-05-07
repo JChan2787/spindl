@@ -40,6 +40,10 @@ SUMMARIES = "summaries"
 # Global collection name (cross-character, NANO-105)
 GLOBAL = "global_memories"
 
+# Distance metric suffix for cosine collections (NANO-126)
+_COSINE_SUFFIX = "_cosine"
+_COLLECTION_TYPES = (GENERAL, FLASHCARDS, SUMMARIES)
+
 # Sentinel for "use instance default" in _add() dedup_threshold parameter
 _SENTINEL = object()
 
@@ -184,6 +188,7 @@ class MemoryStore:
         curation_client: Optional["CurationClientProtocol"] = None,
         global_memory_dir: Optional[str] = None,
         scoring_config: Optional[dict] = None,
+        distance_metric: str = "l2",
     ):
         """
         Initialize ChromaDB collections for a character + global tier.
@@ -207,6 +212,7 @@ class MemoryStore:
                 as sibling to character memory dir (../global/).
             scoring_config: Optional dict with keys w_relevance, w_recency,
                 w_importance, w_frequency, decay_base. None = use module defaults.
+            distance_metric: ChromaDB distance metric — "l2" or "cosine" (NANO-126).
         """
         self._character_id = character_id
         self._dedup_threshold = dedup_threshold
@@ -214,26 +220,16 @@ class MemoryStore:
         self._scoring_config = scoring_config or {}
         self._session_id: Optional[str] = None  # NANO-107: session-scoped retrieval
         self._embedding_fn = ExternalEmbeddingFunction(embedding_client)
+        self._distance_metric = distance_metric
 
         logger.info(
-            "Initializing MemoryStore for '%s' at %s", character_id, memory_dir
+            "Initializing MemoryStore for '%s' at %s (metric=%s)",
+            character_id, memory_dir, distance_metric,
         )
         self._client = chromadb.PersistentClient(path=memory_dir)
 
-        self._collections = {
-            GENERAL: self._client.get_or_create_collection(
-                name=f"{character_id}_{GENERAL}",
-                embedding_function=self._embedding_fn,
-            ),
-            FLASHCARDS: self._client.get_or_create_collection(
-                name=f"{character_id}_{FLASHCARDS}",
-                embedding_function=self._embedding_fn,
-            ),
-            SUMMARIES: self._client.get_or_create_collection(
-                name=f"{character_id}_{SUMMARIES}",
-                embedding_function=self._embedding_fn,
-            ),
-        }
+        self._collections = self._open_collections(character_id, distance_metric)
+        self._inactive_collections = self._open_inactive_collections(character_id, distance_metric)
 
         # Global tier — cross-character, separate ChromaDB client (NANO-105)
         if global_memory_dir is None:
@@ -242,10 +238,66 @@ class MemoryStore:
 
         logger.info("Initializing global memory at %s", global_memory_dir)
         self._global_client = chromadb.PersistentClient(path=global_memory_dir)
-        self._global_collection = self._global_client.get_or_create_collection(
-            name=GLOBAL,
-            embedding_function=self._embedding_fn,
-        )
+        self._global_collection = self._open_global(self._global_client, distance_metric)
+        self._global_inactive = self._open_global_inactive(self._global_client, distance_metric)
+
+    # ── NANO-126: Collection helpers ─────────────────────────────────
+
+    def _collection_name(self, ctype: str, metric: str) -> str:
+        base = f"{self._character_id}_{ctype}"
+        return base + _COSINE_SUFFIX if metric == "cosine" else base
+
+    def _collection_metadata(self, metric: str) -> Optional[dict]:
+        return {"hns:space": "cosine"} if metric == "cosine" else None
+
+    def _open_collections(self, character_id: str, metric: str) -> dict:
+        meta = self._collection_metadata(metric)
+        result = {}
+        for ctype in _COLLECTION_TYPES:
+            name = self._collection_name(ctype, metric)
+            kwargs = {"name": name, "embedding_function": self._embedding_fn}
+            if meta:
+                kwargs["metadata"] = meta
+            result[ctype] = self._client.get_or_create_collection(**kwargs)
+        return result
+
+    def _open_inactive_collections(self, character_id: str, metric: str) -> dict:
+        other = "cosine" if metric == "l2" else "l2"
+        result = {}
+        for ctype in _COLLECTION_TYPES:
+            name = self._collection_name(ctype, other)
+            try:
+                result[ctype] = self._client.get_collection(
+                    name=name, embedding_function=self._embedding_fn,
+                )
+            except Exception:
+                pass
+        return result
+
+    def _global_name(self, metric: str) -> str:
+        return GLOBAL + _COSINE_SUFFIX if metric == "cosine" else GLOBAL
+
+    def _open_global(self, client, metric: str):
+        meta = self._collection_metadata(metric)
+        kwargs = {"name": self._global_name(metric), "embedding_function": self._embedding_fn}
+        if meta:
+            kwargs["metadata"] = meta
+        return client.get_or_create_collection(**kwargs)
+
+    def _open_global_inactive(self, client, metric: str):
+        other = "cosine" if metric == "l2" else "l2"
+        try:
+            return client.get_collection(
+                name=self._global_name(other), embedding_function=self._embedding_fn,
+            )
+        except Exception:
+            return None
+
+    @property
+    def distance_metric(self) -> str:
+        return self._distance_metric
+
+    # ── Public methods ───────────────────────────────────────────────
 
     def add_flash_card(
         self, content: str, metadata: Optional[dict] = None
@@ -555,12 +607,13 @@ class MemoryStore:
 
     def clear_flash_cards(self) -> None:
         """Clear all flash cards (e.g., for testing or reset)."""
-        name = f"{self._character_id}_{FLASHCARDS}"
+        name = self._collection_name(FLASHCARDS, self._distance_metric)
+        meta = self._collection_metadata(self._distance_metric)
         self._client.delete_collection(name)
-        self._collections[FLASHCARDS] = self._client.get_or_create_collection(
-            name=name,
-            embedding_function=self._embedding_fn,
-        )
+        kwargs = {"name": name, "embedding_function": self._embedding_fn}
+        if meta:
+            kwargs["metadata"] = meta
+        self._collections[FLASHCARDS] = self._client.get_or_create_collection(**kwargs)
         logger.info("Cleared flash cards for '%s'", self._character_id)
 
     def get_all(self, collection_name: str) -> list[dict]:
@@ -597,6 +650,73 @@ class MemoryStore:
             )
         return items
 
+    def get_all_inactive(self, collection_name: str) -> list[dict]:
+        """Get all memories from the inactive metric's collection (NANO-126)."""
+        if collection_name == "global":
+            col = self._global_inactive
+        else:
+            col = self._inactive_collections.get(collection_name)
+        if col is None:
+            return []
+        count = col.count()
+        if count == 0:
+            return []
+        result = col.get()
+        items = []
+        for i, doc_id in enumerate(result["ids"]):
+            items.append(
+                {
+                    "id": doc_id,
+                    "content": result["documents"][i],
+                    "metadata": result["metadatas"][i] or {},
+                }
+            )
+        return items
+
+    def migrate_memory(self, collection_name: str, doc_id: str) -> Optional[str]:
+        """Migrate a memory from inactive metric to active metric (NANO-126).
+
+        Copies content+metadata to active collection (re-embeds automatically),
+        then deletes from inactive collection. Content-hash dedup prevents duplicates.
+
+        Returns new document ID, or None if source not found.
+        """
+        if collection_name == "global":
+            source_col = self._global_inactive
+            add_fn = self.add_global
+        else:
+            source_col = self._inactive_collections.get(collection_name)
+            add_fn = None
+
+        if source_col is None:
+            logger.warning("No inactive collection for '%s'", collection_name)
+            return None
+
+        try:
+            result = source_col.get(ids=[doc_id], include=["documents", "metadatas"])
+        except Exception:
+            logger.warning("Document %s not found in inactive %s", doc_id, collection_name)
+            return None
+
+        if not result["ids"]:
+            return None
+
+        content = result["documents"][0]
+        metadata = result["metadatas"][0] or {}
+        metadata["migrated_from_metric"] = "cosine" if self._distance_metric == "l2" else "l2"
+
+        if collection_name == "global":
+            new_id = add_fn(content, metadata)
+        else:
+            new_id = self._add(collection_name, content, metadata, dedup_threshold=None)
+
+        source_col.delete(ids=[doc_id])
+        logger.info(
+            "[NANO-126] Migrated %s:%s → active %s (new id: %s)",
+            collection_name, doc_id, self._distance_metric, new_id,
+        )
+        return new_id
+
     def set_session_id(self, session_id: Optional[str]) -> None:
         """Set the current session ID for session-scoped retrieval.
 
@@ -625,20 +745,8 @@ class MemoryStore:
             new_character_id,
         )
         self._character_id = new_character_id
-        self._collections = {
-            GENERAL: self._client.get_or_create_collection(
-                name=f"{new_character_id}_{GENERAL}",
-                embedding_function=self._embedding_fn,
-            ),
-            FLASHCARDS: self._client.get_or_create_collection(
-                name=f"{new_character_id}_{FLASHCARDS}",
-                embedding_function=self._embedding_fn,
-            ),
-            SUMMARIES: self._client.get_or_create_collection(
-                name=f"{new_character_id}_{SUMMARIES}",
-                embedding_function=self._embedding_fn,
-            ),
-        }
+        self._collections = self._open_collections(new_character_id, self._distance_metric)
+        self._inactive_collections = self._open_inactive_collections(new_character_id, self._distance_metric)
         # Global collection intentionally NOT re-created — persists across characters
 
     @property
@@ -651,6 +759,14 @@ class MemoryStore:
         """Document counts per collection, including global."""
         counts = {name: col.count() for name, col in self._collections.items()}
         counts["global"] = self._global_collection.count()
+        return counts
+
+    @property
+    def inactive_counts(self) -> dict[str, int]:
+        """Document counts for inactive metric's collections (NANO-126)."""
+        counts = {name: col.count() for name, col in self._inactive_collections.items()}
+        if self._global_inactive is not None:
+            counts["global"] = self._global_inactive.count()
         return counts
 
     @staticmethod

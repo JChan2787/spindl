@@ -340,6 +340,9 @@ class MemoryConfig(BaseModel):
     curation: CurationConfig = Field(default_factory=CurationConfig)
     live_mode: bool = True
 
+    # Distance metric for ChromaDB collections (NANO-126)
+    distance_metric: str = Field(default="l2", pattern="^(l2|cosine)$")
+
     # Retrieval scoring weights (NANO-107)
     scoring_w_relevance: float = Field(default=0.5, ge=0.0, le=1.0)
     scoring_w_recency: float = Field(default=0.2, ge=0.0, le=1.0)
@@ -381,6 +384,7 @@ class MemoryConfig(BaseModel):
             reflection_delimiter=data.get("reflection_delimiter", "{qa}"),
             session_summary_max_tokens=data.get("session_summary_max_tokens", 500),
             dedup_threshold=data.get("dedup_threshold", 0.30),
+            distance_metric=data.get("distance_metric", "l2"),
             curation=CurationConfig.from_dict(curation_data),
             live_mode=data.get("live_mode", True),
             scoring_w_relevance=data.get("scoring_w_relevance", 0.5),
@@ -1247,6 +1251,7 @@ class OrchestratorConfig(BaseModel):
         mem["scoring_w_importance"] = self.memory_config.scoring_w_importance
         mem["scoring_w_frequency"] = self.memory_config.scoring_w_frequency
         mem["scoring_decay_base"] = self.memory_config.scoring_decay_base
+        mem["distance_metric"] = self.memory_config.distance_metric
 
         # Curation (nested under memory)
         if "curation" not in mem:

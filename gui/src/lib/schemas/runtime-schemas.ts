@@ -250,6 +250,7 @@ export const MemoryConfigUpdatedSchema = z.object({
   top_k: z.number().int().min(1).max(50).default(5),
   relevance_threshold: z.number().min(0).max(1).nullable().default(0.25),
   dedup_threshold: z.number().min(0).max(2).nullable().default(0.3),
+  distance_metric: z.enum(["l2", "cosine"]).default("l2"),
   reflection_interval: z.number().int().min(1).max(1000).default(20),
   reflection_prompt: z.string().nullable().default(null),
   reflection_system_message: z.string().nullable().default(null),

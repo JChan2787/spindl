@@ -1460,6 +1460,8 @@ export interface ServerToClientEvents {
   memory_promoted: (event: MemoryPromotedEvent) => void;
   memory_search_results: (event: MemorySearchResultsEvent) => void;
   flashcards_cleared: (event: FlashcardsClearedEvent) => void;
+  distance_metric_updated: (event: { success: boolean; distance_metric?: string; persisted?: boolean; error?: string }) => void;
+  memory_migrated: (event: { success: boolean; collection?: string; old_id?: string; new_id?: string; error?: string }) => void;
   // NANO-069: Audio output level for portrait
   audio_level: (event: AudioLevelEvent) => void;
   // NANO-073b: Mic input level for voice overlay
@@ -1602,4 +1604,6 @@ export interface ClientToServerEvents {
   promote_memory: (payload: PromoteMemoryPayload) => void;
   search_memories: (payload: SearchMemoriesPayload) => void;
   clear_flashcards: (payload: ClearFlashcardsPayload) => void;
+  set_distance_metric: (payload: { distance_metric: string }) => void;
+  migrate_memory: (payload: { collection: string; id: string }) => void;
 }

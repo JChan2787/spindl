@@ -388,6 +388,7 @@ class VoiceAgentOrchestrator:
                 curation_client=curation_client,
                 global_memory_dir=global_memory_dir,
                 scoring_config=scoring_config,
+                distance_metric=self._config.memory_config.distance_metric,
             )
             rag_injector = RAGInjector(
                 memory_store=self._memory_store,
@@ -395,6 +396,7 @@ class VoiceAgentOrchestrator:
                 relevance_threshold=self._config.memory_config.relevance_threshold,
                 rag_prefix=self._config.prompt_config.rag_prefix,
                 rag_suffix=self._config.prompt_config.rag_suffix,
+                distance_metric=self._config.memory_config.distance_metric,
             )
             self._rag_injector = rag_injector
 
