@@ -248,7 +248,7 @@ class MemoryStore:
         return base + _COSINE_SUFFIX if metric == "cosine" else base
 
     def _collection_metadata(self, metric: str) -> Optional[dict]:
-        return {"hns:space": "cosine"} if metric == "cosine" else None
+        return {"hnsw:space": "cosine"} if metric == "cosine" else None
 
     def _open_collections(self, character_id: str, metric: str) -> dict:
         meta = self._collection_metadata(metric)
