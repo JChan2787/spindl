@@ -471,7 +471,7 @@ export function MemorySettings() {
         />
 
         <p className="text-xs text-muted-foreground">
-          Relevance threshold controls memory matching strictness. Top K limits memories per prompt. Reflection interval sets how many new messages trigger a memory extraction cycle. Dedup threshold sets the L2 distance below which new memories are considered duplicates (higher = more aggressive dedup).
+          Relevance threshold controls memory matching strictness. Top K limits memories per prompt. Reflection interval sets how many new messages trigger a memory extraction cycle. Dedup threshold sets the {effectiveConfig.distance_metric === "cosine" ? "cosine" : "L2"} distance below which new memories are considered duplicates (higher = more aggressive dedup).
         </p>
 
         {/* NANO-104: Reflection Prompt */}
