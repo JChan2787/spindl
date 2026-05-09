@@ -480,6 +480,7 @@ export async function POST(request: Request) {
             models_dir: body.ttsLocal.modelsDirectory,
             timeout: body.ttsLocal.timeout,
             ...(body.ttsLocal.device ? { device: body.ttsLocal.device } : {}),
+            ...(body.ttsLocal.speed != null ? { speed: body.ttsLocal.speed } : {}),
             ...(body.ttsLocal.envType === "conda" && body.ttsLocal.envNameOrPath
               ? { conda_env: body.ttsLocal.envNameOrPath }
               : {}),
@@ -965,6 +966,7 @@ export async function GET() {
         emitEveryFrames: qwen3Config.emit_every_frames ?? 32,
         instructTemplate: qwen3Config.instruct_template || "",
         seed: qwen3Config.seed ?? 0,
+        speed: kokoroConfig.speed ?? 1.0,
         voiceBlend: kokoroConfig.voice_blend ? {
           name: kokoroConfig.voice_blend.name || "",
           enabled: kokoroConfig.voice_blend.enabled ?? false,

@@ -156,6 +156,8 @@ interface TTSLocalConfig {
   emitEveryFrames: number;
   instructTemplate: string;
   seed: number;
+  // Kokoro TTS params
+  speed: number;
   // Kokoro voice blend (NANO-118)
   voiceBlend: VoiceBlendPreset | null;
 }
@@ -403,6 +405,7 @@ const DEFAULT_TTS_LOCAL: TTSLocalConfig = {
   emitEveryFrames: 32,
   instructTemplate: "",
   seed: 0,
+  speed: 1.0,
   voiceBlend: null,
 };
 

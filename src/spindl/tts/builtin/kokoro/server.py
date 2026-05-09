@@ -124,7 +124,7 @@ class KokoroTTSServer:
             raise ValueError(f"Voice '{voice}' not found. Available: {available}")
         return voice_path
 
-    def synthesize(self, text: str, voice: str = "af_bella", lang: str = "a") -> np.ndarray:
+    def synthesize(self, text: str, voice: str = "af_bella", lang: str = "a", speed: float = 1.0) -> np.ndarray:
         """
         Synthesize speech from text.
 
@@ -132,6 +132,7 @@ class KokoroTTSServer:
             text: Text to synthesize
             voice: Voice ID (e.g., 'af_bella', 'am_adam')
             lang: Language code ('a' for American, 'b' for British)
+            speed: Playback speed multiplier (default: 1.0)
 
         Returns:
             float32 numpy array of audio samples at 24000 Hz
@@ -151,7 +152,7 @@ class KokoroTTSServer:
             )
 
         # Generate audio (may yield multiple chunks)
-        generator = self.pipeline(text, voice=str(voice_path))
+        generator = self.pipeline(text, voice=str(voice_path), speed=speed)
 
         # Concatenate all chunks
         audio_chunks = []
@@ -163,7 +164,7 @@ class KokoroTTSServer:
 
         return np.concatenate(audio_chunks).astype(np.float32)
 
-    def synthesize_with_blend(self, text: str, lang: str = "a") -> np.ndarray:
+    def synthesize_with_blend(self, text: str, lang: str = "a", speed: float = 1.0) -> np.ndarray:
         """Synthesize using the cached blended voice tensor."""
         if self.pipeline is None:
             raise RuntimeError("Model not loaded")
@@ -177,7 +178,7 @@ class KokoroTTSServer:
                 model=self.model,
             )
 
-        generator = self.pipeline(text, voice=self._blended_voice)
+        generator = self.pipeline(text, voice=self._blended_voice, speed=speed)
         audio_chunks = []
         for gs, ps, audio in generator:
             audio_chunks.append(audio)
@@ -245,17 +246,18 @@ class KokoroTTSServer:
         voice = request.get("voice", "af_bella")
         lang = request.get("lang", "a")
         use_blend = request.get("use_blend", False)
+        speed = request.get("speed", 1.0)
 
         if lang not in ("a", "b"):
             return {"status": "error", "error": f"Invalid lang: {lang} (expected 'a' or 'b')"}
 
         try:
             if use_blend and self._blended_voice is not None:
-                print(f"[TTS] Synthesize via blended voice ({len(text)} chars)", flush=True)
-                audio = self.synthesize_with_blend(text, lang)
+                print(f"[TTS] Synthesize via blended voice ({len(text)} chars, speed={speed})", flush=True)
+                audio = self.synthesize_with_blend(text, lang, speed=speed)
             else:
-                print(f"[TTS] Synthesize via single voice '{voice}' ({len(text)} chars)", flush=True)
-                audio = self.synthesize(text, voice, lang)
+                print(f"[TTS] Synthesize via single voice '{voice}' ({len(text)} chars, speed={speed})", flush=True)
+                audio = self.synthesize(text, voice, lang, speed=speed)
         except ValueError as e:
             return {"status": "error", "error": str(e)}
         except Exception as e:

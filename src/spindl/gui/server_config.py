@@ -350,6 +350,9 @@ def register_config_handlers(server: "GUIServer") -> None:
                 if "seed" in data and hasattr(provider, "_seed"):
                     provider._seed = int(data["seed"])
                     updated = True
+                if "speed" in data and hasattr(provider, "_speed"):
+                    provider._speed = max(0.5, min(2.0, float(data["speed"])))
+                    updated = True
 
             if "voice_blend" in data and provider is not None:
                 blend_data = data["voice_blend"]
@@ -377,6 +380,8 @@ def register_config_handlers(server: "GUIServer") -> None:
                     pc["instruct_template"] = str(data["instruct_template"])
                 if "seed" in data:
                     pc["seed"] = int(data["seed"])
+                if "speed" in data:
+                    pc["speed"] = max(0.5, min(2.0, float(data["speed"])))
                 if "voice_blend" in data:
                     pc["voice_blend"] = data["voice_blend"]
 

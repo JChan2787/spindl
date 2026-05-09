@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Volume2 } from "lucide-react";
+import { Volume2, Gauge } from "lucide-react";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,9 +69,11 @@ export function KokoroVoiceBlend() {
     ttsLocal.voiceBlend?.enabled ?? false
   );
   const [missingVoices, setMissingVoices] = useState<string[]>([]);
+  const [localSpeed, setLocalSpeed] = useState(ttsLocal.speed ?? 1.0);
 
   const nameSyncedRef = useRef(localName);
   const weightsSyncedRef = useRef(localWeights);
+  const speedDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync from store when config changes externally
   useEffect(() => {
@@ -83,6 +85,10 @@ export function KokoroVoiceBlend() {
       weightsSyncedRef.current = ttsLocal.voiceBlend.weights;
     }
   }, [ttsLocal.voiceBlend]);
+
+  useEffect(() => {
+    setLocalSpeed(ttsLocal.speed ?? 1.0);
+  }, [ttsLocal.speed]);
 
   // Request voice list on mount
   useEffect(() => {
@@ -140,6 +146,28 @@ export function KokoroVoiceBlend() {
     [blendEnabled, localWeights, localName, updateTTSLocal, socket]
   );
 
+  const pushSpeedToBackend = useCallback(
+    (speed: number) => {
+      const clamped = Math.max(0.5, Math.min(2.0, speed));
+      updateTTSLocal({ speed: clamped });
+      if (socket.connected) {
+        socket.emit("set_tts_config", { speed: clamped });
+      }
+    },
+    [updateTTSLocal, socket]
+  );
+
+  const handleSpeedChange = useCallback(
+    (value: number) => {
+      setLocalSpeed(value);
+      if (speedDebounceRef.current) clearTimeout(speedDebounceRef.current);
+      speedDebounceRef.current = setTimeout(() => {
+        pushSpeedToBackend(value);
+      }, 300);
+    },
+    [pushSpeedToBackend]
+  );
+
   const handleWeightChange = useCallback((voiceId: string, value: number) => {
     setLocalWeights((prev) => ({ ...prev, [voiceId]: value }));
   }, []);
@@ -180,18 +208,46 @@ export function KokoroVoiceBlend() {
     .filter(([, w]) => w > 0)
     .sort(([, a], [, b]) => b - a);
 
-  // Show full voice list when services are running, fall back to saved weight keys when not
+  // Show full voice list when services are running, fall back to all saved weight keys when not
   const displayVoices = voices.length > 0
     ? voices
-    : Object.keys(localWeights).filter((k) => localWeights[k] > 0).sort();
+    : Object.keys(localWeights).sort();
 
   return (
     <CollapsibleCard
-      id="kokoro-voice-blend"
-      title="Kokoro Voice Blend"
+      id="kokoro-tts"
+      title="Kokoro TTS"
       icon={<Volume2 className="h-4 w-4" />}
     >
       <div className="space-y-4 max-w-full">
+        {/* Speed */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="flex items-center gap-2 text-sm">
+              <Gauge className="h-3.5 w-3.5" />
+              Speed
+            </Label>
+            <span className="text-sm font-mono text-muted-foreground">
+              {localSpeed.toFixed(2)}x
+            </span>
+          </div>
+          <input
+            type="range"
+            min={50}
+            max={200}
+            step={5}
+            value={Math.round(localSpeed * 100)}
+            onChange={(e) => handleSpeedChange(parseInt(e.target.value) / 100)}
+            className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+          />
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>0.5x</span>
+            <span>2.0x</span>
+          </div>
+        </div>
+
+        <div className="border-t border-border" />
+
         <div className="flex items-center justify-between">
           <Label htmlFor="blend-toggle" className="text-sm">
             Use Blend

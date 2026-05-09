@@ -53,6 +53,7 @@ class KokoroTTS:
         voice: str = "af_bella",
         lang: str = "a",
         use_blend: bool = False,
+        speed: float = 1.0,
     ) -> np.ndarray:
         """
         Send text to server for speech synthesis.
@@ -88,6 +89,7 @@ class KokoroTTS:
             "voice": voice,
             "lang": lang,
             "use_blend": use_blend,
+            "speed": speed,
         }
         request_json = json.dumps(request) + "\n"
 

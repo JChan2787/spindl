@@ -50,6 +50,7 @@ class KokoroTTSProvider(TTSProvider):
         self._config: dict = {}
         self._default_voice: str = "af_bella"
         self._default_language: str = "a"
+        self._speed: float = 1.0
         self._models_dir: Optional[Path] = None
         self._initialized: bool = False
         self._voice_blend_enabled: bool = False
@@ -76,6 +77,7 @@ class KokoroTTSProvider(TTSProvider):
 
         self._default_voice = config.get("voice", "af_bella")
         self._default_language = config.get("language", "a")
+        self._speed = float(config.get("speed", 1.0))
 
         # Models directory for voice listing (resolve relative paths)
         models_dir = config.get("models_dir")
@@ -145,14 +147,15 @@ class KokoroTTSProvider(TTSProvider):
         # Delegate to client
         if self._voice_blend_enabled:
             active = ", ".join(f"{k}={v:.2f}" for k, v in self._voice_blend_weights.items() if v > 0)
-            print(f"[TTS] Routing synthesis through blended voice ({active})", flush=True)
+            print(f"[TTS] Routing synthesis through blended voice ({active}, speed={self._speed})", flush=True)
         else:
-            print(f"[TTS] Routing synthesis through single voice '{resolved_voice}'", flush=True)
+            print(f"[TTS] Routing synthesis through single voice '{resolved_voice}' (speed={self._speed})", flush=True)
         audio_array = self._client.synthesize(
             text=text,
             voice=resolved_voice,
             lang=language,
             use_blend=self._voice_blend_enabled,
+            speed=self._speed,
         )
 
         # Wrap in AudioResult
