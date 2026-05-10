@@ -82,6 +82,12 @@ class OpenRouterProvider(LLMProvider):
         temperature: float - Default temperature (default: 0.7)
         max_tokens: int    - Default max tokens (default: 256)
         stream: bool       - Enable streaming by default (default: true)
+        provider_routing: dict - Upstream provider selection (optional)
+            order: list[str]      - Provider priority (disables load balancing)
+            ignore: list[str]     - Providers to exclude
+            only: list[str]       - Restrict to these providers only
+            allow_fallbacks: bool - Fall back if preferred unavailable (default: true)
+            sort: str             - Sort by "price", "throughput", or "latency"
     """
 
     def __init__(self):
@@ -94,6 +100,7 @@ class OpenRouterProvider(LLMProvider):
         self._default_max_tokens: int = 256
         self._stream_by_default: bool = True
         self._context_size: Optional[int] = None
+        self._provider_routing: Optional[dict] = None
         self._initialized: bool = False
 
     def initialize(self, config: dict) -> None:
@@ -147,6 +154,22 @@ class OpenRouterProvider(LLMProvider):
                 "No context_size configured for OpenRouter, defaulting to 8192. "
                 "Set via Dashboard or Launcher for accurate budget enforcement."
             )
+
+        # Provider routing preferences (optional — controls upstream provider selection)
+        routing = config.get("provider_routing")
+        if routing and isinstance(routing, dict):
+            self._provider_routing = {}
+            for key in ("order", "ignore", "only"):
+                if key in routing and isinstance(routing[key], list):
+                    self._provider_routing[key] = [str(p) for p in routing[key]]
+            if "allow_fallbacks" in routing:
+                self._provider_routing["allow_fallbacks"] = bool(routing["allow_fallbacks"])
+            if "sort" in routing and routing["sort"] in ("price", "throughput", "latency"):
+                self._provider_routing["sort"] = routing["sort"]
+            if self._provider_routing:
+                logger.info(f"Provider routing configured: {self._provider_routing}")
+            else:
+                self._provider_routing = None
 
         # Verify API connectivity with a lightweight check
         if not self._health_check_internal():
@@ -213,6 +236,9 @@ class OpenRouterProvider(LLMProvider):
             "max_tokens": max_tokens,
             "stream": False,
         }
+
+        if self._provider_routing:
+            payload["provider"] = self._provider_routing
 
         # Tool calling support
         if tools:
@@ -329,6 +355,9 @@ class OpenRouterProvider(LLMProvider):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+
+        if self._provider_routing:
+            payload["provider"] = self._provider_routing
 
         # Tool calling support
         if tools:
@@ -635,7 +664,7 @@ class OpenRouterProvider(LLMProvider):
         Validate OpenRouter provider config.
 
         Required fields: api_key, model
-        Optional fields: url, timeout, temperature, max_tokens, stream
+        Optional fields: url, timeout, temperature, max_tokens, stream, provider_routing
 
         Args:
             config: Provider config dict
@@ -687,6 +716,23 @@ class OpenRouterProvider(LLMProvider):
                 errors.append(f"max_tokens must be an integer, got {type(max_tokens).__name__}")
             elif max_tokens < 1:
                 errors.append(f"max_tokens must be at least 1, got {max_tokens}")
+
+        # provider_routing validation (optional dict)
+        routing = config.get("provider_routing")
+        if routing is not None:
+            if not isinstance(routing, dict):
+                errors.append(f"provider_routing must be a dict, got {type(routing).__name__}")
+            else:
+                for key in ("order", "ignore", "only"):
+                    val = routing.get(key)
+                    if val is not None and not isinstance(val, list):
+                        errors.append(f"provider_routing.{key} must be a list, got {type(val).__name__}")
+                allow = routing.get("allow_fallbacks")
+                if allow is not None and not isinstance(allow, bool):
+                    errors.append(f"provider_routing.allow_fallbacks must be a bool, got {type(allow).__name__}")
+                sort = routing.get("sort")
+                if sort is not None and sort not in ("price", "throughput", "latency"):
+                    errors.append(f"provider_routing.sort must be 'price', 'throughput', or 'latency', got '{sort}'")
 
         return errors
 
