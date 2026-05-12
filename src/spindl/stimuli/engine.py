@@ -101,6 +101,14 @@ class StimuliEngine:
         self._decay_multiplier = 0.3
         self._decay_recovery_per_cycle = 0.2
 
+        # NANO-117: Per-module base weight overrides from dashboard.
+        # Maps module name → override weight. If absent, module's own
+        # metadata["weight"] is used as the base.
+        self._weight_overrides: dict[str, float] = {}
+
+        # NANO-117: Last fire info for dashboard display.
+        self._last_fire_info: dict | None = None
+
     @property
     def enabled(self) -> bool:
         return self._enabled
@@ -245,13 +253,16 @@ class StimuliEngine:
         """
         Get status of all registered modules for dashboard display.
 
-        Returns list of dicts with name, priority, enabled, has_stimulus, healthy.
+        Returns list of dicts with name, priority, enabled, has_stimulus,
+        healthy, base_weight, decay, effective_weight.
         """
         with self._modules_lock:
             result = []
             for module in sorted(
                 self._modules, key=lambda m: m.priority, reverse=True
             ):
+                base = self._weight_overrides.get(module.name, self._get_default_weight(module.name))
+                decay = self._module_decay.get(module.name, 1.0)
                 result.append(
                     {
                         "name": module.name,
@@ -259,9 +270,26 @@ class StimuliEngine:
                         "enabled": module.enabled,
                         "has_stimulus": module.has_stimulus() if module.enabled else False,
                         "healthy": module.health_check(),
+                        "base_weight": base,
+                        "decay": round(decay, 2),
+                        "effective_weight": round(max(0.01, base * decay), 2),
                     }
                 )
             return result
+
+    @staticmethod
+    def _get_default_weight(module_name: str) -> float:
+        """Default weights per module when no override is set."""
+        defaults = {
+            "game_state": 2.0,
+            "twitch": 1.0,
+            "patience": 0.5,
+        }
+        return defaults.get(module_name, 1.0)
+
+    @property
+    def last_fire_info(self) -> dict | None:
+        return self._last_fire_info
 
     # -- Event subscriptions --
 
@@ -448,18 +476,24 @@ class StimuliEngine:
 
         if len(drained) == 1:
             module, stimulus = drained[0]
+            base = self._get_effective_base(module.name, stimulus)
             self._apply_decay(module.name)
+            self._last_fire_info = {
+                "winner": module.name,
+                "effective_weight": round(base, 2),
+                "candidates": 1,
+            }
             logger.info(
                 "[Stimuli] %s fired (weight=%.2f, sole candidate)",
                 module.name.upper(),
-                stimulus.metadata.get("weight", 1.0),
+                base,
             )
             return stimulus
 
         # Weighted random selection across multiple candidates
         weights: list[float] = []
         for module, stimulus in drained:
-            base = stimulus.metadata.get("weight", 1.0)
+            base = self._get_effective_base(module.name, stimulus)
             decay = self._module_decay.get(module.name, 1.0)
             effective = max(0.01, base * decay)
             weights.append(effective)
@@ -481,6 +515,12 @@ class StimuliEngine:
             drained[i][0].name.upper()
             for i in range(len(drained)) if i != winner_idx
         ]
+        self._last_fire_info = {
+            "winner": winner_module.name,
+            "effective_weight": round(weights[winner_idx], 2),
+            "candidates": len(drained),
+            "losers": losers,
+        }
         logger.info(
             "[Stimuli] %s won weighted draw (effective=%.2f, total=%.2f, "
             "candidates=%d, losers=%s)",
@@ -492,6 +532,12 @@ class StimuliEngine:
         )
 
         return winner_stimulus
+
+    def _get_effective_base(self, module_name: str, stimulus: StimulusData) -> float:
+        """Get base weight: override if set, else module's metadata, else default."""
+        if module_name in self._weight_overrides:
+            return self._weight_overrides[module_name]
+        return stimulus.metadata.get("weight", self._get_default_weight(module_name))
 
     @staticmethod
     def _module_has_stimulus(module: StimulusModule) -> bool:

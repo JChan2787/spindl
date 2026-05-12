@@ -347,6 +347,23 @@ export function StimuliSettings() {
     [updatePendingStimuli, emitChanges]
   );
 
+  const MODULE_DEFAULTS: Record<string, { label: string; default: number }> = {
+    game_state: { label: "Game State (Dialogue)", default: 2.0 },
+    twitch: { label: "Twitch Chat", default: 1.0 },
+    patience: { label: "Patience (Idle)", default: 0.5 },
+  };
+
+  const weightOverrides = effectiveConfig.arbitration_weight_overrides ?? {};
+
+  const handleWeightOverrideChange = useCallback(
+    (moduleName: string, value: number) => {
+      const updated = { ...weightOverrides, [moduleName]: value };
+      updatePendingStimuli({ arbitration_weight_overrides: updated });
+      emitChanges({ arbitration_weight_overrides: updated });
+    },
+    [weightOverrides, updatePendingStimuli, emitChanges]
+  );
+
   // Dummy value for the "add model" combobox — always empty, selection triggers add
   const [addModelValue, setAddModelValue] = useState("");
 
@@ -616,8 +633,27 @@ export function StimuliSettings() {
               </Label>
 
               <p className="text-xs text-muted-foreground">
-                When multiple stimulus sources compete, weighted random selection picks the winner. After firing, a source&apos;s weight decays and recovers over subsequent cycles.
+                When multiple stimulus sources compete, weighted random selection picks the winner. Higher weight = more likely to win.
               </p>
+
+              <div className="space-y-3">
+                <Label className="text-xs text-muted-foreground">Base Weights</Label>
+                {Object.entries(MODULE_DEFAULTS).map(([name, info]) => (
+                  <Slider
+                    key={name}
+                    label={info.label}
+                    value={weightOverrides[name] ?? info.default}
+                    min={0.1}
+                    max={10.0}
+                    step={0.1}
+                    icon={<Scale className="h-3 w-3" />}
+                    onChange={(v) => handleWeightOverrideChange(name, v)}
+                    unit="w"
+                  />
+                ))}
+              </div>
+
+              <Label className="text-xs text-muted-foreground">Decay</Label>
 
               <Slider
                 label="Decay Multiplier"

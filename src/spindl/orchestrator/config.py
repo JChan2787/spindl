@@ -595,6 +595,7 @@ class StimuliConfig(BaseModel):
     # Weighted arbitration (NANO-117)
     arbitration_decay_multiplier: float = Field(default=0.3, ge=0.1, le=1.0)
     arbitration_recovery_per_cycle: float = Field(default=0.2, ge=0.05, le=0.5)
+    arbitration_weight_overrides: dict[str, float] = Field(default_factory=dict)
 
     @staticmethod
     def _resolve_env(value: str) -> str:
@@ -764,6 +765,9 @@ class StimuliConfig(BaseModel):
             ),
             arbitration_recovery_per_cycle=arbitration.get(
                 "recovery_per_cycle", defaults.arbitration_recovery_per_cycle
+            ),
+            arbitration_weight_overrides=arbitration.get(
+                "weight_overrides", defaults.arbitration_weight_overrides
             ),
         )
 
@@ -1416,6 +1420,8 @@ class OrchestratorConfig(BaseModel):
         arb = stim["arbitration"]
         arb["decay_multiplier"] = self.stimuli_config.arbitration_decay_multiplier
         arb["recovery_per_cycle"] = self.stimuli_config.arbitration_recovery_per_cycle
+        if self.stimuli_config.arbitration_weight_overrides:
+            arb["weight_overrides"] = dict(self.stimuli_config.arbitration_weight_overrides)
 
         # --- Tools ---
         if "tools" not in data:

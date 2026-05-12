@@ -648,9 +648,10 @@ class VoiceAgentOrchestrator:
             enabled=stimuli_cfg.enabled,
             is_speaking=lambda: self._playback.is_playing,
         )
-        # NANO-117: Wire arbitration decay config
+        # NANO-117: Wire arbitration config
         self._stimuli_engine._decay_multiplier = stimuli_cfg.arbitration_decay_multiplier
         self._stimuli_engine._decay_recovery_per_cycle = stimuli_cfg.arbitration_recovery_per_cycle
+        self._stimuli_engine._weight_overrides = dict(stimuli_cfg.arbitration_weight_overrides)
         # Register PATIENCE module
         patience = PatienceModule(
             timeout_seconds=stimuli_cfg.patience_seconds,
@@ -2195,6 +2196,7 @@ class VoiceAgentOrchestrator:
         model_rotation_api_key: Optional[str] = None,
         arbitration_decay_multiplier: Optional[float] = None,
         arbitration_recovery_per_cycle: Optional[float] = None,
+        arbitration_weight_overrides: Optional[dict[str, float]] = None,
     ) -> None:
         """
         Update stimuli config at runtime (NANO-056).
@@ -2493,6 +2495,10 @@ class VoiceAgentOrchestrator:
             cfg.arbitration_recovery_per_cycle = arbitration_recovery_per_cycle
             if self._stimuli_engine:
                 self._stimuli_engine._decay_recovery_per_cycle = arbitration_recovery_per_cycle
+        if arbitration_weight_overrides is not None:
+            cfg.arbitration_weight_overrides = dict(arbitration_weight_overrides)
+            if self._stimuli_engine:
+                self._stimuli_engine._weight_overrides = dict(arbitration_weight_overrides)
 
     def update_vts_config(
         self,

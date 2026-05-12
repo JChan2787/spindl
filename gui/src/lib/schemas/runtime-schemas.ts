@@ -235,6 +235,7 @@ export const StimuliConfigUpdatedSchema = z.object({
   // NANO-117: Weighted arbitration
   arbitration_decay_multiplier: z.number().min(0.1).max(1.0),
   arbitration_recovery_per_cycle: z.number().min(0.05).max(0.5),
+  arbitration_weight_overrides: z.record(z.string(), z.number().min(0.1).max(10.0)).default({}),
   persisted: z.boolean().optional(),
 });
 

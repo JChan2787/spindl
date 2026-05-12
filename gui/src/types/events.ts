@@ -566,6 +566,7 @@ export interface StimuliConfigUpdatedEvent {
   // NANO-117: Weighted arbitration
   arbitration_decay_multiplier: number;
   arbitration_recovery_per_cycle: number;
+  arbitration_weight_overrides: Record<string, number>;
   persisted: boolean;
 }
 
@@ -644,6 +645,7 @@ export interface SetStimuliConfigPayload {
   // NANO-117: Weighted arbitration
   arbitration_decay_multiplier?: number;
   arbitration_recovery_per_cycle?: number;
+  arbitration_weight_overrides?: Record<string, number>;
 }
 
 // NANO-116: Game-state bridge status

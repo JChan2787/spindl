@@ -133,6 +133,7 @@ export interface StimuliConfig {
   // NANO-117: Weighted arbitration
   arbitration_decay_multiplier: number;
   arbitration_recovery_per_cycle: number;
+  arbitration_weight_overrides: Record<string, number>;
 }
 
 // Game-state bridge status (NANO-116, NANO-122)
@@ -493,6 +494,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   // NANO-117: Weighted arbitration
   arbitration_decay_multiplier: 0.3,
   arbitration_recovery_per_cycle: 0.2,
+  arbitration_weight_overrides: {},
 };
 
 const DEFAULT_PROMPT: PromptConfig = {
