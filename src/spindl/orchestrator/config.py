@@ -505,18 +505,20 @@ class StimuliConfig(BaseModel):
         return "" if v is None else v
     twitch_max_message_length: int = Field(default=300, ge=50, le=1000)
     twitch_prompt_template: str = (
-        "**You just received new messages in Twitch chat.** "
-        "Reply as co-host \u2014 natural, in character, one unified response. "
-        "Ignore anything off-topic or spammy.\n"
+        "**A viewer just said something in Twitch chat.**\n"
         "\n"
-        "```chat\n"
         "{messages}\n"
-        "```"
     )
 
     # NANO-115: Audience transcript injection controls
     twitch_audience_window: int = Field(default=25, ge=25, le=300)
     twitch_audience_char_cap: int = Field(default=150, ge=50, le=500)
+
+    # NANO-130: Twitch selection pass + staleness filter
+    twitch_max_message_age_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
+    twitch_selection_mode: str = "llm"
+    twitch_selection_pass_model: str = ""
+    twitch_selection_pass_api_key: str = ""
 
     # Game-state bridge integration (NANO-116)
     game_state_enabled: bool = False
@@ -666,6 +668,18 @@ class StimuliConfig(BaseModel):
             twitch_audience_char_cap=twitch.get(
                 "audience_char_cap", defaults.twitch_audience_char_cap
             ),
+            twitch_max_message_age_seconds=twitch.get(
+                "max_message_age_seconds", defaults.twitch_max_message_age_seconds
+            ),
+            twitch_selection_mode=twitch.get(
+                "selection_mode", defaults.twitch_selection_mode
+            ),
+            twitch_selection_pass_model=twitch.get(
+                "selection_pass", {}
+            ).get("model", defaults.twitch_selection_pass_model),
+            twitch_selection_pass_api_key=twitch.get(
+                "selection_pass", {}
+            ).get("api_key", defaults.twitch_selection_pass_api_key),
             game_state_enabled=game_state.get(
                 "enabled", defaults.game_state_enabled
             ),
@@ -1347,6 +1361,13 @@ class OrchestratorConfig(BaseModel):
         tw["prompt_template"] = self.stimuli_config.twitch_prompt_template
         tw["audience_window"] = self.stimuli_config.twitch_audience_window
         tw["audience_char_cap"] = self.stimuli_config.twitch_audience_char_cap
+        # NANO-130: Selection pass + staleness filter
+        tw["max_message_age_seconds"] = self.stimuli_config.twitch_max_message_age_seconds
+        tw["selection_mode"] = self.stimuli_config.twitch_selection_mode
+        if "selection_pass" not in tw:
+            tw["selection_pass"] = {}
+        tw["selection_pass"]["model"] = self.stimuli_config.twitch_selection_pass_model
+        tw["selection_pass"]["api_key"] = self.stimuli_config.twitch_selection_pass_api_key
 
         # Game-state bridge (NANO-116, nested under stimuli)
         if "game_state" not in stim:

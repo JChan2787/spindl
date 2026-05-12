@@ -21,10 +21,17 @@ from typing import Callable, Optional
 
 from .base import StimulusModule
 from .models import StimulusData, StimulusSource
+from .twitch_selector import TwitchSelector
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PROMPT_TEMPLATE = (
+    "**A viewer just said something in Twitch chat.**\n"
+    "\n"
+    "{messages}\n"
+)
+
+_LEGACY_BATCH_PROMPT_TEMPLATE = (
     "**You just received new messages in Twitch chat.** "
     "Reply as co-host \u2014 natural, in character, one unified response. "
     "Ignore anything off-topic or spammy.\n"
@@ -79,6 +86,10 @@ class TwitchModule(StimulusModule):
         char_cap: int = 150,
         enabled: bool = False,
         on_message_accepted: Optional["Callable[[str, str, str, int], None]"] = None,
+        max_message_age_seconds: float = 15.0,
+        selection_mode: str = "llm",
+        selection_pass_model: str = "",
+        selection_pass_api_key: str = "",
     ):
         self._channel = channel
         self._app_id = app_id
@@ -90,6 +101,14 @@ class TwitchModule(StimulusModule):
         self._char_cap = max(50, min(500, char_cap))
         self._enabled = enabled
         self._on_message_accepted = on_message_accepted
+
+        # NANO-130: Staleness filter + selection pass
+        self._max_message_age_seconds = max(1.0, min(120.0, max_message_age_seconds))
+        self._selection_mode = selection_mode if selection_mode in ("llm", "heuristic") else "llm"
+        self._selector = TwitchSelector(
+            api_key=selection_pass_api_key,
+            model=selection_pass_model,
+        )
 
         self._connected = False
         self._running = False
@@ -179,6 +198,38 @@ class TwitchModule(StimulusModule):
         self._char_cap = max(50, min(500, value))
 
     @property
+    def max_message_age_seconds(self) -> float:
+        return self._max_message_age_seconds
+
+    @max_message_age_seconds.setter
+    def max_message_age_seconds(self, value: float) -> None:
+        self._max_message_age_seconds = max(1.0, min(120.0, value))
+
+    @property
+    def selection_mode(self) -> str:
+        return self._selection_mode
+
+    @selection_mode.setter
+    def selection_mode(self, value: str) -> None:
+        self._selection_mode = value if value in ("llm", "heuristic") else "llm"
+
+    @property
+    def selection_pass_model(self) -> str:
+        return self._selector.model
+
+    @selection_pass_model.setter
+    def selection_pass_model(self, value: str) -> None:
+        self._selector.model = value
+
+    @property
+    def selection_pass_api_key(self) -> str:
+        return self._selector.api_key
+
+    @selection_pass_api_key.setter
+    def selection_pass_api_key(self, value: str) -> None:
+        self._selector.api_key = value
+
+    @property
     def resolved_app_id(self) -> str:
         """App ID from config, falling back to TWITCH_APP_ID env var."""
         return self._app_id or os.getenv("TWITCH_APP_ID", "")
@@ -238,42 +289,89 @@ class TwitchModule(StimulusModule):
         self._thread = None
         logger.info("Twitch module stopped")
 
+    def _count_fresh_messages(self) -> int:
+        """Read-only staleness check — count messages that would survive the filter."""
+        if not self._buffer:
+            return 0
+        now_ms = int(time.time() * 1000)
+        threshold_ms = int(self._max_message_age_seconds * 1000)
+        return sum(
+            1 for m in self._buffer
+            if m.sent_timestamp_ms <= 0 or (now_ms - m.sent_timestamp_ms) <= threshold_ms
+        )
+
     def has_stimulus(self) -> bool:
-        return self._enabled and self._running and len(self._buffer) > 0
+        return self._enabled and self._running and self._count_fresh_messages() > 0
 
     def get_stimulus(self) -> Optional[StimulusData]:
-        if not self.has_stimulus():
+        if not self._enabled or not self._running or not self._buffer:
             return None
 
-        # Drain the entire buffer into a single stimulus
-        messages = list(self._buffer)
+        # Drain buffer and apply staleness filter
+        all_messages = list(self._buffer)
         self._buffer.clear()
 
-        cap = self._char_cap
-        lines: list[str] = []
-        for m in messages:
-            text = m.text
-            if len(text) > cap:
-                text = text[:cap] + _TRUNCATION_MARKER
-            ts = format_twitch_timestamp(m.sent_timestamp_ms)
-            suffix = f" [{ts}]" if ts else ""
-            lines.append(f"{m.username}: {text}{suffix}")
+        now_ms = int(time.time() * 1000)
+        threshold_ms = int(self._max_message_age_seconds * 1000)
+        fresh = [
+            m for m in all_messages
+            if m.sent_timestamp_ms <= 0 or (now_ms - m.sent_timestamp_ms) <= threshold_ms
+        ]
 
-        formatted = "\n".join(lines)
+        if not fresh:
+            logger.debug(
+                "[Twitch] All %d messages stale (threshold=%.0fs), skipping",
+                len(all_messages), self._max_message_age_seconds,
+            )
+            return None
+
+        stale_count = len(all_messages) - len(fresh)
+        if stale_count:
+            logger.debug("[Twitch] Dropped %d stale messages", stale_count)
+
+        # Selection pass — pick the single best message or reject all
+        candidates = [
+            {"username": m.username, "text": m.text, "sent_timestamp_ms": m.sent_timestamp_ms}
+            for m in fresh
+        ]
+        result = self._selector.select(candidates, mode=self._selection_mode)
+
+        if result.selected_index is None:
+            logger.info(
+                "[Twitch] Selection pass rejected all %d candidates "
+                "(mode=%s, reason=%s)",
+                len(fresh), result.mode, result.reason,
+            )
+            return None
+
+        winner = fresh[result.selected_index]
+        logger.info(
+            "[Twitch] Selected message %d/%d from %s (mode=%s, reason=%s)",
+            result.selected_index + 1, len(fresh),
+            winner.username, result.mode, result.reason,
+        )
+
+        # Format the single selected message
+        cap = self._char_cap
+        text = winner.text
+        if len(text) > cap:
+            text = text[:cap] + _TRUNCATION_MARKER
+
+        formatted = f"{winner.username}: {text}"
 
         template = self._prompt_template or _DEFAULT_PROMPT_TEMPLATE
         if "{messages}" not in template:
             logger.warning(
                 "twitch_prompt_template missing {messages} placeholder; "
-                "falling back to default. Buffered messages would otherwise be lost."
+                "falling back to default."
             )
             template = _DEFAULT_PROMPT_TEMPLATE
 
         user_input = template.format(messages=formatted)
 
         print(
-            f"[Twitch] Buffer drained: {len(messages)} messages, "
-            f"user_input_len={len(user_input)}",
+            f"[Twitch] Selection: {winner.username} from {len(fresh)} fresh "
+            f"({stale_count} stale dropped), mode={result.mode}",
             flush=True,
         )
 
@@ -281,16 +379,21 @@ class TwitchModule(StimulusModule):
             source=StimulusSource.TWITCH,
             user_input=user_input,
             metadata={
-                "message_count": len(messages),
+                "message_count": 1,
                 "channel": self._channel,
                 "messages": [
                     {
-                        "username": m.username,
-                        "text": m.text,
-                        "sent_timestamp_ms": m.sent_timestamp_ms,
+                        "username": winner.username,
+                        "text": winner.text,
+                        "sent_timestamp_ms": winner.sent_timestamp_ms,
                     }
-                    for m in messages
                 ],
+                "selection": {
+                    "mode": result.mode,
+                    "reason": result.reason,
+                    "candidates": len(fresh),
+                    "stale_dropped": stale_count,
+                },
                 "weight": 1.0,
             },
         )

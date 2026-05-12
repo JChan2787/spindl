@@ -673,6 +673,10 @@ class VoiceAgentOrchestrator:
                 char_cap=stimuli_cfg.twitch_audience_char_cap,
                 enabled=stimuli_cfg.twitch_enabled,
                 on_message_accepted=self._twitch_transcript.record_audience_message,
+                max_message_age_seconds=stimuli_cfg.twitch_max_message_age_seconds,
+                selection_mode=stimuli_cfg.twitch_selection_mode,
+                selection_pass_model=stimuli_cfg.twitch_selection_pass_model,
+                selection_pass_api_key=stimuli_cfg.twitch_selection_pass_api_key,
             )
             self._stimuli_engine.register_module(twitch)
             logger.info(
@@ -2165,6 +2169,10 @@ class VoiceAgentOrchestrator:
         twitch_prompt_template: Optional[str] = None,
         twitch_audience_window: Optional[int] = None,
         twitch_audience_char_cap: Optional[int] = None,
+        twitch_max_message_age_seconds: Optional[float] = None,
+        twitch_selection_mode: Optional[str] = None,
+        twitch_selection_pass_model: Optional[str] = None,
+        twitch_selection_pass_api_key: Optional[str] = None,
         addressing_others_contexts: Optional[list] = None,
         game_state_enabled: Optional[bool] = None,
         game_state_host: Optional[str] = None,
@@ -2289,6 +2297,19 @@ class VoiceAgentOrchestrator:
                         cfg.twitch_prompt_template = twitch_prompt_template
                     if twitch_audience_char_cap is not None:
                         module.char_cap = twitch_audience_char_cap
+                    # NANO-130: Selection pass + staleness filter
+                    if twitch_max_message_age_seconds is not None:
+                        module.max_message_age_seconds = twitch_max_message_age_seconds
+                        cfg.twitch_max_message_age_seconds = twitch_max_message_age_seconds
+                    if twitch_selection_mode is not None:
+                        module.selection_mode = twitch_selection_mode
+                        cfg.twitch_selection_mode = twitch_selection_mode
+                    if twitch_selection_pass_model is not None:
+                        module.selection_pass_model = twitch_selection_pass_model
+                        cfg.twitch_selection_pass_model = twitch_selection_pass_model
+                    if twitch_selection_pass_api_key is not None:
+                        module.selection_pass_api_key = twitch_selection_pass_api_key
+                        cfg.twitch_selection_pass_api_key = twitch_selection_pass_api_key
                     break
 
             # Update config even if module isn't registered yet
@@ -2314,6 +2335,15 @@ class VoiceAgentOrchestrator:
                 cfg.twitch_audience_char_cap = twitch_audience_char_cap
                 if hasattr(self, "_twitch_history_injector"):
                     self._twitch_history_injector.audience_char_cap = twitch_audience_char_cap
+            # NANO-130: Selection pass + staleness filter (config fallback)
+            if twitch_max_message_age_seconds is not None:
+                cfg.twitch_max_message_age_seconds = twitch_max_message_age_seconds
+            if twitch_selection_mode is not None:
+                cfg.twitch_selection_mode = twitch_selection_mode
+            if twitch_selection_pass_model is not None:
+                cfg.twitch_selection_pass_model = twitch_selection_pass_model
+            if twitch_selection_pass_api_key is not None:
+                cfg.twitch_selection_pass_api_key = twitch_selection_pass_api_key
 
         # Addressing-others contexts (NANO-110) — config-only, no live module
         if addressing_others_contexts is not None:

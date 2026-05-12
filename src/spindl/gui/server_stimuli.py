@@ -93,6 +93,11 @@ def build_stimuli_hydration(cfg) -> dict:
         "twitch_prompt_template": cfg.twitch_prompt_template,
         "twitch_audience_window": cfg.twitch_audience_window,
         "twitch_audience_char_cap": cfg.twitch_audience_char_cap,
+        # NANO-130: Selection pass + staleness filter
+        "twitch_max_message_age_seconds": cfg.twitch_max_message_age_seconds,
+        "twitch_selection_mode": cfg.twitch_selection_mode,
+        "twitch_selection_pass_model": cfg.twitch_selection_pass_model,
+        "twitch_selection_pass_api_key": cfg.twitch_selection_pass_api_key or "",
         "twitch_has_credentials": bool(
             resolved_channel and resolved_app_id and resolved_app_secret
         ),
@@ -169,6 +174,12 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             twitch_audience_window = data.get("twitch_audience_window")
             twitch_audience_char_cap = data.get("twitch_audience_char_cap")
 
+            # NANO-130: Twitch selection pass + staleness filter
+            twitch_max_message_age_seconds = data.get("twitch_max_message_age_seconds")
+            twitch_selection_mode = data.get("twitch_selection_mode")
+            twitch_selection_pass_model = data.get("twitch_selection_pass_model")
+            twitch_selection_pass_api_key = data.get("twitch_selection_pass_api_key")
+
             # Type coerce
             if enabled is not None:
                 enabled = bool(enabled)
@@ -234,6 +245,19 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             if twitch_audience_char_cap is not None:
                 twitch_audience_char_cap = int(twitch_audience_char_cap)
                 twitch_audience_char_cap = max(50, min(500, twitch_audience_char_cap))
+
+            # NANO-130: Twitch selection pass type coercion
+            if twitch_max_message_age_seconds is not None:
+                twitch_max_message_age_seconds = float(twitch_max_message_age_seconds)
+                twitch_max_message_age_seconds = max(1.0, min(120.0, twitch_max_message_age_seconds))
+            if twitch_selection_mode is not None:
+                twitch_selection_mode = str(twitch_selection_mode).strip()
+                if twitch_selection_mode not in ("llm", "heuristic"):
+                    twitch_selection_mode = "llm"
+            if twitch_selection_pass_model is not None:
+                twitch_selection_pass_model = str(twitch_selection_pass_model).strip()
+            if twitch_selection_pass_api_key is not None:
+                twitch_selection_pass_api_key = str(twitch_selection_pass_api_key).strip()
 
             # Addressing-others contexts (NANO-110)
             addressing_others_contexts = data.get("addressing_others_contexts")
@@ -485,6 +509,10 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_prompt_template=twitch_prompt_template,
                 twitch_audience_window=twitch_audience_window,
                 twitch_audience_char_cap=twitch_audience_char_cap,
+                twitch_max_message_age_seconds=twitch_max_message_age_seconds,
+                twitch_selection_mode=twitch_selection_mode,
+                twitch_selection_pass_model=twitch_selection_pass_model,
+                twitch_selection_pass_api_key=twitch_selection_pass_api_key,
                 addressing_others_contexts=addressing_others_contexts,
                 game_state_enabled=game_state_enabled,
                 game_state_host=game_state_host,

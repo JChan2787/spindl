@@ -93,6 +93,11 @@ export interface StimuliConfig {
   twitch_prompt_template: string;
   twitch_audience_window: number;
   twitch_audience_char_cap: number;
+  // NANO-130: Selection pass + staleness filter
+  twitch_max_message_age_seconds: number;
+  twitch_selection_mode: string;
+  twitch_selection_pass_model: string;
+  twitch_selection_pass_api_key: string;
   // Resolved by backend — true when credentials available (config or env vars)
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
@@ -452,9 +457,14 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_app_secret: "",
   twitch_buffer_size: 10,
   twitch_max_message_length: 300,
-  twitch_prompt_template: "**You just received new messages in Twitch chat.** Reply as co-host \u2014 natural, in character, one unified response. Ignore anything off-topic or spammy.\n\n```chat\n{messages}\n```",
+  twitch_prompt_template: "**A viewer just said something in Twitch chat.**\n\n{messages}\n",
   twitch_audience_window: 25,
   twitch_audience_char_cap: 150,
+  // NANO-130: Selection pass + staleness filter
+  twitch_max_message_age_seconds: 15,
+  twitch_selection_mode: "llm",
+  twitch_selection_pass_model: "",
+  twitch_selection_pass_api_key: "",
   twitch_has_credentials: false,
   addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
   // NANO-116: Game-state bridge

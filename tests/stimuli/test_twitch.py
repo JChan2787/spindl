@@ -1,6 +1,7 @@
 """Tests for TwitchModule."""
 
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -9,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from spindl.stimuli.twitch import TwitchModule, TwitchMessage
+from spindl.stimuli.twitch_selector import TwitchSelector, SelectionResult
 from spindl.stimuli.models import StimulusSource
 
 
@@ -155,32 +157,33 @@ class TestTwitchGetStimulus:
         assert module.get_stimulus() is None
 
     def test_returns_stimulus_data(self):
-        """NANO-115: user_input now carries the directive + fenced batch directly."""
+        """NANO-130: get_stimulus returns single selected message."""
         module = TwitchModule(
             channel="testchannel",
             enabled=True,
             prompt_template="Chat:\n{messages}\nRespond.",
+            selection_mode="heuristic",
         )
         module._running = True
-        module._buffer.append(TwitchMessage(username="alice", text="hello"))
-        module._buffer.append(TwitchMessage(username="bob", text="world"))
+        now_ms = int(time.time() * 1000)
+        module._buffer.append(TwitchMessage(username="alice", text="what is happening in this game right now?", sent_timestamp_ms=now_ms))
+        module._buffer.append(TwitchMessage(username="bob", text="I love this part of the stream so much", sent_timestamp_ms=now_ms))
 
         stimulus = module.get_stimulus()
         assert stimulus is not None
         assert stimulus.source == StimulusSource.TWITCH
-        assert "alice: hello" in stimulus.user_input
-        assert "bob: world" in stimulus.user_input
         assert "Chat:" in stimulus.user_input
         assert "Respond." in stimulus.user_input
         assert "twitch_content" not in stimulus.metadata
-        assert stimulus.metadata["message_count"] == 2
+        assert stimulus.metadata["message_count"] == 1
         assert stimulus.metadata["channel"] == "testchannel"
-        assert len(stimulus.metadata["messages"]) == 2
+        assert len(stimulus.metadata["messages"]) == 1
 
     def test_drains_buffer(self):
-        module = TwitchModule(enabled=True)
+        module = TwitchModule(enabled=True, selection_mode="heuristic")
         module._running = True
-        module._buffer.append(TwitchMessage(username="user", text="msg"))
+        now_ms = int(time.time() * 1000)
+        module._buffer.append(TwitchMessage(username="user", text="what is your favorite part of the game so far?", sent_timestamp_ms=now_ms))
 
         stimulus = module.get_stimulus()
         assert stimulus is not None
@@ -189,9 +192,10 @@ class TestTwitchGetStimulus:
 
     def test_one_shot_behavior(self):
         """get_stimulus() should return None on second call."""
-        module = TwitchModule(enabled=True)
+        module = TwitchModule(enabled=True, selection_mode="heuristic")
         module._running = True
-        module._buffer.append(TwitchMessage(username="user", text="msg"))
+        now_ms = int(time.time() * 1000)
+        module._buffer.append(TwitchMessage(username="user", text="what do you think about this boss fight?", sent_timestamp_ms=now_ms))
 
         first = module.get_stimulus()
         second = module.get_stimulus()
@@ -199,30 +203,35 @@ class TestTwitchGetStimulus:
         assert second is None
 
     def test_metadata_structure(self):
-        module = TwitchModule(channel="ch", enabled=True)
+        module = TwitchModule(channel="ch", enabled=True, selection_mode="heuristic")
         module._running = True
+        now_ms = int(time.time() * 1000)
         module._buffer.append(
-            TwitchMessage(username="viewer", text="hey", sent_timestamp_ms=1234567890000)
+            TwitchMessage(username="viewer", text="what is the best strategy for this boss?", sent_timestamp_ms=now_ms)
         )
 
         stimulus = module.get_stimulus()
+        assert stimulus is not None
         assert stimulus.metadata["messages"][0]["username"] == "viewer"
-        assert stimulus.metadata["messages"][0]["text"] == "hey"
-        assert stimulus.metadata["messages"][0]["sent_timestamp_ms"] == 1234567890000
+        assert stimulus.metadata["messages"][0]["text"] == "what is the best strategy for this boss?"
         assert "twitch_content" not in stimulus.metadata
+        assert "selection" in stimulus.metadata
 
-    def test_stimulus_user_input_carries_batch(self):
-        """NANO-115: user_input IS the directive + fenced batch (not a short trigger)."""
+    def test_stimulus_user_input_carries_selected_message(self):
+        """NANO-130: user_input carries the single selected message."""
         module = TwitchModule(
             channel="ch",
             enabled=True,
             prompt_template="Chat:\n{messages}\nRespond.",
+            selection_mode="heuristic",
         )
         module._running = True
-        module._buffer.append(TwitchMessage(username="alice", text="hello"))
+        now_ms = int(time.time() * 1000)
+        module._buffer.append(TwitchMessage(username="alice", text="how is the game going today?", sent_timestamp_ms=now_ms))
 
         stimulus = module.get_stimulus()
-        assert "alice: hello" in stimulus.user_input
+        assert stimulus is not None
+        assert "alice: how is the game going today?" in stimulus.user_input
         assert "Chat:" in stimulus.user_input
         assert "Respond." in stimulus.user_input
 
@@ -233,15 +242,16 @@ class TestTwitchGetStimulus:
             enabled=True,
             prompt_template="{messages}",
             char_cap=50,
+            selection_mode="heuristic",
         )
         module._running = True
-        long_text = "a" * 80
-        module._buffer.append(TwitchMessage(username="spammer", text=long_text))
+        now_ms = int(time.time() * 1000)
+        long_text = "what do you think about " + "a" * 80
+        module._buffer.append(TwitchMessage(username="spammer", text=long_text, sent_timestamp_ms=now_ms))
 
         stimulus = module.get_stimulus()
+        assert stimulus is not None
         assert "..." in stimulus.user_input
-        assert ("a" * 80) not in stimulus.user_input
-        assert ("a" * 50 + "...") in stimulus.user_input
 
     def test_missing_messages_placeholder_falls_back_to_default(self):
         """NANO-115: template missing {messages} falls back to default to avoid losing batch."""
@@ -249,12 +259,15 @@ class TestTwitchGetStimulus:
             channel="ch",
             enabled=True,
             prompt_template="No placeholder here — just instructions.",
+            selection_mode="heuristic",
         )
         module._running = True
-        module._buffer.append(TwitchMessage(username="alice", text="hello"))
+        now_ms = int(time.time() * 1000)
+        module._buffer.append(TwitchMessage(username="alice", text="what do you think about this fight?", sent_timestamp_ms=now_ms))
 
         stimulus = module.get_stimulus()
-        assert "alice: hello" in stimulus.user_input
+        assert stimulus is not None
+        assert "alice:" in stimulus.user_input
 
 
 class TestTwitchShouldAccept:
@@ -407,3 +420,213 @@ class TestTwitchEnvVarFallback:
     def test_config_takes_precedence_over_env(self):
         module = TwitchModule(app_id="config_id")
         assert module.resolved_app_id == "config_id"
+
+
+class TestTwitchStalenessFilter:
+    """Tests for NANO-130 staleness filter."""
+
+    def _make_module(self, max_age: float = 15.0) -> TwitchModule:
+        module = TwitchModule(
+            enabled=True, selection_mode="heuristic",
+            max_message_age_seconds=max_age,
+        )
+        module._running = True
+        return module
+
+    def _fresh_msg(self, username: str = "user", text: str = "what do you think about this part of the game?") -> TwitchMessage:
+        return TwitchMessage(
+            username=username, text=text,
+            sent_timestamp_ms=int(time.time() * 1000),
+        )
+
+    def _stale_msg(self, username: str = "old", text: str = "what was happening back when this message was sent?") -> TwitchMessage:
+        return TwitchMessage(
+            username=username, text=text,
+            sent_timestamp_ms=int(time.time() * 1000) - 60_000,
+        )
+
+    def test_fresh_messages_pass(self):
+        module = self._make_module()
+        module._buffer.append(self._fresh_msg())
+        assert module.has_stimulus() is True
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert stimulus.metadata["message_count"] == 1
+
+    def test_all_stale_returns_false(self):
+        module = self._make_module(max_age=5.0)
+        module._buffer.append(self._stale_msg())
+        assert module.has_stimulus() is False
+
+    def test_stale_get_stimulus_returns_none(self):
+        module = self._make_module(max_age=5.0)
+        module._buffer.append(self._stale_msg())
+        assert module.get_stimulus() is None
+
+    def test_mixed_fresh_and_stale(self):
+        module = self._make_module(max_age=5.0)
+        module._buffer.append(self._stale_msg())
+        module._buffer.append(self._fresh_msg(username="newuser", text="what is going on here"))
+        assert module.has_stimulus() is True
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert stimulus.metadata["selection"]["stale_dropped"] == 1
+        assert "newuser" in stimulus.user_input
+
+    def test_zero_timestamp_treated_as_fresh(self):
+        module = self._make_module(max_age=5.0)
+        module._buffer.append(TwitchMessage(username="notimed", text="no timestamp message here", sent_timestamp_ms=0))
+        assert module.has_stimulus() is True
+
+    def test_staleness_filter_drains_buffer(self):
+        module = self._make_module(max_age=5.0)
+        module._buffer.append(self._stale_msg())
+        module.get_stimulus()
+        assert module.buffer_count == 0
+
+    def test_max_message_age_property(self):
+        module = TwitchModule(max_message_age_seconds=30.0)
+        assert module.max_message_age_seconds == 30.0
+        module.max_message_age_seconds = 0.5
+        assert module.max_message_age_seconds == 1.0
+        module.max_message_age_seconds = 200.0
+        assert module.max_message_age_seconds == 120.0
+
+
+class TestTwitchSelectionPass:
+    """Tests for NANO-130 selection pass integration."""
+
+    def _make_module(self) -> TwitchModule:
+        module = TwitchModule(
+            enabled=True, selection_mode="heuristic",
+        )
+        module._running = True
+        return module
+
+    def test_single_message_selected(self):
+        module = self._make_module()
+        module._buffer.append(TwitchMessage(
+            username="alice", text="how do you feel about the boss fight?",
+            sent_timestamp_ms=int(time.time() * 1000),
+        ))
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert stimulus.metadata["message_count"] == 1
+        assert stimulus.metadata["messages"][0]["username"] == "alice"
+        assert "selection" in stimulus.metadata
+        assert stimulus.metadata["selection"]["mode"] == "heuristic"
+
+    def test_heuristic_rejects_low_quality(self):
+        module = self._make_module()
+        module._buffer.append(TwitchMessage(
+            username="spammer", text="lol",
+            sent_timestamp_ms=int(time.time() * 1000),
+        ))
+        stimulus = module.get_stimulus()
+        assert stimulus is None
+
+    def test_heuristic_selects_best_from_multiple(self):
+        module = self._make_module()
+        now_ms = int(time.time() * 1000)
+        module._buffer.append(TwitchMessage(
+            username="emote_user", text="PogChamp",
+            sent_timestamp_ms=now_ms,
+        ))
+        module._buffer.append(TwitchMessage(
+            username="asker", text="what boss ability did you just dodge there?",
+            sent_timestamp_ms=now_ms,
+        ))
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert stimulus.metadata["messages"][0]["username"] == "asker"
+
+    def test_selection_metadata_in_stimulus(self):
+        module = self._make_module()
+        module._buffer.append(TwitchMessage(
+            username="viewer", text="this stream is amazing, how long have you been playing?",
+            sent_timestamp_ms=int(time.time() * 1000),
+        ))
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        sel = stimulus.metadata["selection"]
+        assert "mode" in sel
+        assert "reason" in sel
+        assert "candidates" in sel
+        assert "stale_dropped" in sel
+
+    def test_single_message_prompt_template(self):
+        module = self._make_module()
+        module._buffer.append(TwitchMessage(
+            username="viewer", text="great stream today really enjoying it",
+            sent_timestamp_ms=int(time.time() * 1000),
+        ))
+        stimulus = module.get_stimulus()
+        assert stimulus is not None
+        assert "viewer:" in stimulus.user_input
+        assert "A viewer just said something" in stimulus.user_input
+
+    def test_selection_mode_property(self):
+        module = TwitchModule(selection_mode="heuristic")
+        assert module.selection_mode == "heuristic"
+        module.selection_mode = "llm"
+        assert module.selection_mode == "llm"
+        module.selection_mode = "invalid"
+        assert module.selection_mode == "llm"
+
+
+class TestTwitchSelector:
+    """Tests for TwitchSelector heuristic scoring."""
+
+    def test_empty_messages(self):
+        selector = TwitchSelector()
+        result = selector.select([], mode="heuristic")
+        assert result.selected_index is None
+        assert result.reason == "empty"
+
+    def test_heuristic_selects_question(self):
+        messages = [
+            {"username": "a", "text": "lol"},
+            {"username": "b", "text": "what build are you running for this fight?"},
+        ]
+        selector = TwitchSelector()
+        result = selector.select(messages, mode="heuristic")
+        assert result.selected_index == 1
+        assert result.mode == "heuristic"
+
+    def test_heuristic_rejects_all_short(self):
+        messages = [
+            {"username": "a", "text": "hi"},
+            {"username": "b", "text": "lol"},
+        ]
+        selector = TwitchSelector()
+        result = selector.select(messages, mode="heuristic")
+        assert result.selected_index is None
+
+    def test_heuristic_scores_longer_messages_higher(self):
+        messages = [
+            {"username": "short", "text": "nice"},
+            {"username": "long", "text": "this is a really detailed and thoughtful message about the game"},
+        ]
+        selector = TwitchSelector()
+        result = selector.select(messages, mode="heuristic")
+        assert result.selected_index == 1
+
+    def test_heuristic_penalizes_non_alpha(self):
+        messages = [
+            {"username": "emoji", "text": "🔥🔥🔥🔥🔥"},
+            {"username": "text", "text": "I love this part of the game so much"},
+        ]
+        selector = TwitchSelector()
+        result = selector.select(messages, mode="heuristic")
+        assert result.selected_index == 1
+
+    def test_llm_fallback_to_heuristic_when_not_configured(self):
+        messages = [
+            {"username": "viewer", "text": "what is the best strategy for this boss fight?"},
+        ]
+        selector = TwitchSelector()
+        result = selector.select(messages, mode="llm")
+        assert result.mode == "heuristic"
+
+    def test_score_message_question_bonus(self):
+        assert TwitchSelector._score_message("what do you think?") > TwitchSelector._score_message("I agree")

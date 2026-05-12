@@ -607,6 +607,11 @@ export interface SetStimuliConfigPayload {
   twitch_prompt_template?: string;
   twitch_audience_window?: number;
   twitch_audience_char_cap?: number;
+  // NANO-130: Selection pass + staleness filter
+  twitch_max_message_age_seconds?: number;
+  twitch_selection_mode?: string;
+  twitch_selection_pass_model?: string;
+  twitch_selection_pass_api_key?: string;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts?: AddressingContext[];
   // NANO-116: Game-state bridge

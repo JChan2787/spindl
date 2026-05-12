@@ -196,6 +196,11 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_prompt_template: z.string(),
   twitch_audience_window: z.number().int().min(25).max(300).default(25),
   twitch_audience_char_cap: z.number().int().min(50).max(500).default(150),
+  // NANO-130: Selection pass + staleness filter
+  twitch_max_message_age_seconds: z.number().min(1).max(120).default(15),
+  twitch_selection_mode: z.string().default("llm"),
+  twitch_selection_pass_model: z.string().default(""),
+  twitch_selection_pass_api_key: z.string().default(""),
   twitch_has_credentials: z.boolean(),
   // NANO-116: Game-state bridge integration
   game_state_enabled: z.boolean(),
