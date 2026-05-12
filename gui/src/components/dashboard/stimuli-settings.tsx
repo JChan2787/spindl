@@ -678,8 +678,6 @@ export function StimuliSettings() {
               />
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              The stimuli system enables autonomous behavior — idle prompts, Twitch chat responses, and game commentary fire through the engine above.</p>
           </>
         )}
       </CardContent>
