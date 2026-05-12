@@ -1018,10 +1018,10 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
     @sio.event
     async def launch_chat_tts(sid: str, data: dict) -> None:
         """Launch the dedicated chat-TTS Kokoro server (NANO-130)."""
-        cfg = server._config.stimuli_config if server._config else None
-        if cfg is None:
+        if not server._orchestrator:
             await sio.emit("chat_tts_launched", {"success": False, "error": "No config loaded"}, to=sid)
             return
+        cfg = server._orchestrator._config.stimuli_config
 
         host = data.get("host", cfg.twitch_chat_tts_host)
         port = int(data.get("port", cfg.twitch_chat_tts_port))
@@ -1048,8 +1048,8 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
         # Resolve server script and models_dir
         from spindl.tts.builtin.kokoro.provider import KokoroTTSProvider
         kokoro_cfg = {}
-        if server._config and server._config.tts_config:
-            kokoro_cfg = server._config.tts_config.provider_config or {}
+        if server._orchestrator and server._orchestrator._config.tts_config:
+            kokoro_cfg = server._orchestrator._config.tts_config.provider_config or {}
 
         server_script = str(Path(KokoroTTSProvider.__module__.replace(".", "/")).resolve().parent / "server.py")
         # Fallback: find relative to provider.py source file
@@ -1137,7 +1137,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
     @sio.event
     async def request_chat_tts_status(sid: str, data: dict) -> None:
         """Report chat-TTS server status (NANO-130)."""
-        cfg = server._config.stimuli_config if server._config else None
+        cfg = server._orchestrator._config.stimuli_config if server._orchestrator else None
         host = cfg.twitch_chat_tts_host if cfg else "127.0.0.1"
         port = cfg.twitch_chat_tts_port if cfg else 5560
 
