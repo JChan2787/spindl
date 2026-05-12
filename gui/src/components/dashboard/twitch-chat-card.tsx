@@ -202,6 +202,64 @@ export function TwitchChatCard() {
     }
   }, [localChatTtsFormat, updatePendingStimuli, emitChanges]);
 
+  // Chat-TTS server status
+  const [chatTtsStatus, setChatTtsStatus] = useState<{
+    running: boolean;
+    process_alive: boolean;
+    reachable: boolean;
+  } | null>(null);
+  const [chatTtsLaunching, setChatTtsLaunching] = useState(false);
+  const [chatTtsError, setChatTtsError] = useState<string | null>(null);
+
+  const handleLaunchChatTts = useCallback(() => {
+    setChatTtsLaunching(true);
+    setChatTtsError(null);
+    socket.emit("launch_chat_tts", {
+      host: effectiveConfig.twitch_chat_tts_host,
+      port: effectiveConfig.twitch_chat_tts_port,
+      device: effectiveConfig.twitch_chat_tts_device,
+    });
+  }, [socket, effectiveConfig.twitch_chat_tts_host, effectiveConfig.twitch_chat_tts_port, effectiveConfig.twitch_chat_tts_device]);
+
+  const handleStopChatTts = useCallback(() => {
+    socket.emit("stop_chat_tts", {});
+  }, [socket]);
+
+  useEffect(() => {
+    const onLaunched = (data: { success: boolean; error?: string; already_running?: boolean }) => {
+      setChatTtsLaunching(false);
+      if (data.success) {
+        setChatTtsError(null);
+      } else {
+        setChatTtsError(data.error || "Launch failed");
+      }
+    };
+    const onStopped = () => {
+      setChatTtsStatus(null);
+    };
+    const onStatus = (data: { running: boolean; process_alive: boolean; reachable: boolean }) => {
+      setChatTtsStatus(data);
+    };
+
+    socket.on("chat_tts_launched", onLaunched);
+    socket.on("chat_tts_stopped", onStopped);
+    socket.on("chat_tts_status", onStatus);
+    return () => {
+      socket.off("chat_tts_launched", onLaunched);
+      socket.off("chat_tts_stopped", onStopped);
+      socket.off("chat_tts_status", onStatus);
+    };
+  }, [socket]);
+
+  // Poll chat-TTS status when section is open and enabled
+  useEffect(() => {
+    if (!chatTtsOpen || !effectiveConfig.twitch_chat_tts_enabled) return;
+    const poll = () => socket.emit("request_chat_tts_status", {});
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [chatTtsOpen, effectiveConfig.twitch_chat_tts_enabled, socket]);
+
   // Selection pass API key — resolve from launcher fallback
   const launcherCloud = useLauncherStore((s) => s.llmCloud);
   const fallbackKey = launcherCloud.provider === "openrouter" && launcherCloud.apiKey
@@ -509,6 +567,47 @@ export function TwitchChatCard() {
                           />
                         </div>
                       </div>
+
+                      {/* Launch / Stop button + status */}
+                      <div className="flex items-center gap-2">
+                        {chatTtsStatus?.running ? (
+                          <button
+                            onClick={handleStopChatTts}
+                            className="px-3 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white transition-colors"
+                          >
+                            Stop Server
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleLaunchChatTts}
+                            disabled={chatTtsLaunching}
+                            className="px-3 py-1 text-xs rounded bg-primary hover:bg-primary/90 text-primary-foreground transition-colors disabled:opacity-50"
+                          >
+                            {chatTtsLaunching ? "Starting..." : "Launch Server"}
+                          </button>
+                        )}
+                        <span className="flex items-center gap-1 text-xs">
+                          {chatTtsStatus?.running ? (
+                            <>
+                              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                              <span className="text-green-500">Running</span>
+                            </>
+                          ) : chatTtsLaunching ? (
+                            <>
+                              <span className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
+                              <span className="text-yellow-500">Starting</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="h-2 w-2 rounded-full bg-muted-foreground" />
+                              <span className="text-muted-foreground">Idle</span>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      {chatTtsError && (
+                        <p className="text-xs text-red-500">{chatTtsError}</p>
+                      )}
 
                       {/* Device */}
                       <div className="space-y-1">

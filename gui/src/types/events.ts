@@ -1502,6 +1502,10 @@ export interface ServerToClientEvents {
   llm_token: (event: { token: string; is_final: boolean }) => void;
   // NANO-111 Phase 2.5: Barge-in truncated response
   barge_in_truncated: (event: { truncated_text: string; delivered_sentences: number }) => void;
+  // NANO-130: Chat-TTS server lifecycle
+  chat_tts_launched: (event: { success: boolean; error?: string; already_running?: boolean }) => void;
+  chat_tts_stopped: (event: { success: boolean }) => void;
+  chat_tts_status: (event: { running: boolean; process_alive: boolean; reachable: boolean; host: string; port: number }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -1634,4 +1638,8 @@ export interface ClientToServerEvents {
   set_distance_metric: (payload: { distance_metric: string }) => void;
   set_cross_activation: (payload: { enabled: boolean }) => void;
   migrate_memory: (payload: { collection: string; id: string }) => void;
+  // NANO-130: Chat-TTS server lifecycle
+  launch_chat_tts: (payload: { host: string; port: number; device: string }) => void;
+  stop_chat_tts: (payload: Record<string, never>) => void;
+  request_chat_tts_status: (payload: Record<string, never>) => void;
 }

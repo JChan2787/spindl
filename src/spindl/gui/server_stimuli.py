@@ -9,6 +9,7 @@ Extracted from server.py (NANO-113). Handles:
 - Twitch credential testing (test_twitch_credentials)
 - Game-state bridge status (request_game_state_status) (NANO-116)
 - Game-state bridge connection testing (test_game_state_connection) (NANO-116)
+- Chat-TTS server launch/stop/status (NANO-130 Phase 2)
 
 Also exposes persist_twitch_credentials() and build_stimuli_hydration()
 as standalone helpers.
@@ -16,6 +17,9 @@ as standalone helpers.
 
 import os
 import re
+import socket
+import subprocess
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1006,3 +1010,163 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 to=sid,
             )
             print(f"[GUI] Game-state bridge connection test failed: {e}", flush=True)
+
+    # ============================================================
+    # NANO-130: Chat-TTS Kokoro Server Launch / Stop / Status
+    # ============================================================
+
+    @sio.event
+    async def launch_chat_tts(sid: str, data: dict) -> None:
+        """Launch the dedicated chat-TTS Kokoro server (NANO-130)."""
+        cfg = server._config.stimuli_config if server._config else None
+        if cfg is None:
+            await sio.emit("chat_tts_launched", {"success": False, "error": "No config loaded"}, to=sid)
+            return
+
+        host = data.get("host", cfg.twitch_chat_tts_host)
+        port = int(data.get("port", cfg.twitch_chat_tts_port))
+        device = data.get("device", cfg.twitch_chat_tts_device)
+
+        # Check if already running
+        if server._chat_tts_process and server._chat_tts_process.poll() is None:
+            # Verify via TCP
+            if _tcp_check(host, port):
+                await sio.emit("chat_tts_launched", {"success": True, "already_running": True}, to=sid)
+                return
+            else:
+                server._chat_tts_process = None
+
+        # Check for port conflict
+        if _tcp_check(host, port):
+            await sio.emit(
+                "chat_tts_launched",
+                {"success": False, "error": f"Port {port} already in use. Choose a different port or stop the existing process."},
+                to=sid,
+            )
+            return
+
+        # Resolve server script and models_dir
+        from spindl.tts.builtin.kokoro.provider import KokoroTTSProvider
+        kokoro_cfg = {}
+        if server._config and server._config.tts_config:
+            kokoro_cfg = server._config.tts_config.provider_config or {}
+
+        server_script = str(Path(KokoroTTSProvider.__module__.replace(".", "/")).resolve().parent / "server.py")
+        # Fallback: find relative to provider.py source file
+        import spindl.tts.builtin.kokoro.provider as _kprov
+        server_script = str(Path(_kprov.__file__).resolve().parent / "server.py")
+
+        models_dir = kokoro_cfg.get("models_dir", "tts/models")
+        from spindl.utils.paths import resolve_relative_path
+        models_dir = resolve_relative_path(models_dir)
+
+        conda_env = kokoro_cfg.get("conda_env", "pixl")
+
+        # Quote paths with spaces
+        script_q = f'"{server_script}"' if " " in server_script else server_script
+        models_q = f'"{models_dir}"' if " " in models_dir else models_dir
+
+        cmd = (
+            f"conda run -n {conda_env} --no-capture-output "
+            f"python {script_q} "
+            f"--port {port} "
+            f"--models-dir {models_q} "
+            f"--device {device}"
+        )
+
+        print(f"[GUI] Chat-TTS launch command: {cmd}", flush=True)
+
+        def _launch():
+            import asyncio as _asyncio
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                server._chat_tts_process = process
+                print(f"[GUI] Chat-TTS process spawned (PID: {process.pid})", flush=True)
+
+                # Wait for server to become available (health check)
+                for attempt in range(30):
+                    if process.poll() is not None:
+                        break
+                    if _tcp_check(host, port):
+                        break
+                    import time
+                    time.sleep(2.0)
+
+                alive = process.poll() is None
+                reachable = _tcp_check(host, port)
+                success = alive and reachable
+
+                async def _emit():
+                    if success:
+                        await sio.emit("chat_tts_launched", {"success": True})
+                    else:
+                        error = "Process died during startup" if not alive else f"Server not reachable at {host}:{port}"
+                        server._chat_tts_process = None
+                        await sio.emit("chat_tts_launched", {"success": False, "error": error})
+
+                loop = server._event_loop
+                if loop and loop.is_running():
+                    _asyncio.run_coroutine_threadsafe(_emit(), loop)
+
+            except Exception as e:
+                print(f"[GUI] Chat-TTS launch exception: {e}", flush=True)
+                server._chat_tts_process = None
+
+                async def _emit_err():
+                    await sio.emit("chat_tts_launched", {"success": False, "error": str(e)})
+
+                loop = server._event_loop
+                if loop and loop.is_running():
+                    _asyncio.run_coroutine_threadsafe(_emit_err(), loop)
+
+        thread = threading.Thread(target=_launch, daemon=True)
+        thread.start()
+
+    @sio.event
+    async def stop_chat_tts(sid: str, data: dict) -> None:
+        """Stop the chat-TTS Kokoro server (NANO-130)."""
+        server._chat_tts_kill()
+        await sio.emit("chat_tts_stopped", {"success": True}, to=sid)
+
+    @sio.event
+    async def request_chat_tts_status(sid: str, data: dict) -> None:
+        """Report chat-TTS server status (NANO-130)."""
+        cfg = server._config.stimuli_config if server._config else None
+        host = cfg.twitch_chat_tts_host if cfg else "127.0.0.1"
+        port = cfg.twitch_chat_tts_port if cfg else 5560
+
+        process_alive = (
+            server._chat_tts_process is not None
+            and server._chat_tts_process.poll() is None
+        )
+        reachable = _tcp_check(host, port) if process_alive else False
+
+        await sio.emit(
+            "chat_tts_status",
+            {
+                "running": process_alive and reachable,
+                "process_alive": process_alive,
+                "reachable": reachable,
+                "host": host,
+                "port": port,
+            },
+            to=sid,
+        )
+
+
+def _tcp_check(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Quick TCP connect check to see if something is listening."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.close()
+        return True
+    except (ConnectionError, socket.error, socket.timeout, OSError):
+        return False

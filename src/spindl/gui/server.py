@@ -126,6 +126,9 @@ class GUIServer:
         self._stream_deck_process: Optional[subprocess.Popen] = None
         self._stream_deck_spawned_by_us: bool = False
 
+        # NANO-130 Phase 2: Chat-TTS Kokoro server process
+        self._chat_tts_process: Optional[subprocess.Popen] = None
+
         # Callback for when services are ready (standalone mode)
         # Can be sync or async callable
         self._on_services_ready: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
@@ -833,10 +836,11 @@ class GUIServer:
                     print(f"[GUI] Error stopping orchestrator: {e}", flush=True)
                     # Continue with shutdown even if orchestrator stop fails
 
-            # Step 1b: Stop avatar, subtitle, and stream deck processes
+            # Step 1b: Stop avatar, subtitle, stream deck, and chat-TTS processes
             self._avatar_kill()
             self._subtitle_kill()
             self._stream_deck_kill()
+            self._chat_tts_kill()
 
             # Step 2: Stop services
             if self._service_runner:
@@ -1557,6 +1561,33 @@ class GUIServer:
         finally:
             self._stream_deck_process = None
             self._stream_deck_spawned_by_us = False
+
+    # ============================================================
+    # NANO-130: Chat-TTS Kokoro Server Process Management
+    # ============================================================
+
+    def _chat_tts_kill(self) -> None:
+        """Kill the chat-TTS Kokoro server process if running."""
+        if not self._chat_tts_process:
+            return
+
+        if self._chat_tts_process.poll() is not None:
+            self._chat_tts_process = None
+            return
+
+        try:
+            terminated, force_killed = kill_process_tree(
+                self._chat_tts_process.pid, timeout=5.0
+            )
+            print(
+                f"[GUI] Chat-TTS process killed "
+                f"(terminated: {len(terminated)}, force-killed: {len(force_killed)})",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[GUI] Failed to kill chat-TTS process: {e}", flush=True)
+        finally:
+            self._chat_tts_process = None
 
     @property
     def client_count(self) -> int:
