@@ -630,3 +630,172 @@ class TestTwitchSelector:
 
     def test_score_message_question_bonus(self):
         assert TwitchSelector._score_message("what do you think?") > TwitchSelector._score_message("I agree")
+
+
+# ============================================================
+# NANO-130 Phase 2: Chat-TTS config round-trip tests
+# ============================================================
+
+
+class TestChatTTSConfig:
+    """Tests for chat-TTS config fields on StimuliConfig."""
+
+    def test_defaults(self):
+        from spindl.orchestrator.config import StimuliConfig
+        cfg = StimuliConfig()
+        assert cfg.twitch_chat_tts_enabled is False
+        assert cfg.twitch_chat_tts_host == "127.0.0.1"
+        assert cfg.twitch_chat_tts_port == 5560
+        assert cfg.twitch_chat_tts_device == "cpu"
+        assert cfg.twitch_chat_tts_voice == "af_sarah"
+        assert cfg.twitch_chat_tts_speed == 1.1
+        assert cfg.twitch_chat_tts_format == "{username} says: {message}"
+        assert cfg.twitch_chat_tts_max_length == 100
+
+    def test_from_dict_parses_chat_tts(self):
+        from spindl.orchestrator.config import StimuliConfig
+        cfg = StimuliConfig.from_dict({
+            "twitch": {
+                "chat_tts": {
+                    "enabled": True,
+                    "host": "192.168.1.10",
+                    "port": 5570,
+                    "device": "cuda:0",
+                    "voice": "af_bella",
+                    "speed": 1.3,
+                    "format": "{username}: {message}",
+                    "max_length": 200,
+                }
+            }
+        })
+        assert cfg.twitch_chat_tts_enabled is True
+        assert cfg.twitch_chat_tts_host == "192.168.1.10"
+        assert cfg.twitch_chat_tts_port == 5570
+        assert cfg.twitch_chat_tts_device == "cuda:0"
+        assert cfg.twitch_chat_tts_voice == "af_bella"
+        assert cfg.twitch_chat_tts_speed == 1.3
+        assert cfg.twitch_chat_tts_format == "{username}: {message}"
+        assert cfg.twitch_chat_tts_max_length == 200
+
+    def test_from_dict_missing_chat_tts_uses_defaults(self):
+        from spindl.orchestrator.config import StimuliConfig
+        cfg = StimuliConfig.from_dict({"twitch": {}})
+        assert cfg.twitch_chat_tts_enabled is False
+        assert cfg.twitch_chat_tts_port == 5560
+        assert cfg.twitch_chat_tts_voice == "af_sarah"
+
+    def test_chat_tts_port_validation(self):
+        from spindl.orchestrator.config import StimuliConfig
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            StimuliConfig(twitch_chat_tts_port=0)
+        with pytest.raises(ValidationError):
+            StimuliConfig(twitch_chat_tts_port=70000)
+
+    def test_chat_tts_speed_clamped(self):
+        from spindl.orchestrator.config import StimuliConfig
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            StimuliConfig(twitch_chat_tts_speed=0.1)
+        with pytest.raises(ValidationError):
+            StimuliConfig(twitch_chat_tts_speed=3.0)
+
+    def test_chat_tts_max_length_clamped(self):
+        from spindl.orchestrator.config import StimuliConfig
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            StimuliConfig(twitch_chat_tts_max_length=5)
+        with pytest.raises(ValidationError):
+            StimuliConfig(twitch_chat_tts_max_length=1000)
+
+
+class TestChatTTSSynthesisHelper:
+    """Tests for OrchestratorCallbacks._synthesize_chat_tts."""
+
+    def _make_callbacks(self):
+        from spindl.orchestrator.callbacks import OrchestratorCallbacks
+        cb = OrchestratorCallbacks(
+            stt_client=None,
+            tts_provider=None,
+            llm_pipeline=MagicMock(),
+            persona={},
+        )
+        return cb
+
+    def test_returns_none_when_no_client(self):
+        cb = self._make_callbacks()
+        assert cb._synthesize_chat_tts("user", "hello") is None
+
+    def test_returns_none_when_server_unavailable(self):
+        cb = self._make_callbacks()
+        mock_client = MagicMock()
+        mock_client.is_server_available.return_value = False
+        cb._chat_tts_client = mock_client
+        assert cb._synthesize_chat_tts("user", "hello") is None
+
+    def test_format_string_applied(self):
+        import numpy as np
+        cb = self._make_callbacks()
+        mock_client = MagicMock()
+        mock_client.is_server_available.return_value = True
+        mock_client.synthesize.return_value = np.zeros(2400, dtype=np.float32)
+        cb._chat_tts_client = mock_client
+        cb._chat_tts_format = "{username} said: {message}"
+        cb._chat_tts_voice = "af_test"
+        cb._chat_tts_speed = 1.0
+        cb._chat_tts_max_length = 100
+
+        result = cb._synthesize_chat_tts("viewer1", "nice stream")
+        assert result is not None
+        mock_client.synthesize.assert_called_once()
+        call_args = mock_client.synthesize.call_args
+        assert call_args.kwargs["text"] == "viewer1 said: nice stream"
+
+    def test_message_truncated_at_max_length(self):
+        import numpy as np
+        cb = self._make_callbacks()
+        mock_client = MagicMock()
+        mock_client.is_server_available.return_value = True
+        mock_client.synthesize.return_value = np.zeros(2400, dtype=np.float32)
+        cb._chat_tts_client = mock_client
+        cb._chat_tts_format = "{username}: {message}"
+        cb._chat_tts_voice = "af_test"
+        cb._chat_tts_speed = 1.0
+        cb._chat_tts_max_length = 10
+
+        long_message = "a" * 200
+        cb._synthesize_chat_tts("v", long_message)
+        call_args = mock_client.synthesize.call_args
+        assert call_args.kwargs["text"] == "v: " + "a" * 10
+
+    def test_synthesis_exception_returns_none(self):
+        cb = self._make_callbacks()
+        mock_client = MagicMock()
+        mock_client.is_server_available.return_value = True
+        mock_client.synthesize.side_effect = ConnectionError("timeout")
+        cb._chat_tts_client = mock_client
+        cb._chat_tts_format = "{username}: {message}"
+        cb._chat_tts_voice = "af_test"
+        cb._chat_tts_speed = 1.0
+        cb._chat_tts_max_length = 100
+
+        assert cb._synthesize_chat_tts("user", "hello") is None
+
+    def test_reconnect_creates_client(self):
+        cb = self._make_callbacks()
+        assert cb._chat_tts_client is None
+
+        cfg = MagicMock()
+        cfg.twitch_chat_tts_host = "127.0.0.1"
+        cfg.twitch_chat_tts_port = 5560
+        cfg.twitch_chat_tts_voice = "af_sarah"
+        cfg.twitch_chat_tts_speed = 1.1
+        cfg.twitch_chat_tts_format = "{username} says: {message}"
+        cfg.twitch_chat_tts_max_length = 100
+
+        cb._reconnect_chat_tts_client(cfg)
+        assert cb._chat_tts_client is not None
+        assert cb._chat_tts_client.host == "127.0.0.1"
+        assert cb._chat_tts_client.port == 5560
+        assert cb._chat_tts_voice == "af_sarah"
+        assert cb._chat_tts_speed == 1.1

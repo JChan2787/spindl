@@ -520,6 +520,16 @@ class StimuliConfig(BaseModel):
     twitch_selection_pass_model: str = ""
     twitch_selection_pass_api_key: str = ""
 
+    # NANO-130 Phase 2: Chat-TTS (dedicated Kokoro instance for reading chat aloud)
+    twitch_chat_tts_enabled: bool = False
+    twitch_chat_tts_host: str = "127.0.0.1"
+    twitch_chat_tts_port: int = Field(default=5560, ge=1, le=65535)
+    twitch_chat_tts_device: str = "cpu"
+    twitch_chat_tts_voice: str = "af_sarah"
+    twitch_chat_tts_speed: float = Field(default=1.1, ge=0.5, le=2.0)
+    twitch_chat_tts_format: str = "{username} says: {message}"
+    twitch_chat_tts_max_length: int = Field(default=100, ge=20, le=500)
+
     # Game-state bridge integration (NANO-116)
     game_state_enabled: bool = False
     game_state_host: str = "127.0.0.1"
@@ -680,6 +690,30 @@ class StimuliConfig(BaseModel):
             twitch_selection_pass_api_key=twitch.get(
                 "selection_pass", {}
             ).get("api_key", defaults.twitch_selection_pass_api_key),
+            twitch_chat_tts_enabled=twitch.get(
+                "chat_tts", {}
+            ).get("enabled", defaults.twitch_chat_tts_enabled),
+            twitch_chat_tts_host=twitch.get(
+                "chat_tts", {}
+            ).get("host", defaults.twitch_chat_tts_host),
+            twitch_chat_tts_port=twitch.get(
+                "chat_tts", {}
+            ).get("port", defaults.twitch_chat_tts_port),
+            twitch_chat_tts_device=twitch.get(
+                "chat_tts", {}
+            ).get("device", defaults.twitch_chat_tts_device),
+            twitch_chat_tts_voice=twitch.get(
+                "chat_tts", {}
+            ).get("voice", defaults.twitch_chat_tts_voice),
+            twitch_chat_tts_speed=twitch.get(
+                "chat_tts", {}
+            ).get("speed", defaults.twitch_chat_tts_speed),
+            twitch_chat_tts_format=twitch.get(
+                "chat_tts", {}
+            ).get("format", defaults.twitch_chat_tts_format),
+            twitch_chat_tts_max_length=twitch.get(
+                "chat_tts", {}
+            ).get("max_length", defaults.twitch_chat_tts_max_length),
             game_state_enabled=game_state.get(
                 "enabled", defaults.game_state_enabled
             ),
@@ -1368,6 +1402,18 @@ class OrchestratorConfig(BaseModel):
             tw["selection_pass"] = {}
         tw["selection_pass"]["model"] = self.stimuli_config.twitch_selection_pass_model
         tw["selection_pass"]["api_key"] = self.stimuli_config.twitch_selection_pass_api_key
+        # NANO-130 Phase 2: Chat-TTS
+        if "chat_tts" not in tw:
+            tw["chat_tts"] = {}
+        ct = tw["chat_tts"]
+        ct["enabled"] = self.stimuli_config.twitch_chat_tts_enabled
+        ct["host"] = self.stimuli_config.twitch_chat_tts_host
+        ct["port"] = self.stimuli_config.twitch_chat_tts_port
+        ct["device"] = self.stimuli_config.twitch_chat_tts_device
+        ct["voice"] = self.stimuli_config.twitch_chat_tts_voice
+        ct["speed"] = self.stimuli_config.twitch_chat_tts_speed
+        ct["format"] = self.stimuli_config.twitch_chat_tts_format
+        ct["max_length"] = self.stimuli_config.twitch_chat_tts_max_length
 
         # Game-state bridge (NANO-116, nested under stimuli)
         if "game_state" not in stim:

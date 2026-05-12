@@ -98,6 +98,15 @@ def build_stimuli_hydration(cfg) -> dict:
         "twitch_selection_mode": cfg.twitch_selection_mode,
         "twitch_selection_pass_model": cfg.twitch_selection_pass_model,
         "twitch_selection_pass_api_key": cfg.twitch_selection_pass_api_key or "",
+        # NANO-130 Phase 2: Chat-TTS
+        "twitch_chat_tts_enabled": cfg.twitch_chat_tts_enabled,
+        "twitch_chat_tts_host": cfg.twitch_chat_tts_host,
+        "twitch_chat_tts_port": cfg.twitch_chat_tts_port,
+        "twitch_chat_tts_device": cfg.twitch_chat_tts_device,
+        "twitch_chat_tts_voice": cfg.twitch_chat_tts_voice,
+        "twitch_chat_tts_speed": cfg.twitch_chat_tts_speed,
+        "twitch_chat_tts_format": cfg.twitch_chat_tts_format,
+        "twitch_chat_tts_max_length": cfg.twitch_chat_tts_max_length,
         "twitch_has_credentials": bool(
             resolved_channel and resolved_app_id and resolved_app_secret
         ),
@@ -180,6 +189,16 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             twitch_selection_pass_model = data.get("twitch_selection_pass_model")
             twitch_selection_pass_api_key = data.get("twitch_selection_pass_api_key")
 
+            # NANO-130 Phase 2: Chat-TTS
+            twitch_chat_tts_enabled = data.get("twitch_chat_tts_enabled")
+            twitch_chat_tts_host = data.get("twitch_chat_tts_host")
+            twitch_chat_tts_port = data.get("twitch_chat_tts_port")
+            twitch_chat_tts_device = data.get("twitch_chat_tts_device")
+            twitch_chat_tts_voice = data.get("twitch_chat_tts_voice")
+            twitch_chat_tts_speed = data.get("twitch_chat_tts_speed")
+            twitch_chat_tts_format = data.get("twitch_chat_tts_format")
+            twitch_chat_tts_max_length = data.get("twitch_chat_tts_max_length")
+
             # Type coerce
             if enabled is not None:
                 enabled = bool(enabled)
@@ -258,6 +277,29 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_selection_pass_model = str(twitch_selection_pass_model).strip()
             if twitch_selection_pass_api_key is not None:
                 twitch_selection_pass_api_key = str(twitch_selection_pass_api_key).strip()
+
+            # NANO-130 Phase 2: Chat-TTS type coercion
+            if twitch_chat_tts_enabled is not None:
+                twitch_chat_tts_enabled = bool(twitch_chat_tts_enabled)
+            if twitch_chat_tts_host is not None:
+                twitch_chat_tts_host = str(twitch_chat_tts_host).strip() or "127.0.0.1"
+            if twitch_chat_tts_port is not None:
+                twitch_chat_tts_port = int(twitch_chat_tts_port)
+                twitch_chat_tts_port = max(1, min(65535, twitch_chat_tts_port))
+            if twitch_chat_tts_device is not None:
+                twitch_chat_tts_device = str(twitch_chat_tts_device).strip() or "cpu"
+            if twitch_chat_tts_voice is not None:
+                twitch_chat_tts_voice = str(twitch_chat_tts_voice).strip()
+            if twitch_chat_tts_speed is not None:
+                twitch_chat_tts_speed = float(twitch_chat_tts_speed)
+                twitch_chat_tts_speed = max(0.5, min(2.0, twitch_chat_tts_speed))
+            if twitch_chat_tts_format is not None:
+                twitch_chat_tts_format = str(twitch_chat_tts_format).strip()
+                if not twitch_chat_tts_format:
+                    twitch_chat_tts_format = "{username} says: {message}"
+            if twitch_chat_tts_max_length is not None:
+                twitch_chat_tts_max_length = int(twitch_chat_tts_max_length)
+                twitch_chat_tts_max_length = max(20, min(500, twitch_chat_tts_max_length))
 
             # Addressing-others contexts (NANO-110)
             addressing_others_contexts = data.get("addressing_others_contexts")
@@ -513,6 +555,14 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_selection_mode=twitch_selection_mode,
                 twitch_selection_pass_model=twitch_selection_pass_model,
                 twitch_selection_pass_api_key=twitch_selection_pass_api_key,
+                twitch_chat_tts_enabled=twitch_chat_tts_enabled,
+                twitch_chat_tts_host=twitch_chat_tts_host,
+                twitch_chat_tts_port=twitch_chat_tts_port,
+                twitch_chat_tts_device=twitch_chat_tts_device,
+                twitch_chat_tts_voice=twitch_chat_tts_voice,
+                twitch_chat_tts_speed=twitch_chat_tts_speed,
+                twitch_chat_tts_format=twitch_chat_tts_format,
+                twitch_chat_tts_max_length=twitch_chat_tts_max_length,
                 addressing_others_contexts=addressing_others_contexts,
                 game_state_enabled=game_state_enabled,
                 game_state_host=game_state_host,

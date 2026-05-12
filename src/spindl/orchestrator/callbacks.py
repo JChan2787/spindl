@@ -182,6 +182,14 @@ class OrchestratorCallbacks:
         self._event_bus = event_bus
         self._context_manager = context_manager
 
+        # NANO-130 Phase 2: Chat-TTS client for reading Twitch messages aloud
+        self._chat_tts_client: Optional[object] = None
+        self._chat_tts_playback: Optional[object] = None
+        self._chat_tts_voice: str = "af_sarah"
+        self._chat_tts_speed: float = 1.1
+        self._chat_tts_format: str = "{username} says: {message}"
+        self._chat_tts_max_length: int = 100
+
         # NANO-115: Twitch audience transcript dual-write callback
         self._on_twitch_response: Optional[Callable[[str, list[str]], None]] = None
 
@@ -1193,6 +1201,61 @@ class OrchestratorCallbacks:
                 )
             )
 
+    def _reconnect_chat_tts_client(self, cfg) -> None:
+        """Rebuild the chat-TTS KokoroTTS client from current config."""
+        from ..tts.builtin.kokoro.client import KokoroTTS
+
+        self._chat_tts_client = KokoroTTS(
+            host=cfg.twitch_chat_tts_host,
+            port=cfg.twitch_chat_tts_port,
+            timeout=10.0,
+            max_retries=1,
+            retry_delay=0.5,
+        )
+        self._chat_tts_voice = cfg.twitch_chat_tts_voice
+        self._chat_tts_speed = cfg.twitch_chat_tts_speed
+        self._chat_tts_format = cfg.twitch_chat_tts_format
+        self._chat_tts_max_length = cfg.twitch_chat_tts_max_length
+        logger.info(
+            "[NANO-130] Chat-TTS client connected: %s:%d voice=%s speed=%.1f",
+            cfg.twitch_chat_tts_host, cfg.twitch_chat_tts_port,
+            cfg.twitch_chat_tts_voice, cfg.twitch_chat_tts_speed,
+        )
+
+    def _synthesize_chat_tts(self, username: str, message: str) -> Optional[np.ndarray]:
+        """Synthesize a chat message via the dedicated chat-TTS Kokoro instance.
+
+        Returns float32 audio array at 24000 Hz, or None on failure.
+        """
+        if self._chat_tts_client is None:
+            return None
+
+        tts_text = self._chat_tts_format.format(
+            username=username,
+            message=message[:self._chat_tts_max_length],
+        )
+
+        try:
+            if not self._chat_tts_client.is_server_available():
+                logger.warning("[NANO-130] Chat-TTS server not available")
+                return None
+
+            audio = self._chat_tts_client.synthesize(
+                text=tts_text,
+                voice=self._chat_tts_voice,
+                speed=self._chat_tts_speed,
+                use_blend=False,
+            )
+            logger.info(
+                "[NANO-130] Chat-TTS synthesized: %s (%.1fs)",
+                tts_text[:60],
+                len(audio) / 24000.0 if len(audio) > 0 else 0.0,
+            )
+            return audio
+        except Exception as e:
+            logger.warning("[NANO-130] Chat-TTS synthesis failed: %s", e)
+            return None
+
     def process_text_input(
         self,
         text: str,
@@ -1300,6 +1363,23 @@ class OrchestratorCallbacks:
                             stimulus_source,
                             cycled_model,
                         )
+
+                # NANO-130 Phase 2: Chat-TTS — read the selected Twitch
+                # message aloud before the LLM responds.
+                if (
+                    stimulus_source == "twitch"
+                    and self._chat_tts_client is not None
+                    and self._chat_tts_playback is not None
+                    and stimulus_metadata
+                    and stimulus_metadata.get("messages")
+                ):
+                    selected = stimulus_metadata["messages"][0]
+                    chat_audio = self._synthesize_chat_tts(
+                        username=selected.get("username", "someone"),
+                        message=selected.get("text", ""),
+                    )
+                    if chat_audio is not None and len(chat_audio) > 0:
+                        self._chat_tts_playback.play(chat_audio, blocking=True)
 
                 result = self._pipeline.run(
                     tagged_input,

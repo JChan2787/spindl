@@ -98,6 +98,15 @@ export interface StimuliConfig {
   twitch_selection_mode: string;
   twitch_selection_pass_model: string;
   twitch_selection_pass_api_key: string;
+  // NANO-130 Phase 2: Chat-TTS
+  twitch_chat_tts_enabled: boolean;
+  twitch_chat_tts_host: string;
+  twitch_chat_tts_port: number;
+  twitch_chat_tts_device: string;
+  twitch_chat_tts_voice: string;
+  twitch_chat_tts_speed: number;
+  twitch_chat_tts_format: string;
+  twitch_chat_tts_max_length: number;
   // Resolved by backend — true when credentials available (config or env vars)
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
@@ -465,6 +474,15 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_selection_mode: "llm",
   twitch_selection_pass_model: "",
   twitch_selection_pass_api_key: "",
+  // NANO-130 Phase 2: Chat-TTS
+  twitch_chat_tts_enabled: false,
+  twitch_chat_tts_host: "127.0.0.1",
+  twitch_chat_tts_port: 5560,
+  twitch_chat_tts_device: "cpu",
+  twitch_chat_tts_voice: "af_sarah",
+  twitch_chat_tts_speed: 1.1,
+  twitch_chat_tts_format: "{username} says: {message}",
+  twitch_chat_tts_max_length: 100,
   twitch_has_credentials: false,
   addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
   // NANO-116: Game-state bridge

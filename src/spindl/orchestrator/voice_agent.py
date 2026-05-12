@@ -520,6 +520,10 @@ class VoiceAgentOrchestrator:
             on_audio_level=self._on_audio_level,
         )
 
+        # NANO-130 Phase 2: Dedicated chat-TTS playback instance
+        self._chat_tts_playback = AudioPlayback()
+        self._chat_tts_playback.configure(sample_rate=24000, channels=1)
+
         # Configure playback sample rate from TTS provider properties (NANO-015)
         # Provider declares its output format, playback adapts
         if self._tts_provider is not None:
@@ -564,7 +568,10 @@ class VoiceAgentOrchestrator:
         self._callbacks._on_response_ready_streaming = self._on_response_ready_streaming
         self._callbacks._append_playback_audio = self._append_playback_audio
         self._callbacks._finalize_playback_streaming = self._finalize_playback_streaming
-        self._callbacks._is_playback_active = lambda: self._playback.is_playing if self._playback else False
+        self._callbacks._is_playback_active = lambda: (
+            (self._playback.is_playing if self._playback else False)
+            or (self._chat_tts_playback.is_playing if self._chat_tts_playback else False)
+        )
         self._callbacks._suppress_playback_complete = self._suppress_playback_complete
         self._callbacks._restore_playback_complete = self._restore_playback_complete
         self._callbacks._on_session_playback_complete = self._on_playback_complete
@@ -582,6 +589,11 @@ class VoiceAgentOrchestrator:
                     AgentState.LISTENING, "tts_skipped"
                 )
         self._callbacks._on_tts_skipped = _on_tts_skipped
+
+        # NANO-130 Phase 2: Wire chat-TTS playback + client
+        self._callbacks._chat_tts_playback = self._chat_tts_playback
+        if stimuli_cfg.twitch_chat_tts_enabled:
+            self._callbacks._reconnect_chat_tts_client(stimuli_cfg)
 
         # NANO-111 Phase 2.5: Wire history manager for barge-in truncation
         self._callbacks._history_manager = self._history_manager
@@ -646,7 +658,10 @@ class VoiceAgentOrchestrator:
             callbacks=self._callbacks,
             event_bus=self._event_bus,
             enabled=stimuli_cfg.enabled,
-            is_speaking=lambda: self._playback.is_playing,
+            is_speaking=lambda: (
+                self._playback.is_playing
+                or (self._chat_tts_playback is not None and self._chat_tts_playback.is_playing)
+            ),
         )
         # NANO-117: Wire arbitration config
         self._stimuli_engine._decay_multiplier = stimuli_cfg.arbitration_decay_multiplier
@@ -1048,8 +1063,10 @@ class VoiceAgentOrchestrator:
             time.sleep(0.01)
 
     def _handle_barge_in(self) -> None:
-        """Handle barge-in by stopping playback."""
+        """Handle barge-in by stopping playback (both character and chat-TTS)."""
         self._playback.stop()
+        if self._chat_tts_playback is not None:
+            self._chat_tts_playback.stop()
 
     def _handle_self_barge_in(self) -> None:
         """Handle game-event self-barge-in (NANO-124).
@@ -1063,6 +1080,8 @@ class VoiceAgentOrchestrator:
         self._callbacks.trigger_self_barge_in()
         self._state_machine.finish_system_speaking()
         self._playback.stop()
+        if self._chat_tts_playback is not None:
+            self._chat_tts_playback.stop()
 
     def set_addressing_others(self, context_id: str) -> None:
         """
@@ -1084,6 +1103,8 @@ class VoiceAgentOrchestrator:
             and self._state_machine.state == AgentState.SYSTEM_SPEAKING
         ):
             self._playback.stop()
+            if self._chat_tts_playback is not None:
+                self._chat_tts_playback.stop()
             # Transition to LISTENING, not USER_SPEAKING — we're suppressing input
             self._state_machine.finish_system_speaking()
 
@@ -2173,6 +2194,14 @@ class VoiceAgentOrchestrator:
         twitch_selection_mode: Optional[str] = None,
         twitch_selection_pass_model: Optional[str] = None,
         twitch_selection_pass_api_key: Optional[str] = None,
+        twitch_chat_tts_enabled: Optional[bool] = None,
+        twitch_chat_tts_host: Optional[str] = None,
+        twitch_chat_tts_port: Optional[int] = None,
+        twitch_chat_tts_device: Optional[str] = None,
+        twitch_chat_tts_voice: Optional[str] = None,
+        twitch_chat_tts_speed: Optional[float] = None,
+        twitch_chat_tts_format: Optional[str] = None,
+        twitch_chat_tts_max_length: Optional[int] = None,
         addressing_others_contexts: Optional[list] = None,
         game_state_enabled: Optional[bool] = None,
         game_state_host: Optional[str] = None,
@@ -2344,6 +2373,26 @@ class VoiceAgentOrchestrator:
                 cfg.twitch_selection_pass_model = twitch_selection_pass_model
             if twitch_selection_pass_api_key is not None:
                 cfg.twitch_selection_pass_api_key = twitch_selection_pass_api_key
+            # NANO-130 Phase 2: Chat-TTS config
+            if twitch_chat_tts_enabled is not None:
+                cfg.twitch_chat_tts_enabled = twitch_chat_tts_enabled
+            if twitch_chat_tts_host is not None:
+                cfg.twitch_chat_tts_host = twitch_chat_tts_host
+            if twitch_chat_tts_port is not None:
+                cfg.twitch_chat_tts_port = twitch_chat_tts_port
+            if twitch_chat_tts_device is not None:
+                cfg.twitch_chat_tts_device = twitch_chat_tts_device
+            if twitch_chat_tts_voice is not None:
+                cfg.twitch_chat_tts_voice = twitch_chat_tts_voice
+            if twitch_chat_tts_speed is not None:
+                cfg.twitch_chat_tts_speed = twitch_chat_tts_speed
+            if twitch_chat_tts_format is not None:
+                cfg.twitch_chat_tts_format = twitch_chat_tts_format
+            if twitch_chat_tts_max_length is not None:
+                cfg.twitch_chat_tts_max_length = twitch_chat_tts_max_length
+            # Reconnect chat-TTS client if connection params changed
+            if any(x is not None for x in (twitch_chat_tts_host, twitch_chat_tts_port, twitch_chat_tts_voice, twitch_chat_tts_speed)):
+                self._callbacks._reconnect_chat_tts_client(cfg)
 
         # Addressing-others contexts (NANO-110) — config-only, no live module
         if addressing_others_contexts is not None:

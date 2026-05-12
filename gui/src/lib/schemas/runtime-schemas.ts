@@ -201,6 +201,15 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_selection_mode: z.string().default("llm"),
   twitch_selection_pass_model: z.string().default(""),
   twitch_selection_pass_api_key: z.string().default(""),
+  // NANO-130 Phase 2: Chat-TTS
+  twitch_chat_tts_enabled: z.boolean().default(false),
+  twitch_chat_tts_host: z.string().default("127.0.0.1"),
+  twitch_chat_tts_port: z.number().int().min(1).max(65535).default(5560),
+  twitch_chat_tts_device: z.string().default("cpu"),
+  twitch_chat_tts_voice: z.string().default("af_sarah"),
+  twitch_chat_tts_speed: z.number().min(0.5).max(2.0).default(1.1),
+  twitch_chat_tts_format: z.string().default("{username} says: {message}"),
+  twitch_chat_tts_max_length: z.number().int().min(20).max(500).default(100),
   twitch_has_credentials: z.boolean(),
   // NANO-116: Game-state bridge integration
   game_state_enabled: z.boolean(),

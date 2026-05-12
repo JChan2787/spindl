@@ -612,6 +612,15 @@ export interface SetStimuliConfigPayload {
   twitch_selection_mode?: string;
   twitch_selection_pass_model?: string;
   twitch_selection_pass_api_key?: string;
+  // NANO-130 Phase 2: Chat-TTS
+  twitch_chat_tts_enabled?: boolean;
+  twitch_chat_tts_host?: string;
+  twitch_chat_tts_port?: number;
+  twitch_chat_tts_device?: string;
+  twitch_chat_tts_voice?: string;
+  twitch_chat_tts_speed?: number;
+  twitch_chat_tts_format?: string;
+  twitch_chat_tts_max_length?: number;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts?: AddressingContext[];
   // NANO-116: Game-state bridge
