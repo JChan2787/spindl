@@ -130,6 +130,9 @@ export interface StimuliConfig {
   model_rotation_enabled: boolean;
   model_rotation_models: string[];
   model_rotation_api_key: string;
+  // NANO-117: Weighted arbitration
+  arbitration_decay_multiplier: number;
+  arbitration_recovery_per_cycle: number;
 }
 
 // Game-state bridge status (NANO-116, NANO-122)
@@ -487,6 +490,9 @@ const DEFAULT_STIMULI: StimuliConfig = {
   model_rotation_enabled: false,
   model_rotation_models: [],
   model_rotation_api_key: "",
+  // NANO-117: Weighted arbitration
+  arbitration_decay_multiplier: 0.3,
+  arbitration_recovery_per_cycle: 0.2,
 };
 
 const DEFAULT_PROMPT: PromptConfig = {

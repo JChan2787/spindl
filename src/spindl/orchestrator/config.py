@@ -592,6 +592,10 @@ class StimuliConfig(BaseModel):
     model_rotation_models: list[str] = Field(default_factory=list)
     model_rotation_api_key: str = ""
 
+    # Weighted arbitration (NANO-117)
+    arbitration_decay_multiplier: float = Field(default=0.3, ge=0.1, le=1.0)
+    arbitration_recovery_per_cycle: float = Field(default=0.2, ge=0.05, le=0.5)
+
     @staticmethod
     def _resolve_env(value: str) -> str:
         """Expand ${VAR_NAME} patterns with env var values."""
@@ -615,6 +619,7 @@ class StimuliConfig(BaseModel):
         gameplay = game_state.get("gameplay", {})
         barge_in = dialogue.get("tts_barge_in", {})
         model_rotation = data.get("model_rotation", {})
+        arbitration = data.get("arbitration", {})
 
         # Parse addressing-others contexts (NANO-110)
         addressing = data.get("addressing_others", {})
@@ -753,6 +758,12 @@ class StimuliConfig(BaseModel):
             ),
             model_rotation_api_key=model_rotation.get(
                 "api_key", defaults.model_rotation_api_key
+            ),
+            arbitration_decay_multiplier=arbitration.get(
+                "decay_multiplier", defaults.arbitration_decay_multiplier
+            ),
+            arbitration_recovery_per_cycle=arbitration.get(
+                "recovery_per_cycle", defaults.arbitration_recovery_per_cycle
             ),
         )
 
@@ -1398,6 +1409,13 @@ class OrchestratorConfig(BaseModel):
         mr["enabled"] = self.stimuli_config.model_rotation_enabled
         mr["models"] = self.stimuli_config.model_rotation_models
         mr["api_key"] = self.stimuli_config.model_rotation_api_key
+
+        # Weighted arbitration (NANO-117, nested under stimuli)
+        if "arbitration" not in stim:
+            stim["arbitration"] = {}
+        arb = stim["arbitration"]
+        arb["decay_multiplier"] = self.stimuli_config.arbitration_decay_multiplier
+        arb["recovery_per_cycle"] = self.stimuli_config.arbitration_recovery_per_cycle
 
         # --- Tools ---
         if "tools" not in data:

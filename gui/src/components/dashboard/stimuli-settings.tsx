@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Zap, Timer, MessageSquare, Users, Plus, Trash2, X, Shuffle } from "lucide-react";
+import { Zap, Timer, MessageSquare, Users, Plus, Trash2, X, Shuffle, Scale } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -330,6 +330,23 @@ export function StimuliSettings() {
     }
   }, [effectiveRotationApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // NANO-117: Weighted arbitration
+  const handleDecayMultiplierChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ arbitration_decay_multiplier: value });
+      emitChanges({ arbitration_decay_multiplier: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
+  const handleRecoveryPerCycleChange = useCallback(
+    (value: number) => {
+      updatePendingStimuli({ arbitration_recovery_per_cycle: value });
+      emitChanges({ arbitration_recovery_per_cycle: value });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
   // Dummy value for the "add model" combobox — always empty, selection triggers add
   const [addModelValue, setAddModelValue] = useState("");
 
@@ -589,6 +606,40 @@ export function StimuliSettings() {
                   placeholder="Falls back to main LLM API key"
                 />
               </div>
+            </div>
+
+            {/* NANO-117: Weighted Arbitration */}
+            <div className="border-t border-border pt-4 space-y-4">
+              <Label className="flex items-center gap-2 text-sm font-medium">
+                <Scale className="h-3 w-3" />
+                Weighted Arbitration
+              </Label>
+
+              <p className="text-xs text-muted-foreground">
+                When multiple stimulus sources compete, weighted random selection picks the winner. After firing, a source&apos;s weight decays and recovers over subsequent cycles.
+              </p>
+
+              <Slider
+                label="Decay Multiplier"
+                value={effectiveConfig.arbitration_decay_multiplier}
+                min={0.1}
+                max={1.0}
+                step={0.05}
+                icon={<Scale className="h-3 w-3" />}
+                onChange={handleDecayMultiplierChange}
+                unit="×"
+              />
+
+              <Slider
+                label="Recovery Per Cycle"
+                value={effectiveConfig.arbitration_recovery_per_cycle}
+                min={0.05}
+                max={0.5}
+                step={0.05}
+                icon={<Scale className="h-3 w-3" />}
+                onChange={handleRecoveryPerCycleChange}
+                unit="/cyc"
+              />
             </div>
 
             <p className="text-xs text-muted-foreground">

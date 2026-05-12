@@ -291,6 +291,7 @@ class TwitchModule(StimulusModule):
                     }
                     for m in messages
                 ],
+                "weight": 1.0,
             },
         )
 

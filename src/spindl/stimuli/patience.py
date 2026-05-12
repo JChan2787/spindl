@@ -137,6 +137,7 @@ class PatienceModule(StimulusModule):
             metadata={
                 "elapsed_seconds": round(elapsed, 1),
                 "timeout_seconds": self._timeout,
+                "weight": 0.5,
             },
         )
 

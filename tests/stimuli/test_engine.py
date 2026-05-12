@@ -76,12 +76,14 @@ class DummyModule(StimulusModule):
         enabled: bool = True,
         has: bool = False,
         user_input: str = "dummy stimulus",
+        weight: float = 1.0,
     ):
         self._name = name
         self._priority = priority
         self._enabled = enabled
         self._has = has
         self._user_input = user_input
+        self._weight = weight
         self._started = False
         self._stopped = False
 
@@ -113,6 +115,7 @@ class DummyModule(StimulusModule):
         return StimulusData(
             source=StimulusSource.MODULE,
             user_input=self._user_input,
+            metadata={"weight": self._weight},
         )
 
     def health_check(self) -> bool:
@@ -428,17 +431,16 @@ class TestEngineShouldFire:
 
 
 class TestEngineSelectStimulus:
-    """Tests for _select_stimulus() priority logic."""
+    """Tests for _select_stimulus() weighted selection (NANO-117)."""
 
-    def test_selects_highest_priority(self, engine):
-        low = DummyModule(name="low", priority=0, has=True, user_input="low msg")
-        high = DummyModule(name="high", priority=100, has=True, user_input="high msg")
-        engine.register_module(low)
-        engine.register_module(high)
+    def test_single_candidate_returns_directly(self, engine):
+        """Single module with stimulus should always win — no randomization."""
+        only = DummyModule(name="only", has=True, user_input="only msg", weight=1.0)
+        engine.register_module(only)
 
         stimulus = engine._select_stimulus()
         assert stimulus is not None
-        assert stimulus.user_input == "high msg"
+        assert stimulus.user_input == "only msg"
 
     def test_skips_disabled_modules(self, engine):
         disabled = DummyModule(
@@ -460,6 +462,104 @@ class TestEngineSelectStimulus:
 
     def test_returns_none_when_no_modules(self, engine):
         assert engine._select_stimulus() is None
+
+    def test_weighted_selection_respects_weights(self, engine):
+        """High-weight module should win most draws over many iterations."""
+        import random
+        random.seed(42)
+
+        wins = {"heavy": 0, "light": 0}
+        for _ in range(200):
+            heavy = DummyModule(name="heavy", has=True, user_input="heavy", weight=10.0)
+            light = DummyModule(name="light", has=True, user_input="light", weight=1.0)
+            engine._modules = []
+            engine.register_module(heavy)
+            engine.register_module(light)
+            engine._module_decay.clear()
+
+            result = engine._select_stimulus()
+            assert result is not None
+            wins[result.user_input] += 1
+
+        assert wins["heavy"] > wins["light"] * 3
+
+    def test_decay_applied_after_firing(self, engine):
+        """After selection, the winner should have a decay multiplier."""
+        module = DummyModule(name="winner", has=True, user_input="win", weight=2.0)
+        engine.register_module(module)
+        engine._decay_multiplier = 0.3
+
+        engine._select_stimulus()
+        assert "winner" in engine._module_decay
+        assert engine._module_decay["winner"] == pytest.approx(0.3)
+
+    def test_decay_recovery(self, engine):
+        """Decay should recover toward 1.0 each cycle."""
+        engine._module_decay["test"] = 0.3
+        engine._decay_recovery_per_cycle = 0.2
+
+        engine._recover_decay()
+        assert engine._module_decay["test"] == pytest.approx(0.5)
+
+        engine._recover_decay()
+        assert engine._module_decay["test"] == pytest.approx(0.7)
+
+        engine._recover_decay()
+        assert engine._module_decay["test"] == pytest.approx(0.9)
+
+        engine._recover_decay()
+        assert "test" not in engine._module_decay
+
+    def test_decay_reduces_effective_weight(self, engine):
+        """A decayed module should win less often than a fresh one."""
+        import random
+        random.seed(123)
+
+        wins = {"decayed": 0, "fresh": 0}
+        for _ in range(200):
+            decayed = DummyModule(name="decayed", has=True, user_input="decayed", weight=2.0)
+            fresh = DummyModule(name="fresh", has=True, user_input="fresh", weight=2.0)
+            engine._modules = []
+            engine.register_module(decayed)
+            engine.register_module(fresh)
+            engine._module_decay = {"decayed": 0.3}
+
+            result = engine._select_stimulus()
+            assert result is not None
+            wins[result.user_input] += 1
+
+        assert wins["fresh"] > wins["decayed"] * 2
+
+    def test_default_weight_when_not_set(self, engine):
+        """Modules without metadata['weight'] default to 1.0."""
+        from spindl.stimuli.models import StimulusData, StimulusSource
+
+        class NoWeightModule(StimulusModule):
+            @property
+            def name(self): return "noweight"
+            @property
+            def priority(self): return 50
+            @property
+            def enabled(self): return True
+            def start(self): pass
+            def stop(self): pass
+            def has_stimulus(self): return self._has
+            def get_stimulus(self):
+                if not self._has:
+                    return None
+                self._has = False
+                return StimulusData(
+                    source=StimulusSource.MODULE,
+                    user_input="no weight set",
+                )
+            def health_check(self): return True
+            def __init__(self):
+                self._has = True
+
+        engine.register_module(NoWeightModule())
+        result = engine._select_stimulus()
+        assert result is not None
+        assert result.user_input == "no weight set"
 
 
 class TestEngineFire:

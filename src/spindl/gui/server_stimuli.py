@@ -134,6 +134,9 @@ def build_stimuli_hydration(cfg) -> dict:
         "model_rotation_enabled": cfg.model_rotation_enabled,
         "model_rotation_models": cfg.model_rotation_models,
         "model_rotation_api_key": cfg.model_rotation_api_key or "",
+        # NANO-117: Weighted arbitration
+        "arbitration_decay_multiplier": cfg.arbitration_decay_multiplier,
+        "arbitration_recovery_per_cycle": cfg.arbitration_recovery_per_cycle,
     }
 
 
@@ -301,6 +304,15 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                     ]
             if model_rotation_api_key is not None:
                 model_rotation_api_key = str(model_rotation_api_key).strip()
+
+            # NANO-117: Weighted arbitration fields
+            arbitration_decay_multiplier = data.get("arbitration_decay_multiplier")
+            arbitration_recovery_per_cycle = data.get("arbitration_recovery_per_cycle")
+
+            if arbitration_decay_multiplier is not None:
+                arbitration_decay_multiplier = max(0.1, min(1.0, float(arbitration_decay_multiplier)))
+            if arbitration_recovery_per_cycle is not None:
+                arbitration_recovery_per_cycle = max(0.05, min(0.5, float(arbitration_recovery_per_cycle)))
 
             # Game-state type coercion (NANO-116)
             if game_state_enabled is not None:
@@ -491,6 +503,8 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 model_rotation_enabled=model_rotation_enabled,
                 model_rotation_models=model_rotation_models,
                 model_rotation_api_key=model_rotation_api_key,
+                arbitration_decay_multiplier=arbitration_decay_multiplier,
+                arbitration_recovery_per_cycle=arbitration_recovery_per_cycle,
             )
 
             cfg = server._orchestrator._config.stimuli_config

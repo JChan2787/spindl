@@ -9,8 +9,14 @@ Event-driven with a periodic 1-second PATIENCE check:
 - Subscribes to STATE_CHANGED, RESPONSE_READY, TTS_COMPLETED
   to track activity and wake immediately on state transitions.
 - Checks PATIENCE every 1 second via threading.Event timeout.
+
+NANO-117: Weighted arbitration (lottery scheduling). When multiple
+modules have pending stimuli, selection uses weighted random draw
+instead of rigid priority ordering. Each module sets metadata["weight"]
+in its get_stimulus() return. Decay after firing prevents starvation.
 """
 
+import random
 import threading
 import time
 from typing import Callable, Optional, TYPE_CHECKING
@@ -40,8 +46,11 @@ class StimuliEngine:
     Central stimuli decision engine.
 
     Polls registered modules for pending stimuli, gates on agent state
-    (must be LISTENING and not processing), and fires the highest-priority
+    (must be LISTENING and not processing), and fires the winning
     stimulus through OrchestratorCallbacks.process_text_input().
+
+    Selection: weighted random draw (lottery scheduling, NANO-117).
+    Decay after firing prevents starvation of competing sources.
 
     Thread model:
         - Runs as a single daemon thread
@@ -85,6 +94,12 @@ class StimuliEngine:
 
         # Track previous playback state for pause/resume transitions
         self._was_speaking = False
+
+        # NANO-117: Weighted arbitration decay state.
+        # Maps module name → current decay multiplier (1.0 = no decay).
+        self._module_decay: dict[str, float] = {}
+        self._decay_multiplier = 0.3
+        self._decay_recovery_per_cycle = 0.2
 
     @property
     def enabled(self) -> bool:
@@ -315,6 +330,9 @@ class StimuliEngine:
             # Detect playback state transitions → pause/resume modules
             self._check_playback_transitions()
 
+            # NANO-117: Recover decayed weights each cycle
+            self._recover_decay()
+
             if not self._enabled:
                 continue
 
@@ -396,37 +414,107 @@ class StimuliEngine:
 
     def _select_stimulus(self) -> Optional[StimulusData]:
         """
-        Select the highest-priority stimulus from registered modules.
+        Select a stimulus via weighted random draw (NANO-117).
 
-        Iterates modules sorted by priority (descending). First module
-        with a pending stimulus wins.
+        1. Collect all enabled modules with has_stimulus() == True
+        2. Drain each candidate via get_stimulus(), read metadata["weight"]
+        3. Apply decay multiplier to get effective weight
+        4. Single candidate: return directly (no randomization overhead)
+        5. Multiple candidates: weighted random selection, discard losers
         """
         with self._modules_lock:
-            candidates = sorted(
-                self._modules, key=lambda m: m.priority, reverse=True
-            )
+            ready = [
+                m for m in self._modules
+                if m.enabled and self._module_has_stimulus(m)
+            ]
 
-        for module in candidates:
-            if not module.enabled:
-                continue
+        if not ready:
+            return None
+
+        # Drain all candidates
+        drained: list[tuple[StimulusModule, StimulusData]] = []
+        for module in ready:
             try:
-                if module.has_stimulus():
-                    stimulus = module.get_stimulus()
-                    if stimulus:
-                        logger.info(
-                            "[Stimuli] %s fired (priority=%d)",
-                            module.name.upper(),
-                            module.priority,
-                        )
-                        return stimulus
+                stimulus = module.get_stimulus()
+                if stimulus:
+                    drained.append((module, stimulus))
             except Exception as e:
                 logger.error(
-                    "Module '%s' error in has_stimulus/get_stimulus: %s",
-                    module.name,
-                    e,
+                    "Module '%s' error in get_stimulus: %s", module.name, e
                 )
 
-        return None
+        if not drained:
+            return None
+
+        if len(drained) == 1:
+            module, stimulus = drained[0]
+            self._apply_decay(module.name)
+            logger.info(
+                "[Stimuli] %s fired (weight=%.2f, sole candidate)",
+                module.name.upper(),
+                stimulus.metadata.get("weight", 1.0),
+            )
+            return stimulus
+
+        # Weighted random selection across multiple candidates
+        weights: list[float] = []
+        for module, stimulus in drained:
+            base = stimulus.metadata.get("weight", 1.0)
+            decay = self._module_decay.get(module.name, 1.0)
+            effective = max(0.01, base * decay)
+            weights.append(effective)
+
+        total = sum(weights)
+        roll = random.random() * total
+        cumulative = 0.0
+        winner_idx = len(drained) - 1
+        for i, w in enumerate(weights):
+            cumulative += w
+            if roll <= cumulative:
+                winner_idx = i
+                break
+
+        winner_module, winner_stimulus = drained[winner_idx]
+        self._apply_decay(winner_module.name)
+
+        losers = [
+            drained[i][0].name.upper()
+            for i in range(len(drained)) if i != winner_idx
+        ]
+        logger.info(
+            "[Stimuli] %s won weighted draw (effective=%.2f, total=%.2f, "
+            "candidates=%d, losers=%s)",
+            winner_module.name.upper(),
+            weights[winner_idx],
+            total,
+            len(drained),
+            losers,
+        )
+
+        return winner_stimulus
+
+    @staticmethod
+    def _module_has_stimulus(module: StimulusModule) -> bool:
+        try:
+            return module.has_stimulus()
+        except Exception as e:
+            logger.error(
+                "Module '%s' error in has_stimulus: %s", module.name, e
+            )
+            return False
+
+    def _apply_decay(self, module_name: str) -> None:
+        """Apply post-fire decay to a module's weight multiplier."""
+        self._module_decay[module_name] = self._decay_multiplier
+
+    def _recover_decay(self) -> None:
+        """Recover all decayed modules toward 1.0. Called once per engine cycle."""
+        for name in list(self._module_decay):
+            current = self._module_decay[name]
+            if current < 1.0:
+                self._module_decay[name] = min(1.0, current + self._decay_recovery_per_cycle)
+            if self._module_decay[name] >= 1.0:
+                del self._module_decay[name]
 
     def _fire(self, stimulus: StimulusData) -> None:
         """

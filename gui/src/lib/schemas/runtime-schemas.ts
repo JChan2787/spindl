@@ -232,6 +232,9 @@ export const StimuliConfigUpdatedSchema = z.object({
   model_rotation_enabled: z.boolean(),
   model_rotation_models: z.array(z.string()),
   model_rotation_api_key: z.string(),
+  // NANO-117: Weighted arbitration
+  arbitration_decay_multiplier: z.number().min(0.1).max(1.0),
+  arbitration_recovery_per_cycle: z.number().min(0.05).max(0.5),
   persisted: z.boolean().optional(),
 });
 

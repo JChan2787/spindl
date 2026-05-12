@@ -537,6 +537,7 @@ class GameStateModule(StimulusModule):
                 "game_id": "pragmata",
                 "combat_snapshot_bundled": latest_ctx.combat_active and self._current_snapshot is not None,
                 "barge_in": is_barge_in,
+                "weight": 2.0,
             },
         )
 
@@ -641,6 +642,7 @@ class GameStateModule(StimulusModule):
                 "stimulus_type": "priority_event",
                 "event_count": len(priority_events),
                 "game_id": "pragmata",
+                "weight": 5.0,
             },
         )
 
