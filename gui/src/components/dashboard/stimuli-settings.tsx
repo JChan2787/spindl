@@ -679,7 +679,7 @@ export function StimuliSettings() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              The stimuli system enables autonomous behavior. The idle timer fires after the agent has been idle for the configured timeout.</p>
+              The stimuli system enables autonomous behavior — idle prompts, Twitch chat responses, and game commentary fire through the engine above.</p>
           </>
         )}
       </CardContent>
