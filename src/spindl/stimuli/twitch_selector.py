@@ -132,7 +132,6 @@ class TwitchSelector:
                     ],
                     "temperature": 0.0,
                     "max_tokens": 30,
-                    "response_format": {"type": "json_object"},
                 },
                 timeout=self._timeout,
             )
