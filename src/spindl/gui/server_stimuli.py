@@ -1079,12 +1079,13 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
         def _launch():
             import asyncio as _asyncio
             try:
+                import sys
+                create_flags = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+                cmd_with_title = f'start "chat-tts" /wait {cmd}' if sys.platform == "win32" else cmd
                 process = subprocess.Popen(
-                    cmd,
+                    cmd_with_title,
                     shell=True,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    creationflags=create_flags,
                 )
                 server._chat_tts_process = process
                 print(f"[GUI] Chat-TTS process spawned (PID: {process.pid})", flush=True)
