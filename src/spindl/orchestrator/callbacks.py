@@ -1379,7 +1379,11 @@ class OrchestratorCallbacks:
                         message=selected.get("text", ""),
                     )
                     if chat_audio is not None and len(chat_audio) > 0:
-                        self._chat_tts_playback.play(chat_audio, blocking=True)
+                        max_duration = len(chat_audio) / 24000.0 + 5.0
+                        self._chat_tts_playback.play(chat_audio)
+                        if not self._chat_tts_playback.wait(timeout=max_duration):
+                            logger.warning("[NANO-130] Chat-TTS playback timed out — skipping")
+                            self._chat_tts_playback.stop()
 
                 result = self._pipeline.run(
                     tagged_input,
