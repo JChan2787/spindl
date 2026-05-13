@@ -105,7 +105,7 @@ class TwitchSelector:
             result = self._select_llm(messages)
             if result is not None:
                 return result
-            logger.warning("LLM selection failed, falling back to heuristic")
+            print("[NANO-130] LLM selection failed, falling back to heuristic", flush=True)
 
         return self._select_heuristic(messages)
 
@@ -138,24 +138,28 @@ class TwitchSelector:
             )
 
             if response.status_code != 200:
-                logger.error(
-                    "Selection pass API error %d: %s",
-                    response.status_code,
-                    response.text[:200],
+                print(
+                    f"[NANO-130] Selection pass API error {response.status_code}: {response.text[:200]}",
+                    flush=True,
                 )
                 return None
 
             data = response.json()
             choices = data.get("choices", [])
             if not choices:
-                logger.error("Selection pass: no choices in response")
+                print("[NANO-130] Selection pass: no choices in response", flush=True)
                 return None
 
             content = choices[0].get("message", {}).get("content", "")
             if not content:
-                logger.error("Selection pass: empty content")
+                print("[NANO-130] Selection pass: empty content from LLM", flush=True)
                 return None
 
+            content = content.strip()
+            if content.startswith("```"):
+                content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+            print(f"[NANO-130] Selection pass raw content: {content!r}", flush=True)
             parsed = json.loads(content)
             selected = parsed.get("selected")
 
@@ -166,10 +170,9 @@ class TwitchSelector:
 
             idx = int(selected) - 1
             if idx < 0 or idx >= len(messages):
-                logger.warning(
-                    "Selection pass returned out-of-range index %d (count=%d)",
-                    idx + 1,
-                    len(messages),
+                print(
+                    f"[NANO-130] Selection pass returned out-of-range index {idx + 1} (count={len(messages)})",
+                    flush=True,
                 )
                 return None
 
@@ -178,13 +181,13 @@ class TwitchSelector:
             )
 
         except requests.Timeout:
-            logger.error("Selection pass timed out after %.1fs", self._timeout)
+            print(f"[NANO-130] Selection pass timed out after {self._timeout:.1f}s", flush=True)
             return None
         except requests.RequestException as e:
-            logger.error("Selection pass request failed: %s", e)
+            print(f"[NANO-130] Selection pass request failed: {e}", flush=True)
             return None
         except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            logger.error("Selection pass response parse error: %s", e)
+            print(f"[NANO-130] Selection pass response parse error: {e}", flush=True)
             return None
 
     def _select_heuristic(self, messages: list[dict]) -> SelectionResult:
