@@ -691,7 +691,10 @@ class VoiceAgentOrchestrator:
                 max_message_age_seconds=stimuli_cfg.twitch_max_message_age_seconds,
                 selection_mode=stimuli_cfg.twitch_selection_mode,
                 selection_pass_model=stimuli_cfg.twitch_selection_pass_model,
-                selection_pass_api_key=stimuli_cfg.twitch_selection_pass_api_key,
+                selection_pass_api_key=(
+                    stimuli_cfg.twitch_selection_pass_api_key
+                    or self._config.llm_config.provider_config.get("api_key", "")
+                ),
             )
             self._stimuli_engine.register_module(twitch)
             logger.info(
@@ -2337,7 +2340,11 @@ class VoiceAgentOrchestrator:
                         module.selection_pass_model = twitch_selection_pass_model
                         cfg.twitch_selection_pass_model = twitch_selection_pass_model
                     if twitch_selection_pass_api_key is not None:
-                        module.selection_pass_api_key = twitch_selection_pass_api_key
+                        effective_key = (
+                            twitch_selection_pass_api_key
+                            or self._config.llm_config.provider_config.get("api_key", "")
+                        )
+                        module.selection_pass_api_key = effective_key
                         cfg.twitch_selection_pass_api_key = twitch_selection_pass_api_key
                     break
 
