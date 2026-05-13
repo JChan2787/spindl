@@ -1216,10 +1216,10 @@ class OrchestratorCallbacks:
         self._chat_tts_speed = cfg.twitch_chat_tts_speed
         self._chat_tts_format = cfg.twitch_chat_tts_format
         self._chat_tts_max_length = cfg.twitch_chat_tts_max_length
-        logger.info(
-            "[NANO-130] Chat-TTS client connected: %s:%d voice=%s speed=%.1f",
-            cfg.twitch_chat_tts_host, cfg.twitch_chat_tts_port,
-            cfg.twitch_chat_tts_voice, cfg.twitch_chat_tts_speed,
+        print(
+            f"[NANO-130] Chat-TTS client connected: {cfg.twitch_chat_tts_host}:{cfg.twitch_chat_tts_port} "
+            f"voice={cfg.twitch_chat_tts_voice} speed={cfg.twitch_chat_tts_speed:.1f}",
+            flush=True,
         )
 
     def _synthesize_chat_tts(self, username: str, message: str) -> Optional[np.ndarray]:
@@ -1237,7 +1237,7 @@ class OrchestratorCallbacks:
 
         try:
             if not self._chat_tts_client.is_server_available():
-                logger.warning("[NANO-130] Chat-TTS server not available")
+                print("[NANO-130] Chat-TTS server not available", flush=True)
                 return None
 
             audio = self._chat_tts_client.synthesize(
@@ -1246,14 +1246,13 @@ class OrchestratorCallbacks:
                 speed=self._chat_tts_speed,
                 use_blend=False,
             )
-            logger.info(
-                "[NANO-130] Chat-TTS synthesized: %s (%.1fs)",
-                tts_text[:60],
-                len(audio) / 24000.0 if len(audio) > 0 else 0.0,
+            print(
+                f"[NANO-130] Chat-TTS synthesized: {tts_text[:60]} ({len(audio) / 24000.0 if len(audio) > 0 else 0.0:.1f}s)",
+                flush=True,
             )
             return audio
         except Exception as e:
-            logger.warning("[NANO-130] Chat-TTS synthesis failed: %s", e)
+            print(f"[NANO-130] Chat-TTS synthesis failed: {e}", flush=True)
             return None
 
     def process_text_input(
@@ -1382,7 +1381,7 @@ class OrchestratorCallbacks:
                         max_duration = len(chat_audio) / 24000.0 + 5.0
                         self._chat_tts_playback.play(chat_audio)
                         if not self._chat_tts_playback.wait(timeout=max_duration):
-                            logger.warning("[NANO-130] Chat-TTS playback timed out — skipping")
+                            print("[NANO-130] Chat-TTS playback timed out — skipping", flush=True)
                             self._chat_tts_playback.stop()
 
                 result = self._pipeline.run(
