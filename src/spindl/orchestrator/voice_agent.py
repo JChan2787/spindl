@@ -2390,9 +2390,12 @@ class VoiceAgentOrchestrator:
                 cfg.twitch_chat_tts_format = twitch_chat_tts_format
             if twitch_chat_tts_max_length is not None:
                 cfg.twitch_chat_tts_max_length = twitch_chat_tts_max_length
-            # Reconnect chat-TTS client if connection params changed
-            if any(x is not None for x in (twitch_chat_tts_host, twitch_chat_tts_port, twitch_chat_tts_voice, twitch_chat_tts_speed)):
-                self._callbacks._reconnect_chat_tts_client(cfg)
+            # Reconnect chat-TTS client if enabled or connection params changed
+            if twitch_chat_tts_enabled or any(x is not None for x in (twitch_chat_tts_host, twitch_chat_tts_port, twitch_chat_tts_voice, twitch_chat_tts_speed)):
+                if cfg.twitch_chat_tts_enabled:
+                    self._callbacks._reconnect_chat_tts_client(cfg)
+                else:
+                    self._callbacks._chat_tts_client = None
 
         # Addressing-others contexts (NANO-110) — config-only, no live module
         if addressing_others_contexts is not None:
