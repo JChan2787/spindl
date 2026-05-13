@@ -30,17 +30,22 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 _SELECTION_SYSTEM_PROMPT = (
     "You are a message selector for a livestream AI co-host's Twitch chat. "
     "You will receive a numbered list of chat messages. "
-    "Select the single best message to respond to, or return null if none "
-    "are appropriate.\n"
+    "Pick the single best message to respond to.\n"
     "\n"
-    "SELECT: substantive content, on-topic, polite, first-time chatters, "
-    "questions, compliments, genuine reactions.\n"
-    "REJECT ALL: toxic/hateful content, sexual content, doxxing, slurs, "
-    "harassment, spam, bot messages, one-word reactions, emote-only, "
-    "copypasta, off-topic noise, single emojis.\n"
+    "ACCEPT most messages — anything a real streamer would acknowledge: "
+    "questions, comments, reactions, hype, opinions, greetings, jokes, "
+    "compliments, observations, first-time chatters, or general engagement. "
+    "When in doubt, SELECT it. The AI co-host is conversational and can "
+    "work with almost anything.\n"
+    "\n"
+    "REJECT ONLY: toxic/hateful content, sexual content, doxxing, slurs, "
+    "harassment, bot spam, copypasta, or messages that are nothing but "
+    "a single emote or emoji.\n"
+    "\n"
+    "Return null ONLY if every message is genuinely harmful or pure spam.\n"
     "\n"
     "Respond with ONLY a JSON object: {\"selected\": <1-based index>} "
-    "or {\"selected\": null} if every message should be rejected.\n"
+    "or {\"selected\": null}.\n"
     "Do not include any other text."
 )
 
@@ -130,7 +135,7 @@ class TwitchSelector:
                         {"role": "system", "content": _SELECTION_SYSTEM_PROMPT},
                         {"role": "user", "content": user_message},
                     ],
-                    "temperature": 0.0,
+                    "temperature": 0.1,
                     "max_tokens": 30,
                 },
                 timeout=self._timeout,
