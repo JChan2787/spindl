@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpindL Approved Chat</title>
+    <meta name="robots" content="noindex">
+<style>
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    font-family: 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    background-color: #0000;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+* {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+#chat-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    padding: 0 12px;
+    box-sizing: border-box;
+}
+
+#message-list-wrapper {
+    width: 100%;
+    transition: transform 0.4s ease-out;
+}
+
+.message {
+    padding: 4px 10px;
+    margin-bottom: 4px;
+    border-radius: 6px;
+    background: rgba(18, 18, 24, 0.75);
+    color: #e4e6eb;
+    font-size: 15px;
+    line-height: 1.4;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.4s ease-out, transform 0.4s ease-out,
+                max-height 0.4s ease-in-out, margin-bottom 0.4s ease-in-out,
+                padding 0.4s ease-in-out, filter 0.3s ease-out;
+    overflow: hidden;
+    max-height: 200px;
+    box-sizing: border-box;
+    position: relative;
+    --scroll-opacity: 1;
+    filter: opacity(var(--scroll-opacity));
+    will-change: transform, opacity, filter;
+}
+
+.message.proximity-fading {
+    --scroll-opacity: 0;
+}
+
+.message.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.message.fading {
+    opacity: 0;
+    transition: opacity 1.5s ease-out;
+}
+
+.message.hidden {
+    opacity: 0;
+    transform: translateY(-20px);
+    max-height: 0px !important;
+    padding: 0px !important;
+    margin-bottom: 0px !important;
+}
+
+.reverse-mode .message { transform: translateY(-20px); }
+.reverse-mode .message.visible { transform: translateY(0); }
+.reverse-mode .message.hidden { transform: translateY(20px); }
+
+.username {
+    color: #a970ff;
+    font-weight: 700;
+    margin-right: 6px;
+}
+
+.msg-text {
+    color: #e4e6eb;
+    word-wrap: break-word;
+}
+
+#spacer {
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    border: none;
+    box-sizing: border-box;
+    background: transparent;
+    transition: none;
+}
+
+#connection-dot {
+    position: fixed;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ef4444;
+    transition: background 0.3s;
+    z-index: 100;
+}
+
+#connection-dot.connected {
+    background: #22c55e;
+}
+</style>
+</head>
+<body>
+<div id="connection-dot"></div>
+<div id="chat-container">
+    <div id="message-list-wrapper">
+        <div id="spacer" style="height: 2200px; width: 100%;"></div>
+    </div>
+</div>
+<script src="https://cdn.socket.io/4.8.3/socket.io.min.js"></script>
+<script>
+    var urlParams = new URLSearchParams(window.location.search);
+    var reversed = urlParams.has("reverse");
+
+    var chatContainer = document.getElementById("chat-container");
+    var messageListWrapper = document.getElementById("message-list-wrapper");
+    var topSpacer = document.getElementById("spacer");
+    var connectionDot = document.getElementById("connection-dot");
+    var initialSpacerHeight = topSpacer.style.height || "2200px";
+
+    var MAX_MESSAGES = urlParams.has("limit") ? parseInt(urlParams.get("limit")) : 20;
+    var showtime = urlParams.has("showtime") ? parseInt(urlParams.get("showtime")) : 30000;
+    var port = urlParams.get("port") || "8765";
+    var messageCounter = 0;
+    var messageTimestamps = new Map();
+    var MAX_SPACER_HEIGHT_BEFORE_RESET = 18000000;
+
+    var PROXIMITY_FADE_DISTANCE = (function() {
+        if (urlParams.has("fadezone")) {
+            var parsed = parseInt(urlParams.get("fadezone"), 10);
+            if (!isNaN(parsed) && parsed >= 0) return parsed;
+        }
+        return 120;
+    })();
+
+    if (reversed) {
+        topSpacer.style.display = "none";
+        chatContainer.style.bottom = "auto";
+        chatContainer.style.top = "0";
+        chatContainer.classList.add("reverse-mode");
+    }
+
+    // --- Scroll management (from sampleoverlay.html) ---
+
+    function adjustMessageWrapperScroll() {
+        if (reversed) return;
+        requestAnimationFrame(function() {
+            var wrapperScrollHeight = messageListWrapper.scrollHeight;
+            var containerClientHeight = chatContainer.clientHeight;
+            var translateY = 0;
+            if (wrapperScrollHeight > containerClientHeight) {
+                translateY = -(wrapperScrollHeight - containerClientHeight);
+            }
+            translateY = Math.min(0, translateY);
+            messageListWrapper.style.transform = "translateY(" + translateY + "px)";
+        });
+    }
+
+    function getOverlayMessages() {
+        return Array.from(messageListWrapper.children).filter(function(child) {
+            return child.id !== "spacer" && child.classList.contains("message");
+        });
+    }
+
+    function removeOverlayMessage(message) {
+        if (!message) return;
+        messageTimestamps.delete(message.id);
+        if (message.parentNode) message.parentNode.removeChild(message);
+    }
+
+    // --- Proximity fade ---
+
+    function updateProximityFade() {
+        var messages = getOverlayMessages();
+        if (messages.length === 0) {
+            requestAnimationFrame(updateProximityFade);
+            return;
+        }
+
+        var containerRect = chatContainer.getBoundingClientRect();
+
+        messages.forEach(function(message) {
+            if (!message.isConnected) return;
+            if (PROXIMITY_FADE_DISTANCE <= 0) {
+                message.style.removeProperty("--scroll-opacity");
+                message.classList.remove("proximity-fading");
+                delete message.dataset.proximityFadeStarted;
+                return;
+            }
+
+            var rect = message.getBoundingClientRect();
+            var distanceFromEdge = reversed
+                ? (containerRect.bottom - rect.bottom)
+                : (rect.top - containerRect.top);
+            var fadeStarted = message.dataset.proximityFadeStarted === "true";
+
+            if (distanceFromEdge <= PROXIMITY_FADE_DISTANCE) {
+                if (!fadeStarted) {
+                    message.dataset.proximityFadeStarted = "true";
+                    message.classList.add("proximity-fading");
+                    message.style.setProperty("--scroll-opacity", "0");
+                }
+                return;
+            }
+
+            if (!fadeStarted) {
+                message.classList.remove("proximity-fading");
+                message.style.removeProperty("--scroll-opacity");
+            }
+        });
+
+        requestAnimationFrame(updateProximityFade);
+    }
+
+    requestAnimationFrame(updateProximityFade);
+
+    // --- Message aging ---
+
+    setInterval(function() {
+        var now = Date.now();
+        var messages = getOverlayMessages();
+        messages.forEach(function(message) {
+            var timestamp = messageTimestamps.get(message.id);
+            if (timestamp && showtime > 0 && (now - timestamp) > showtime && !message.classList.contains("fading")) {
+                message.classList.add("fading");
+            }
+        });
+    }, 1000);
+
+    // --- Add message ---
+
+    function addMessage(username, text) {
+        messageCounter += 1;
+        var msgId = "msg-" + Date.now() + "-" + messageCounter;
+
+        var messageDiv = document.createElement("div");
+        messageDiv.classList.add("message");
+        messageDiv.id = msgId;
+        messageTimestamps.set(msgId, Date.now());
+
+        messageDiv.innerHTML =
+            '<span class="username">' + escapeHtml(username) + ':</span>' +
+            '<span class="msg-text">' + escapeHtml(text) + '</span>';
+
+        if (reversed) {
+            var firstMessage = messageListWrapper.querySelector(".message");
+            if (firstMessage) {
+                messageListWrapper.insertBefore(messageDiv, firstMessage);
+            } else {
+                messageListWrapper.appendChild(messageDiv);
+            }
+        } else {
+            messageListWrapper.appendChild(messageDiv);
+        }
+
+        void messageDiv.offsetWidth;
+        messageDiv.classList.add("visible");
+
+        var messages = getOverlayMessages();
+        if (messages.length > MAX_MESSAGES) {
+            var oldest = reversed ? messages[messages.length - 1] : messages[0];
+            if (oldest) {
+                if (!reversed) {
+                    var style = getComputedStyle(oldest);
+                    var marginBottom = parseFloat(style.marginBottom) || 0;
+                    var space = oldest.offsetHeight + marginBottom;
+                    var currentHeight = parseFloat(topSpacer.style.height) || 0;
+                    var newHeight = currentHeight + space;
+                    if (newHeight > MAX_SPACER_HEIGHT_BEFORE_RESET) newHeight = 0;
+                    topSpacer.style.height = newHeight + "px";
+                }
+                removeOverlayMessage(oldest);
+            }
+        }
+
+        adjustMessageWrapperScroll();
+    }
+
+    function escapeHtml(str) {
+        var div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    // --- Socket.IO connection ---
+
+    var socket = io("http://127.0.0.1:" + port, {
+        reconnection: true,
+        reconnectionDelay: 2000,
+        reconnectionDelayMax: 30000,
+        transports: ["websocket"],
+    });
+
+    socket.on("connect", function() {
+        console.log("[ApprovedChat] Connected to SpindL on port " + port);
+        connectionDot.classList.add("connected");
+    });
+
+    socket.on("disconnect", function(reason) {
+        console.log("[ApprovedChat] Disconnected:", reason);
+        connectionDot.classList.remove("connected");
+    });
+
+    socket.on("twitch_message_approved", function(data) {
+        if (data && data.username && data.message_text) {
+            addMessage(data.username, data.message_text);
+        }
+    });
+</script>
+</body>
+</html>

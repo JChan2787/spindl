@@ -1233,6 +1233,13 @@ class GUIServer:
             "delivered_sentences": delivered_sentences,
         })
 
+    async def emit_twitch_message_approved(self, username: str, message_text: str) -> None:
+        """Emit approved Twitch message for OBS chat overlay (NANO-131)."""
+        await self.sio.emit("twitch_message_approved", {
+            "username": username,
+            "message_text": message_text,
+        })
+
     async def emit_avatar_load_model(
         self,
         vrm_path: str,

@@ -28,6 +28,7 @@ from ..core.events import (
     PromptSnapshotEvent,
     StateChangedEvent,
     AvatarMoodEvent,
+    TwitchMessageApprovedEvent,
 )
 from ..history.snapshot_store import append_snapshot
 from ..llm import LLMPipeline
@@ -1362,6 +1363,25 @@ class OrchestratorCallbacks:
                             stimulus_source,
                             cycled_model,
                         )
+
+                # NANO-131: Emit approved message for OBS overlay
+                # (before chat-TTS so the message appears on screen as it's read aloud)
+                if (
+                    stimulus_source == "twitch"
+                    and self._event_bus is not None
+                    and stimulus_metadata
+                    and stimulus_metadata.get("messages")
+                ):
+                    _approved = stimulus_metadata["messages"][0]
+                    _sel_info = stimulus_metadata.get("selection", {})
+                    self._event_bus.emit(
+                        TwitchMessageApprovedEvent(
+                            username=_approved.get("username", ""),
+                            message_text=_approved.get("text", ""),
+                            candidate_count=_sel_info.get("candidates", 0),
+                            stale_dropped=_sel_info.get("stale_dropped", 0),
+                        )
+                    )
 
                 # NANO-130 Phase 2: Chat-TTS — read the selected Twitch
                 # message aloud before the LLM responds.

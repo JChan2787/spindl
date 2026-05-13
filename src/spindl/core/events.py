@@ -58,6 +58,9 @@ class EventType(Enum):
     LLM_TOKEN = auto()  # Token-level text from streaming LLM (for dashboard display)
     BARGE_IN_TRUNCATED = auto()  # Response truncated to delivered sentences (Phase 2.5)
 
+    # Approved chat overlay (NANO-131)
+    TWITCH_MESSAGE_APPROVED = auto()  # Selection pass picked a Twitch message winner
+
     # Error events
     PIPELINE_ERROR = auto()  # Processing error occurred
 
@@ -432,3 +435,19 @@ class BargeInTruncatedEvent(Event):
     """The response text truncated to only delivered sentences."""
     delivered_sentences: int = 0
     """Number of sentences that were actually delivered before barge-in."""
+
+
+@dataclass
+class TwitchMessageApprovedEvent(Event):
+    """
+    Fired when a Twitch message wins the selection pass (NANO-131).
+
+    The approved-chat OBS overlay uses this to display only
+    curated messages to the stream audience.
+    """
+
+    event_type: EventType = field(default=EventType.TWITCH_MESSAGE_APPROVED, init=False)
+    username: str = ""
+    message_text: str = ""
+    candidate_count: int = 0
+    stale_dropped: int = 0
