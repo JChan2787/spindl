@@ -1027,8 +1027,17 @@ export interface AvatarDataEventExtended extends AvatarDataEvent {
 }
 
 // NANO-034 Phase 5: Codex Management Events
+export interface CodexVolume {
+  id: string;
+  name: string;
+  enabled: boolean;
+  insertion_order: number;
+  description?: string;
+}
+
 export interface GlobalCodexEvent {
   entries: CharacterBookEntry[];
+  volumes: CodexVolume[];
   name: string;
   error?: string;
 }
@@ -1109,10 +1118,12 @@ export interface CharacterBookEntry {
   sticky?: number;
   cooldown?: number;
   delay?: number;
+  volume_id?: string | null;
 }
 
 export interface CharacterBook {
   entries: CharacterBookEntry[];
+  volumes?: CodexVolume[];
   name?: string;
   description?: string;
   scan_depth?: number;

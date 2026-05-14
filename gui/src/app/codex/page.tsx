@@ -40,7 +40,7 @@ export default function CodexPage() {
       setLoadingGlobal(true);
       try {
         const data = await fetchGlobalCodex();
-        setGlobalCodex(data.entries, data.name);
+        setGlobalCodex(data.entries, data.name, data.volumes);
       } catch (error) {
         console.error("Failed to fetch global codex:", error);
         setActionError(error instanceof Error ? error.message : "Failed to fetch global codex");
@@ -63,7 +63,7 @@ export default function CodexPage() {
     setLoadingGlobal(true);
     try {
       const data = await fetchGlobalCodex();
-      setGlobalCodex(data.entries, data.name);
+      setGlobalCodex(data.entries, data.name, data.volumes);
     } catch (error) {
       console.error("Failed to refresh global codex:", error);
       setActionError(error instanceof Error ? error.message : "Failed to refresh global codex");

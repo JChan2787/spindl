@@ -5,6 +5,7 @@ import * as path from "path";
 import type {
   CharacterBook,
   CharacterBookEntry,
+  CodexVolume,
   GlobalCodexEvent,
 } from "@/types/events";
 import { getCharactersDir } from "@/lib/characters-dir";
@@ -20,10 +21,11 @@ export async function GET() {
     const GLOBAL_DIR = path.join(getCharactersDir(), "_global");
     const codexPath = path.join(GLOBAL_DIR, CODEX_FILENAME);
 
-    // If no global codex exists, return empty
+    // If no global codex exists, return empty with default volume
     if (!fs.existsSync(codexPath)) {
       return NextResponse.json<GlobalCodexEvent>({
         entries: [],
+        volumes: [{ id: "vol_default", name: "Default", enabled: true, insertion_order: 0 }],
         name: "Global Codex",
       });
     }
@@ -37,8 +39,15 @@ export async function GET() {
       id: entry.id ?? index,
     }));
 
+    // Ensure volumes exist with at least the default
+    let volumes: CodexVolume[] = book.volumes || [];
+    if (!volumes.some((v) => v.id === "vol_default")) {
+      volumes = [{ id: "vol_default", name: "Default", enabled: true, insertion_order: 0 }, ...volumes];
+    }
+
     return NextResponse.json<GlobalCodexEvent>({
       entries,
+      volumes,
       name: book.name || "Global Codex",
     });
   } catch (error) {
@@ -56,6 +65,7 @@ export async function GET() {
 
 interface SaveGlobalCodexRequest {
   entries: CharacterBookEntry[];
+  volumes?: CodexVolume[];
   name?: string;
 }
 
@@ -63,7 +73,7 @@ export async function PUT(request: Request) {
   try {
     const GLOBAL_DIR = path.join(getCharactersDir(), "_global");
     const body: SaveGlobalCodexRequest = await request.json();
-    const { entries, name } = body;
+    const { entries, volumes, name } = body;
 
     if (!Array.isArray(entries)) {
       return NextResponse.json(
@@ -91,11 +101,18 @@ export async function PUT(request: Request) {
       id: entry.id ?? nextId++,
     }));
 
+    // Ensure default volume exists in the volumes array
+    const savedVolumes = volumes || [];
+    if (!savedVolumes.some((v) => v.id === "vol_default")) {
+      savedVolumes.unshift({ id: "vol_default", name: "Default", enabled: true, insertion_order: 0 });
+    }
+
     // Build the CharacterBook structure
     const book: CharacterBook = {
       name: name || "Global Codex",
       description: "Entries active across all characters",
       entries: entriesWithIds,
+      volumes: savedVolumes,
       extensions: {},
     };
 
@@ -105,6 +122,7 @@ export async function PUT(request: Request) {
 
     return NextResponse.json<GlobalCodexEvent>({
       entries: entriesWithIds,
+      volumes: savedVolumes,
       name: book.name || "Global Codex",
     });
   } catch (error) {
@@ -153,6 +171,7 @@ export async function POST(request: Request) {
         name: "Global Codex",
         description: "Entries active across all characters",
         entries: [],
+        volumes: [{ id: "vol_default", name: "Default", enabled: true, insertion_order: 0 }],
         extensions: {},
       };
     }

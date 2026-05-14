@@ -1,11 +1,14 @@
 import { create } from "zustand";
-import type { CharacterBookEntry, GlobalCodexEvent, CharacterCodexEvent } from "@/types/events";
+import type { CharacterBookEntry, CodexVolume, GlobalCodexEvent, CharacterCodexEvent } from "@/types/events";
 
 interface CodexStoreState {
   // Global codex
   globalEntries: CharacterBookEntry[];
   globalCodexName: string;
   isLoadingGlobal: boolean;
+
+  // Volumes (NANO-128)
+  volumes: CodexVolume[];
 
   // Character codex (for editing within character editor)
   characterEntries: CharacterBookEntry[];
@@ -27,7 +30,8 @@ interface CodexStoreState {
   };
 
   // Actions
-  setGlobalCodex: (entries: CharacterBookEntry[], name: string) => void;
+  setGlobalCodex: (entries: CharacterBookEntry[], name: string, volumes?: CodexVolume[]) => void;
+  setVolumes: (volumes: CodexVolume[]) => void;
   setLoadingGlobal: (loading: boolean) => void;
   setCharacterCodex: (characterId: string, entries: CharacterBookEntry[]) => void;
   setLoadingCharacter: (loading: boolean) => void;
@@ -83,6 +87,7 @@ export const useCodexStore = create<CodexStoreState>((set) => ({
   globalEntries: [],
   globalCodexName: "Global Codex",
   isLoadingGlobal: false,
+  volumes: [],
 
   characterEntries: [],
   characterCodexId: null,
@@ -100,8 +105,15 @@ export const useCodexStore = create<CodexStoreState>((set) => ({
     error: null,
   },
 
-  setGlobalCodex: (entries, name) =>
-    set({ globalEntries: entries, globalCodexName: name, isLoadingGlobal: false }),
+  setGlobalCodex: (entries, name, volumes) =>
+    set({
+      globalEntries: entries,
+      globalCodexName: name,
+      isLoadingGlobal: false,
+      ...(volumes ? { volumes } : {}),
+    }),
+
+  setVolumes: (volumes) => set({ volumes }),
 
   setLoadingGlobal: (isLoadingGlobal) => set({ isLoadingGlobal }),
 
@@ -326,6 +338,64 @@ export async function deleteCodexEntryApi(
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.error || "Failed to delete codex entry");
+  }
+  return response.json();
+}
+
+// ============================================
+// Volume REST API Functions (NANO-128)
+// ============================================
+
+export async function fetchVolumes(): Promise<{ volumes: CodexVolume[] }> {
+  const response = await fetch("/api/codex/global/volumes");
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch volumes");
+  }
+  return response.json();
+}
+
+export async function createVolumeApi(
+  name: string,
+  description?: string
+): Promise<{ volume: CodexVolume; success: boolean }> {
+  const response = await fetch("/api/codex/global/volumes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, description }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to create volume");
+  }
+  return response.json();
+}
+
+export async function updateVolumeApi(
+  volumeId: string,
+  updates: Partial<Omit<CodexVolume, "id">>
+): Promise<{ volume: CodexVolume; success: boolean }> {
+  const response = await fetch(`/api/codex/global/volumes/${volumeId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to update volume");
+  }
+  return response.json();
+}
+
+export async function deleteVolumeApi(
+  volumeId: string
+): Promise<{ success: boolean; volume_id: string }> {
+  const response = await fetch(`/api/codex/global/volumes/${volumeId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to delete volume");
   }
   return response.json();
 }

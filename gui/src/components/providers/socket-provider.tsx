@@ -842,7 +842,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     // Codex events (NANO-034 Phase 5)
     socket.on("global_codex", (event) => {
-      setGlobalCodex(event.entries, event.name);
+      setGlobalCodex(event.entries, event.name, event.volumes);
     });
 
     socket.on("character_codex", (event) => {
