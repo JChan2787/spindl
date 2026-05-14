@@ -33,6 +33,7 @@ let currentClipName: string | null = null;
 let curiousHoldActive = false;
 let curiousHoldTimer: ReturnType<typeof setTimeout> | null = null;
 let curiousHoldDuration = 8.0; // seconds — updated from backend config
+let angryHoldDuration = 8.0; // seconds — updated from backend config
 
 // NANO-099: Base animations fallback (global defaults from Settings)
 export interface BaseAnimationsConfig {
@@ -97,6 +98,11 @@ export function isCuriousHoldActive(): boolean {
 /** Set the curious hold duration (seconds). Called from config updates. */
 export function setCuriousHoldDuration(seconds: number): void {
   curiousHoldDuration = seconds;
+}
+
+/** Set the angry hold duration (seconds). Called from config updates. */
+export function setAngryHoldDuration(seconds: number): void {
+  angryHoldDuration = seconds;
 }
 
 /** Cancel any active curious hold and release the body. */
@@ -275,8 +281,9 @@ export async function loadAnimationsWithFallback(
   }
 }
 
-// Moods that use the curious/thinking body animation slot
-const CURIOUS_MOODS = new Set(['curious', 'surprised']);
+// Moods that clamp-and-hold: play once, freeze on last frame, hold for duration
+const CLAMP_HOLD_MOODS = new Set(['curious', 'surprised', 'annoyed']);
+const ANGRY_MOODS = new Set(['annoyed']);
 
 /**
  * Emotion-driven animation crossfade (NANO-098 Session 3).
@@ -285,9 +292,9 @@ const CURIOUS_MOODS = new Set(['curious', 'surprised']);
  * animation config, crossfade to the emotion clip. Otherwise, crossfade
  * back to the default idle clip. Skips if the target clip is already playing.
  *
- * Curious/Thinking clips play once (LoopOnce + clampWhenFinished) and hold
- * the final pose for `curiousHoldDuration` seconds. During the hold, other
- * emotion body animations are blocked — only the face reacts.
+ * Curious/Thinking and Angry clips play once (LoopOnce + clampWhenFinished)
+ * and hold the final pose for `curiousHoldDuration` seconds. During the
+ * hold, other emotion body animations are blocked — only the face reacts.
  *
  * No-op when animationConfig is null (context menu behavior preserved).
  */
@@ -298,15 +305,15 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
   if (curiousHoldActive) return;
 
   const emotions = animationConfig?.emotions;
-  const isCuriousMood = mood !== null && CURIOUS_MOODS.has(mood);
+  const isClampHoldMood = mood !== null && CLAMP_HOLD_MOODS.has(mood);
 
   // Check if current mood has a per-character animation above threshold
   if (mood && emotions && mood in emotions) {
     const { threshold, clip } = emotions[mood];
     if (confidence >= threshold && loadedClips.has(clip)) {
       if (currentClipName === clip) return;
-      playClip(clip, 0.3, isCuriousMood);
-      if (isCuriousMood) startCuriousHold();
+      playClip(clip, 0.3, isClampHoldMood);
+      if (isClampHoldMood) startClampHold(mood);
       return;
     }
   }
@@ -317,8 +324,8 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
     const baseClip = baseAnimations[slot];
     if (baseClip && loadedClips.has(baseClip)) {
       if (currentClipName === baseClip) return;
-      playClip(baseClip, 0.3, isCuriousMood);
-      if (isCuriousMood) startCuriousHold();
+      playClip(baseClip, 0.3, isClampHoldMood);
+      if (isClampHoldMood) startClampHold(mood);
       return;
     }
   }
@@ -332,21 +339,22 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
 }
 
 /**
- * Start the curious hold timer. The body stays clamped on the last frame
- * of the Thinking clip. When the timer expires, crossfade back to idle.
+ * Start the clamp hold timer. The body stays clamped on the last frame
+ * of the emotion clip. When the timer expires, crossfade back to idle.
+ * Uses angry_hold_duration for annoyed mood, curious_hold_duration for others.
  */
-function startCuriousHold(): void {
+function startClampHold(mood: string): void {
   cancelCuriousHold();
   curiousHoldActive = true;
+  const duration = ANGRY_MOODS.has(mood) ? angryHoldDuration : curiousHoldDuration;
   curiousHoldTimer = setTimeout(() => {
     curiousHoldActive = false;
     curiousHoldTimer = null;
-    // Release: crossfade back to default idle
     const defaultClip = animationConfig?.default ?? baseAnimations.idle;
     if (defaultClip && loadedClips.has(defaultClip)) {
       playClip(defaultClip);
     } else {
       stopClip();
     }
-  }, curiousHoldDuration * 1000);
+  }, duration * 1000);
 }

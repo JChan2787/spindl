@@ -6,7 +6,7 @@ import { setMood, updateExpressions, getAvailableMoods, setExpressionComposites 
 import { updateIdle, setMousePosition, triggerBlink, resetIdle } from './idle';
 import { updateLipSyncAmplitude, resetLipSync } from './lipsync';
 import { updateBody, triggerKeystrokeReaction } from './body';
-import { initMixer, disposeMixer, updateMixer, loadAnimationsFromDir, loadAnimationsWithFallback, playClip, stopClip, getLoadedClipNames, setAnimationConfig, getAnimationConfig, updateEmotionAnimation, setBaseAnimations, setCuriousHoldDuration } from './mixer';
+import { initMixer, disposeMixer, updateMixer, loadAnimationsFromDir, loadAnimationsWithFallback, playClip, stopClip, getLoadedClipNames, setAnimationConfig, getAnimationConfig, updateEmotionAnimation, setBaseAnimations, setCuriousHoldDuration, setAngryHoldDuration } from './mixer';
 import { initWind, updateWind } from './wind';
 import { createSpring, springDamped, SpringState } from './spring';
 import { applyBackground, loadBackgroundConfig, saveBackgroundConfig, BACKGROUND_PRESETS, BackgroundConfig } from './background';
@@ -650,7 +650,7 @@ let dutchTiltEnabled = localStorage.getItem('spindl-avatar-dutch') !== '0';
   await setupMixerForAvatar();
   // Re-apply force-opaque if transparent mode was restored before avatar loaded
   if (ctx.transparent) setForceOpaqueMaterials(true);
-  connectStatus(WS_URL, state, onStatusMessage, (delay) => { expressionFadeDelay = delay; }, (dur) => { setCuriousHoldDuration(dur); });
+  connectStatus(WS_URL, state, onStatusMessage, (delay) => { expressionFadeDelay = delay; }, (dur) => { setCuriousHoldDuration(dur); }, (dur) => { setAngryHoldDuration(dur); });
 })();
 
 function animate(): void {

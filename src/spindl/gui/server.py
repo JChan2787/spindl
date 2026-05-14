@@ -1096,6 +1096,7 @@ class GUIServer:
                     "emotion_confidence_threshold": config.avatar_config.emotion_confidence_threshold,
                     "expression_fade_delay": config.avatar_config.expression_fade_delay,
                     "curious_hold_duration": config.avatar_config.curious_hold_duration,
+                    "angry_hold_duration": config.avatar_config.angry_hold_duration,
                     "subtitles_enabled": config.avatar_config.subtitles_enabled,
                     "subtitle_fade_delay": config.avatar_config.subtitle_fade_delay,
                     "avatar_always_on_top": config.avatar_config.avatar_always_on_top,

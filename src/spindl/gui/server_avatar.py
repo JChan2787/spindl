@@ -416,6 +416,7 @@ def register_avatar_handlers(server: "GUIServer") -> None:
             emotion_confidence_threshold = data.get("emotion_confidence_threshold")
             expression_fade_delay = data.get("expression_fade_delay")
             curious_hold_duration = data.get("curious_hold_duration")
+            angry_hold_duration = data.get("angry_hold_duration")
             subtitles_enabled = data.get("subtitles_enabled")
             subtitle_fade_delay = data.get("subtitle_fade_delay")
             avatar_always_on_top = data.get("avatar_always_on_top")
@@ -454,6 +455,14 @@ def register_avatar_handlers(server: "GUIServer") -> None:
                     dur = float(curious_hold_duration)
                     if 0.0 <= dur <= 30.0:
                         config.avatar_config.curious_hold_duration = dur
+                        updated = True
+                except (ValueError, TypeError):
+                    pass
+            if angry_hold_duration is not None:
+                try:
+                    dur = float(angry_hold_duration)
+                    if 0.0 <= dur <= 30.0:
+                        config.avatar_config.angry_hold_duration = dur
                         updated = True
                 except (ValueError, TypeError):
                     pass
@@ -512,6 +521,7 @@ def register_avatar_handlers(server: "GUIServer") -> None:
                         "emotion_confidence_threshold": cfg.emotion_confidence_threshold,
                         "expression_fade_delay": cfg.expression_fade_delay,
                         "curious_hold_duration": cfg.curious_hold_duration,
+                        "angry_hold_duration": cfg.angry_hold_duration,
                         "subtitles_enabled": cfg.subtitles_enabled,
                         "subtitle_fade_delay": cfg.subtitle_fade_delay,
                         "avatar_always_on_top": cfg.avatar_always_on_top,

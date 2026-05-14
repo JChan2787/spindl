@@ -214,6 +214,7 @@ export interface AvatarRuntimeConfig {
   emotion_confidence_threshold: number;
   expression_fade_delay: number;
   curious_hold_duration: number;
+  angry_hold_duration: number;
   subtitles_enabled: boolean; // NANO-100: subtitle overlay window
   subtitle_fade_delay: number; // NANO-100: seconds to hold subtitle after TTS
   stream_deck_enabled: boolean; // NANO-110: stream deck overlay window
@@ -446,6 +447,7 @@ const DEFAULT_AVATAR: AvatarRuntimeConfig = {
   emotion_confidence_threshold: 0.3,
   expression_fade_delay: 1.0,
   curious_hold_duration: 8.0,
+  angry_hold_duration: 8.0,
   subtitles_enabled: false,
   subtitle_fade_delay: 1.5,
   stream_deck_enabled: false,

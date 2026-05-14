@@ -879,6 +879,7 @@ class AvatarConfig(BaseModel):
     emotion_confidence_threshold: float = 0.3
     expression_fade_delay: float = 1.0  # Seconds after TTS ends before face+body expressions fade out
     curious_hold_duration: float = 8.0  # Seconds the Thinking/Curious body pose holds before releasing
+    angry_hold_duration: float = 8.0  # Seconds the Angry body pose holds before releasing
     show_emotion_in_chat: bool = True
     subtitles_enabled: bool = False  # NANO-100: Show subtitle overlay window in avatar app
     subtitle_fade_delay: float = 1.5  # NANO-100: Seconds to hold subtitle text after TTS ends
@@ -913,6 +914,9 @@ class AvatarConfig(BaseModel):
             ),
             curious_hold_duration=data.get(
                 "curious_hold_duration", defaults.curious_hold_duration
+            ),
+            angry_hold_duration=data.get(
+                "angry_hold_duration", defaults.angry_hold_duration
             ),
             show_emotion_in_chat=data.get(
                 "show_emotion_in_chat", defaults.show_emotion_in_chat
@@ -1527,6 +1531,7 @@ class OrchestratorConfig(BaseModel):
         av["emotion_confidence_threshold"] = self.avatar_config.emotion_confidence_threshold
         av["expression_fade_delay"] = self.avatar_config.expression_fade_delay
         av["curious_hold_duration"] = self.avatar_config.curious_hold_duration
+        av["angry_hold_duration"] = self.avatar_config.angry_hold_duration
         av["show_emotion_in_chat"] = self.avatar_config.show_emotion_in_chat
         av["subtitles_enabled"] = self.avatar_config.subtitles_enabled
         av["subtitle_fade_delay"] = self.avatar_config.subtitle_fade_delay
