@@ -29,6 +29,11 @@ let animationConfig: AnimationConfig | null = null;
 // Track which clip name is currently playing for dedup
 let currentClipName: string | null = null;
 
+// Curious/Thinking hold state — body pose locks for a duration, face stays reactive
+let curiousHoldActive = false;
+let curiousHoldTimer: ReturnType<typeof setTimeout> | null = null;
+let curiousHoldDuration = 8.0; // seconds — updated from backend config
+
 // NANO-099: Base animations fallback (global defaults from Settings)
 export interface BaseAnimationsConfig {
   idle: string | null;
@@ -69,6 +74,7 @@ export function disposeMixer(): void {
   loadedClips.clear();
   clipPlaying = false;
   currentClipName = null;
+  cancelCuriousHold();
   // animationConfig is NOT cleared here — it's character-level state
   // set externally via setAnimationConfig(), not owned by the mixer.
 }
@@ -81,6 +87,25 @@ export function updateMixer(delta: number): void {
 /** True when a keyframed animation clip is driving the skeleton. */
 export function isClipPlaying(): boolean {
   return clipPlaying;
+}
+
+/** True when the Thinking/Curious body pose is locked in its hold window. */
+export function isCuriousHoldActive(): boolean {
+  return curiousHoldActive;
+}
+
+/** Set the curious hold duration (seconds). Called from config updates. */
+export function setCuriousHoldDuration(seconds: number): void {
+  curiousHoldDuration = seconds;
+}
+
+/** Cancel any active curious hold and release the body. */
+export function cancelCuriousHold(): void {
+  if (curiousHoldTimer) {
+    clearTimeout(curiousHoldTimer);
+    curiousHoldTimer = null;
+  }
+  curiousHoldActive = false;
 }
 
 /**
@@ -111,14 +136,23 @@ export async function loadFBXClip(name: string, filePath: string): Promise<void>
 /**
  * Crossfade to a named clip. If already playing a different clip,
  * crossfades from the current action.
+ *
+ * When `clampOnce` is true, the clip plays once and freezes on the last
+ * frame instead of looping. Used for Thinking/Curious body poses.
  */
-export function playClip(name: string, crossfadeDuration = 0.3): void {
+export function playClip(name: string, crossfadeDuration = 0.3, clampOnce = false): void {
   if (!mixer) return;
   const clip = loadedClips.get(name);
   if (!clip) return;
 
   const newAction = mixer.clipAction(clip);
-  newAction.setLoop(THREE.LoopRepeat, Infinity);
+  if (clampOnce) {
+    newAction.setLoop(THREE.LoopOnce, 1);
+    newAction.clampWhenFinished = true;
+  } else {
+    newAction.setLoop(THREE.LoopRepeat, Infinity);
+    newAction.clampWhenFinished = false;
+  }
 
   if (currentAction && currentAction !== newAction) {
     newAction.reset();
@@ -241,6 +275,9 @@ export async function loadAnimationsWithFallback(
   }
 }
 
+// Moods that use the curious/thinking body animation slot
+const CURIOUS_MOODS = new Set(['curious', 'surprised']);
+
 /**
  * Emotion-driven animation crossfade (NANO-098 Session 3).
  *
@@ -248,19 +285,28 @@ export async function loadAnimationsWithFallback(
  * animation config, crossfade to the emotion clip. Otherwise, crossfade
  * back to the default idle clip. Skips if the target clip is already playing.
  *
+ * Curious/Thinking clips play once (LoopOnce + clampWhenFinished) and hold
+ * the final pose for `curiousHoldDuration` seconds. During the hold, other
+ * emotion body animations are blocked — only the face reacts.
+ *
  * No-op when animationConfig is null (context menu behavior preserved).
  */
 export function updateEmotionAnimation(mood: string | null, confidence: number): void {
   if (!mixer) return;
-  // Allow base animations fallback even without per-character animationConfig
+
+  // During a curious hold, block all body animation changes
+  if (curiousHoldActive) return;
+
   const emotions = animationConfig?.emotions;
+  const isCuriousMood = mood !== null && CURIOUS_MOODS.has(mood);
 
   // Check if current mood has a per-character animation above threshold
   if (mood && emotions && mood in emotions) {
     const { threshold, clip } = emotions[mood];
     if (confidence >= threshold && loadedClips.has(clip)) {
-      if (currentClipName === clip) return; // already playing
-      playClip(clip);
+      if (currentClipName === clip) return;
+      playClip(clip, 0.3, isCuriousMood);
+      if (isCuriousMood) startCuriousHold();
       return;
     }
   }
@@ -271,7 +317,8 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
     const baseClip = baseAnimations[slot];
     if (baseClip && loadedClips.has(baseClip)) {
       if (currentClipName === baseClip) return;
-      playClip(baseClip);
+      playClip(baseClip, 0.3, isCuriousMood);
+      if (isCuriousMood) startCuriousHold();
       return;
     }
   }
@@ -279,7 +326,27 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
   // Below threshold / no config / no base animation — return to default idle
   const defaultClip = animationConfig?.default ?? baseAnimations.idle;
   if (defaultClip && loadedClips.has(defaultClip)) {
-    if (currentClipName === defaultClip) return; // already playing
+    if (currentClipName === defaultClip) return;
     playClip(defaultClip);
   }
+}
+
+/**
+ * Start the curious hold timer. The body stays clamped on the last frame
+ * of the Thinking clip. When the timer expires, crossfade back to idle.
+ */
+function startCuriousHold(): void {
+  cancelCuriousHold();
+  curiousHoldActive = true;
+  curiousHoldTimer = setTimeout(() => {
+    curiousHoldActive = false;
+    curiousHoldTimer = null;
+    // Release: crossfade back to default idle
+    const defaultClip = animationConfig?.default ?? baseAnimations.idle;
+    if (defaultClip && loadedClips.has(defaultClip)) {
+      playClip(defaultClip);
+    } else {
+      stopClip();
+    }
+  }, curiousHoldDuration * 1000);
 }

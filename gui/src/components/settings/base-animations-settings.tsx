@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Music, Upload, X } from "lucide-react";
+import { Music, Upload, X, Clock } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { getSocket } from "@/lib/socket";
@@ -9,6 +9,7 @@ import {
   fetchBaseAnimations,
   uploadBaseAnimation,
   clearBaseAnimation,
+  useSettingsStore,
 } from "@/lib/stores";
 import type { BaseAnimationsConfig } from "@/lib/stores";
 
@@ -21,6 +22,16 @@ export function BaseAnimationsSettings() {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeSlotRef = useRef<Slot | null>(null);
+  const avatarConfig = useSettingsStore((s) => s.avatarConfig);
+
+  const handleCuriousHoldChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const socket = getSocket();
+      const value = parseFloat(e.target.value);
+      socket.emit("set_avatar_config", { curious_hold_duration: value });
+    },
+    [],
+  );
 
   // Load config on mount
   useEffect(() => {
@@ -136,6 +147,36 @@ export function BaseAnimationsSettings() {
             </div>
           );
         })}
+      </div>
+
+      {/* Curious/Thinking hold duration slider */}
+      <div className="space-y-2 mt-4 pt-4 border-t border-border">
+        <div className="flex items-center justify-between">
+          <Label className="flex items-center gap-2 text-sm">
+            <Clock className="h-3.5 w-3.5" />
+            Thinking Hold Duration
+          </Label>
+          <span className="text-sm font-mono text-muted-foreground">
+            {avatarConfig.curious_hold_duration.toFixed(0)}s
+          </span>
+        </div>
+        <input
+          type="range"
+          min={1}
+          max={30}
+          step={1}
+          value={avatarConfig.curious_hold_duration}
+          onChange={handleCuriousHoldChange}
+          className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+        />
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>1s</span>
+          <span>30s</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          How long the Thinking body pose holds after the clip finishes, regardless of new emotions.
+          Face expressions still react during the hold.
+        </p>
       </div>
 
       {/* Hidden file input shared across all slots */}

@@ -1,5 +1,5 @@
 import { getVRM } from './avatar';
-import { isClipPlaying } from './mixer';
+import { isClipPlaying, isCuriousHoldActive } from './mixer';
 import { createSpring, springDamped, springUnderdamped, SpringState } from './spring';
 import { fbm } from './noise';
 import type { Mode, Mood } from './state';
@@ -206,6 +206,11 @@ export function triggerKeystrokeReaction(): void {
 export function updateBody(deltaMs: number, mode: Mode, mood: Mood, amplitude: number): void {
   const vrm = getVRM();
   if (!vrm?.humanoid) return;
+
+  // During a curious hold, the clamped Thinking clip owns the skeleton —
+  // don't layer procedural posture on top or it'll drift the pose.
+  if (isCuriousHoldActive()) return;
+
   const dt = deltaMs / 1000;
 
   keystrokeCooldown = Math.max(0, keystrokeCooldown - deltaMs);
