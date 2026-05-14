@@ -34,6 +34,11 @@ export {
   createCodexEntryApi,
   updateCodexEntryApi,
   deleteCodexEntryApi,
+  // Volume API functions (NANO-128)
+  fetchVolumes,
+  createVolumeApi,
+  updateVolumeApi,
+  deleteVolumeApi,
 } from "./codex-store";
 export { useMemoryStore } from "./memory-store";
 export { useBlockEditorStore } from "./block-editor-store";

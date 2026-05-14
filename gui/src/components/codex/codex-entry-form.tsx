@@ -29,13 +29,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Save, Trash2, X, Plus, Loader2, AlertCircle } from "lucide-react";
-import type { CharacterBookEntry } from "@/types/events";
+import type { CharacterBookEntry, CodexVolume } from "@/types/events";
 
 interface CodexEntryFormProps {
   entry: CharacterBookEntry;
   isNew: boolean;
   isSaving: boolean;
   error: string | null;
+  volumes?: CodexVolume[];
   onChange: (entry: CharacterBookEntry) => void;
   onSave: () => void;
   onDelete?: () => void;
@@ -47,6 +48,7 @@ export function CodexEntryForm({
   isNew,
   isSaving,
   error,
+  volumes,
   onChange,
   onSave,
   onDelete,
@@ -458,6 +460,33 @@ export function CodexEntryForm({
                   Where in the system prompt this entry&apos;s content appears.
                 </p>
               </div>
+
+              {/* Volume (NANO-128) */}
+              {volumes && volumes.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Volume</Label>
+                  <Select
+                    value={entry.volume_id || "vol_default"}
+                    onValueChange={(value) => updateField("volume_id", value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[...volumes]
+                        .sort((a, b) => a.insertion_order - b.insertion_order)
+                        .map((vol) => (
+                          <SelectItem key={vol.id} value={vol.id}>
+                            {vol.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Assign this entry to a volume for grouped management.
+                  </p>
+                </div>
+              )}
 
               {/* Priority */}
               <div className="space-y-2">
