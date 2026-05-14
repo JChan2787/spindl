@@ -360,8 +360,8 @@ class TestActivateEntries:
 
         assert len(results) == 2
         # Should be sorted by insertion_order
-        assert results[0].entry_id == 1  # coffee (100)
-        assert results[1].entry_id == 2  # tea (200)
+        assert results[0].entry_id == "1"  # coffee (100)
+        assert results[1].entry_id == "2"  # tea (200)
 
     def test_max_entries_limit(self):
         """Respect max_entries limit, keeping highest priority."""
@@ -383,9 +383,9 @@ class TestActivateEntries:
         assert len(results) == 2
         # Should keep highest priority (3 and 2), sorted by insertion_order
         entry_ids = [r.entry_id for r in results]
-        assert 2 in entry_ids  # priority 3
-        assert 3 in entry_ids  # priority 2
-        assert 1 not in entry_ids  # priority 1 (dropped)
+        assert "2" in entry_ids  # priority 3
+        assert "3" in entry_ids  # priority 2
+        assert "1" not in entry_ids  # priority 1 (dropped)
 
     def test_position_preserved(self):
         """Entry position is preserved in results."""
@@ -402,7 +402,7 @@ class TestActivateEntries:
         results = activate_entries("before and after", entries, state)
 
         assert len(results) == 2
-        before_result = next(r for r in results if r.entry_id == 1)
-        after_result = next(r for r in results if r.entry_id == 2)
+        before_result = next(r for r in results if r.entry_id == "1")
+        after_result = next(r for r in results if r.entry_id == "2")
         assert before_result.position == "before_char"
         assert after_result.position == "after_char"

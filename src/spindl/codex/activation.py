@@ -199,7 +199,7 @@ def check_secondary_keys(
 def can_activate_entry(
     entry: "CharacterBookEntry",
     state: CodexState,
-    entry_id: int,
+    entry_id: str,
 ) -> tuple[bool, str]:
     """
     Check if an entry can activate based on timed effects.
@@ -230,7 +230,7 @@ def can_activate_entry(
 def activate_entry(
     text: str,
     entry: "CharacterBookEntry",
-    entry_id: int,
+    entry_id: str,
     state: CodexState,
     match_whole_words: bool = False,
 ) -> ActivationResult:
@@ -370,8 +370,11 @@ def activate_entries(
     results: list[ActivationResult] = []
 
     for i, entry in enumerate(entries):
-        # Use entry.id if available, otherwise use list index
-        entry_id = entry.id if entry.id is not None else i
+        # Use runtime ID (set by CodexManager._merge_entries) if available,
+        # otherwise fall back to stringified entry.id or list index
+        entry_id: str = getattr(entry, "_runtime_id", None) or str(
+            entry.id if entry.id is not None else i
+        )
 
         result = activate_entry(text, entry, entry_id, state, match_whole_words)
 

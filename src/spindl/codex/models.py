@@ -28,7 +28,7 @@ class EntryState:
     This state persists across the conversation but resets on session restart.
     """
 
-    entry_id: int
+    entry_id: str
     last_activated_turn: int | None = None  # Turn index when last activated
     sticky_until_turn: int | None = None  # Entry remains active until this turn
     cooldown_until_turn: int | None = None  # Entry cannot activate until this turn
@@ -67,7 +67,7 @@ class EntryState:
 class ActivationResult:
     """Result of attempting to activate a codex entry."""
 
-    entry_id: int
+    entry_id: str
     entry_name: str | None
     activated: bool
     content: str
@@ -88,9 +88,9 @@ class CodexState:
     """
 
     current_turn: int = 0
-    entry_states: dict[int, EntryState] = field(default_factory=dict)
+    entry_states: dict[str, EntryState] = field(default_factory=dict)
 
-    def get_entry_state(self, entry_id: int) -> EntryState:
+    def get_entry_state(self, entry_id: str) -> EntryState:
         """Get or create state for an entry."""
         if entry_id not in self.entry_states:
             self.entry_states[entry_id] = EntryState(entry_id=entry_id)
@@ -105,7 +105,7 @@ class CodexState:
         self.current_turn = 0
         self.entry_states.clear()
 
-    def get_active_sticky_entries(self) -> list[int]:
+    def get_active_sticky_entries(self) -> list[str]:
         """Get IDs of entries currently active via sticky effect."""
         return [
             entry_id
@@ -113,7 +113,7 @@ class CodexState:
             if state.is_sticky_active(self.current_turn)
         ]
 
-    def get_entries_on_cooldown(self) -> list[int]:
+    def get_entries_on_cooldown(self) -> list[str]:
         """Get IDs of entries currently on cooldown."""
         return [
             entry_id
