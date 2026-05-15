@@ -24,6 +24,14 @@ export function BaseAnimationsSettings() {
   const activeSlotRef = useRef<Slot | null>(null);
   const avatarConfig = useSettingsStore((s) => s.avatarConfig);
 
+  const handleIdleClampOnceChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const socket = getSocket();
+      socket.emit("set_avatar_config", { idle_clamp_once: e.target.checked });
+    },
+    [],
+  );
+
   const handleCuriousHoldChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const socket = getSocket();
@@ -156,6 +164,23 @@ export function BaseAnimationsSettings() {
             </div>
           );
         })}
+      </div>
+
+      {/* Idle clamp-once toggle */}
+      <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border">
+        <input
+          type="checkbox"
+          id="idle-clamp-once"
+          checked={avatarConfig.idle_clamp_once}
+          onChange={handleIdleClampOnceChange}
+          className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+        />
+        <Label htmlFor="idle-clamp-once" className="text-sm cursor-pointer">
+          Idle: Play Once &amp; Hold
+        </Label>
+        <span className="text-xs text-muted-foreground ml-auto">
+          Play the idle clip once and freeze on the last frame instead of looping
+        </span>
       </div>
 
       {/* Curious/Thinking hold duration slider */}

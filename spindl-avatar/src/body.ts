@@ -1,5 +1,5 @@
 import { getVRM } from './avatar';
-import { isClipPlaying, isCuriousHoldActive } from './mixer';
+import { isClipPlaying, isCuriousHoldActive, isIdleClampHolding } from './mixer';
 import { createSpring, springDamped, springUnderdamped, SpringState } from './spring';
 import { fbm } from './noise';
 import type { Mode, Mood } from './state';
@@ -42,13 +42,7 @@ const MODE_POSTURES: Record<Mode, PostureTarget> = {
   idle: { ...ZERO_POSTURE },
   thinking: {
     ...ZERO_POSTURE,
-    headX: 0.1,
-    headZ: 0.12,
-    headY: 0.08,
-    chestX: -0.04,
-    upperArmRX: -0.3,
-    lowerArmRZ: 0.4,
-    shoulderR: 0.05,
+    headZ: 0.14,
   },
   speaking: {
     ...ZERO_POSTURE,
@@ -303,6 +297,8 @@ export function updateBody(deltaMs: number, mode: Mode, mood: Mood, amplitude: n
   }
 
   const clipActive = isClipPlaying();
+
+  if (isIdleClampHolding()) return;
 
   const chest = vrm.humanoid.getNormalizedBoneNode('chest');
   if (chest) {

@@ -105,6 +105,33 @@ export function setAngryHoldDuration(seconds: number): void {
   angryHoldDuration = seconds;
 }
 
+let idleClampOnce = localStorage.getItem('spindl-idle-clamp-once') === '1';
+let idleClampHolding = false;
+
+/** When true, idle clips play once and freeze on the last frame instead of looping. */
+export function setIdleClampOnce(value: boolean): void {
+  idleClampOnce = value;
+  localStorage.setItem('spindl-idle-clamp-once', value ? '1' : '0');
+}
+
+export function getIdleClampOnce(): boolean {
+  return idleClampOnce;
+}
+
+/** True when an idle clamp-once clip has finished playing and is frozen on the last frame. */
+export function isIdleClampHolding(): boolean {
+  return idleClampHolding;
+}
+
+/** Re-play the current idle/default clip with the current clamp mode. */
+export function replayIdle(): void {
+  const defaultClip = animationConfig?.default ?? baseAnimations.idle;
+  if (defaultClip && loadedClips.has(defaultClip)) {
+    currentClipName = null;
+    playClip(defaultClip, 0.3, idleClampOnce);
+  }
+}
+
 /** Cancel any active curious hold and release the body. */
 export function cancelCuriousHold(): void {
   if (curiousHoldTimer) {
@@ -172,6 +199,17 @@ export function playClip(name: string, crossfadeDuration = 0.3, clampOnce = fals
   currentAction = newAction;
   currentClipName = name;
   clipPlaying = true;
+  idleClampHolding = false;
+
+  if (clampOnce) {
+    const onFinished = (e: { action: THREE.AnimationAction }) => {
+      if (e.action === newAction) {
+        mixer?.removeEventListener('finished', onFinished);
+        idleClampHolding = true;
+      }
+    };
+    mixer.addEventListener('finished', onFinished);
+  }
 }
 
 /** Fade out the current action and return to procedural idle. */
@@ -334,7 +372,7 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
   const defaultClip = animationConfig?.default ?? baseAnimations.idle;
   if (defaultClip && loadedClips.has(defaultClip)) {
     if (currentClipName === defaultClip) return;
-    playClip(defaultClip);
+    playClip(defaultClip, 0.3, idleClampOnce);
   }
 }
 
@@ -352,7 +390,7 @@ function startClampHold(mood: string): void {
     curiousHoldTimer = null;
     const defaultClip = animationConfig?.default ?? baseAnimations.idle;
     if (defaultClip && loadedClips.has(defaultClip)) {
-      playClip(defaultClip);
+      playClip(defaultClip, 0.3, idleClampOnce);
     } else {
       stopClip();
     }

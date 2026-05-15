@@ -34,6 +34,7 @@ export function connectStatus(
   onFadeDelayUpdate?: (delay: number) => void,
   onCuriousHoldUpdate?: (duration: number) => void,
   onAngryHoldUpdate?: (duration: number) => void,
+  onIdleClampOnceUpdate?: (value: boolean) => void,
 ): void {
   const socket: Socket = io(url, {
     reconnection: true,
@@ -51,7 +52,7 @@ export function connectStatus(
   });
 
   // Initial config hydration — mirrors subtitle renderer pattern
-  socket.on('config_loaded', (data: { settings?: { avatar?: { avatar_always_on_top?: boolean; expression_fade_delay?: number; curious_hold_duration?: number; angry_hold_duration?: number } } }) => {
+  socket.on('config_loaded', (data: { settings?: { avatar?: { avatar_always_on_top?: boolean; expression_fade_delay?: number; curious_hold_duration?: number; angry_hold_duration?: number; idle_clamp_once?: boolean } } }) => {
     const avatarCfg = data.settings?.avatar;
     if (!avatarCfg) return;
     if (avatarCfg.avatar_always_on_top !== undefined) {
@@ -65,6 +66,9 @@ export function connectStatus(
     }
     if (avatarCfg.angry_hold_duration !== undefined && onAngryHoldUpdate) {
       onAngryHoldUpdate(avatarCfg.angry_hold_duration);
+    }
+    if (avatarCfg.idle_clamp_once !== undefined && onIdleClampOnceUpdate) {
+      onIdleClampOnceUpdate(avatarCfg.idle_clamp_once);
     }
   });
 
@@ -130,7 +134,7 @@ export function connectStatus(
   });
 
   // Avatar config updates (expression_fade_delay, curious_hold_duration, always_on_top, etc.)
-  socket.on('avatar_config_updated', (data: { expression_fade_delay?: number; curious_hold_duration?: number; angry_hold_duration?: number; avatar_always_on_top?: boolean }) => {
+  socket.on('avatar_config_updated', (data: { expression_fade_delay?: number; curious_hold_duration?: number; angry_hold_duration?: number; idle_clamp_once?: boolean; avatar_always_on_top?: boolean }) => {
     if (data.expression_fade_delay !== undefined && onFadeDelayUpdate) {
       onFadeDelayUpdate(data.expression_fade_delay);
     }
@@ -139,6 +143,9 @@ export function connectStatus(
     }
     if (data.angry_hold_duration !== undefined && onAngryHoldUpdate) {
       onAngryHoldUpdate(data.angry_hold_duration);
+    }
+    if (data.idle_clamp_once !== undefined && onIdleClampOnceUpdate) {
+      onIdleClampOnceUpdate(data.idle_clamp_once);
     }
     if (data.avatar_always_on_top !== undefined) {
       getCurrentWindow().setAlwaysOnTop(data.avatar_always_on_top);

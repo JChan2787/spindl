@@ -417,6 +417,7 @@ def register_avatar_handlers(server: "GUIServer") -> None:
             expression_fade_delay = data.get("expression_fade_delay")
             curious_hold_duration = data.get("curious_hold_duration")
             angry_hold_duration = data.get("angry_hold_duration")
+            idle_clamp_once = data.get("idle_clamp_once")
             subtitles_enabled = data.get("subtitles_enabled")
             subtitle_fade_delay = data.get("subtitle_fade_delay")
             avatar_always_on_top = data.get("avatar_always_on_top")
@@ -466,6 +467,9 @@ def register_avatar_handlers(server: "GUIServer") -> None:
                         updated = True
                 except (ValueError, TypeError):
                     pass
+            if idle_clamp_once is not None:
+                config.avatar_config.idle_clamp_once = bool(idle_clamp_once)
+                updated = True
             if subtitles_enabled is not None:
                 config.avatar_config.subtitles_enabled = bool(subtitles_enabled)
                 updated = True
@@ -522,6 +526,7 @@ def register_avatar_handlers(server: "GUIServer") -> None:
                         "expression_fade_delay": cfg.expression_fade_delay,
                         "curious_hold_duration": cfg.curious_hold_duration,
                         "angry_hold_duration": cfg.angry_hold_duration,
+                        "idle_clamp_once": cfg.idle_clamp_once,
                         "subtitles_enabled": cfg.subtitles_enabled,
                         "subtitle_fade_delay": cfg.subtitle_fade_delay,
                         "avatar_always_on_top": cfg.avatar_always_on_top,

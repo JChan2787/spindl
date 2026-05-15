@@ -6,7 +6,7 @@ import { setMood, updateExpressions, getAvailableMoods, setExpressionComposites 
 import { updateIdle, setMousePosition, triggerBlink, resetIdle } from './idle';
 import { updateLipSyncAmplitude, resetLipSync } from './lipsync';
 import { updateBody, triggerKeystrokeReaction } from './body';
-import { initMixer, disposeMixer, updateMixer, loadAnimationsFromDir, loadAnimationsWithFallback, playClip, stopClip, getLoadedClipNames, setAnimationConfig, getAnimationConfig, updateEmotionAnimation, setBaseAnimations, setCuriousHoldDuration, setAngryHoldDuration } from './mixer';
+import { initMixer, disposeMixer, updateMixer, loadAnimationsFromDir, loadAnimationsWithFallback, playClip, stopClip, getLoadedClipNames, setAnimationConfig, getAnimationConfig, updateEmotionAnimation, setBaseAnimations, setCuriousHoldDuration, setAngryHoldDuration, setIdleClampOnce, getIdleClampOnce } from './mixer';
 import { initWind, updateWind } from './wind';
 import { createSpring, springDamped, SpringState } from './spring';
 import { applyBackground, loadBackgroundConfig, saveBackgroundConfig, BACKGROUND_PRESETS, BackgroundConfig } from './background';
@@ -499,14 +499,14 @@ async function setupMixerForAvatar(characterAnimDir?: string): Promise<void> {
   const clips = getLoadedClipNames();
   if (config) {
     if (config.default && clips.includes(config.default)) {
-      playClip(config.default, 0);
+      playClip(config.default, 0, getIdleClampOnce());
     }
   } else if (clips.length > 0) {
     // No character config — check localStorage for previously selected animation
     const saved = localStorage.getItem('spindl-avatar-animation');
     if (saved) {
       const match = clips.find(c => c.toLowerCase() === saved.toLowerCase());
-      if (match) playClip(match, 0);
+      if (match) playClip(match, 0, getIdleClampOnce());
     }
   }
 }
@@ -650,7 +650,7 @@ let dutchTiltEnabled = localStorage.getItem('spindl-avatar-dutch') !== '0';
   await setupMixerForAvatar();
   // Re-apply force-opaque if transparent mode was restored before avatar loaded
   if (ctx.transparent) setForceOpaqueMaterials(true);
-  connectStatus(WS_URL, state, onStatusMessage, (delay) => { expressionFadeDelay = delay; }, (dur) => { setCuriousHoldDuration(dur); }, (dur) => { setAngryHoldDuration(dur); });
+  connectStatus(WS_URL, state, onStatusMessage, (delay) => { expressionFadeDelay = delay; }, (dur) => { setCuriousHoldDuration(dur); }, (dur) => { setAngryHoldDuration(dur); }, (val) => { setIdleClampOnce(val); });
 })();
 
 function animate(): void {
