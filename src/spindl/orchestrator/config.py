@@ -514,6 +514,9 @@ class StimuliConfig(BaseModel):
     twitch_audience_window: int = Field(default=25, ge=25, le=300)
     twitch_audience_char_cap: int = Field(default=150, ge=50, le=500)
 
+    # NANO-132: Twitch EventSub events
+    twitch_events_enabled: bool = False
+
     # NANO-130: Twitch selection pass + staleness filter
     twitch_max_message_age_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
     twitch_selection_mode: str = "llm"
@@ -660,6 +663,9 @@ class StimuliConfig(BaseModel):
                 else defaults.patience_prompts,
             ),
             twitch_enabled=twitch.get("enabled", defaults.twitch_enabled),
+            twitch_events_enabled=twitch.get("events", {}).get(
+                "enabled", defaults.twitch_events_enabled
+            ),
             twitch_channel=twitch.get("channel", defaults.twitch_channel),
             twitch_app_id=cls._resolve_env(twitch.get("app_id", defaults.twitch_app_id)),
             twitch_app_secret=cls._resolve_env(twitch.get("app_secret", defaults.twitch_app_secret)),
@@ -1399,6 +1405,10 @@ class OrchestratorConfig(BaseModel):
             stim["twitch"] = {}
         tw = stim["twitch"]
         tw["enabled"] = self.stimuli_config.twitch_enabled
+        # NANO-132: EventSub events
+        if "events" not in tw:
+            tw["events"] = {}
+        tw["events"]["enabled"] = self.stimuli_config.twitch_events_enabled
         tw["channel"] = self.stimuli_config.twitch_channel
         tw["app_id"] = self.stimuli_config.twitch_app_id
         tw["app_secret"] = self.stimuli_config.twitch_app_secret

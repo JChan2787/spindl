@@ -599,6 +599,7 @@ export interface SetStimuliConfigPayload {
   patience_prompts?: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled?: boolean;
+  twitch_events_enabled?: boolean;
   twitch_channel?: string;
   twitch_app_id?: string;
   twitch_app_secret?: string;

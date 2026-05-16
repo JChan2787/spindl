@@ -1,9 +1,14 @@
 """
-Twitch chat stimulus module.
+Twitch chat + EventSub stimulus module.
 
 Connects to a Twitch channel via IRC (twitchAPI library) and buffers
 incoming chat messages as stimuli. Priority 50 — fires above PATIENCE
 but below custom injection.
+
+NANO-132: EventSub WebSocket for platform events (follows, etc.).
+Runs alongside IRC chat in the same async event loop. Follow events
+use a 3-second accumulation window, bypass the selection pass, and
+fire at weight 5.0 with deterministic self-barge-in.
 
 Auth: OAuth2 App Flow via twitchAPI UserAuthenticator. First run opens
 a browser for authorization; library handles token refresh thereafter.
@@ -63,14 +68,45 @@ class TwitchMessage:
     sent_timestamp_ms: int = 0
 
 
+@dataclass
+class TwitchFollowEntry:
+    """A buffered follow event from EventSub."""
+
+    user_id: str
+    user_login: str
+    user_name: str
+    timestamp: float = 0.0
+
+
+_FOLLOW_ACCUMULATION_WINDOW = 3.0
+_FOLLOW_BUFFER_CAP = 10
+_FOLLOW_WEIGHT = 5.0
+
+
+def _format_follow_names(names: list[str]) -> str:
+    """Format a list of display names for the follow prompt."""
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    if len(names) == 3:
+        return f"{names[0]}, {names[1]}, and {names[2]}"
+    rest = len(names) - 3
+    return f"{names[0]}, {names[1]}, {names[2]}, and {rest} others"
+
+
 class TwitchModule(StimulusModule):
     """
-    Twitch chat stimulus source.
+    Twitch chat + EventSub stimulus source.
 
     Connects to a single Twitch channel, buffers incoming chat messages,
     and exposes them as stimuli for the StimuliEngine. Messages are
     filtered by length via _should_accept() — designed to be extensible
     for future spam detection, subscriber priority, keyword filtering, etc.
+
+    NANO-132: EventSub WebSocket for platform events (follows). Runs
+    alongside IRC chat. Follow events use a 3-second accumulation window
+    and fire at weight 5.0 with deterministic self-barge-in.
 
     Priority 50 — external integration tier.
     """
@@ -90,6 +126,9 @@ class TwitchModule(StimulusModule):
         selection_mode: str = "llm",
         selection_pass_model: str = "",
         selection_pass_api_key: str = "",
+        events_enabled: bool = False,
+        is_engine_idle: Optional["Callable[[], bool]"] = None,
+        trigger_barge_in: Optional["Callable[[], None]"] = None,
     ):
         self._channel = channel
         self._app_id = app_id
@@ -109,6 +148,17 @@ class TwitchModule(StimulusModule):
             api_key=selection_pass_api_key,
             model=selection_pass_model,
         )
+
+        # NANO-132: EventSub follow events
+        self._events_enabled = events_enabled
+        self._follow_buffer: list[TwitchFollowEntry] = []
+        self._first_follow_time: float = 0.0
+        self._has_follow_trigger = False
+        self._is_engine_idle = is_engine_idle
+        self._trigger_barge_in = trigger_barge_in
+        self._eventsub = None
+        self._events_connected = False
+        self._broadcaster_id: Optional[str] = None
 
         self._connected = False
         self._running = False
@@ -244,6 +294,22 @@ class TwitchModule(StimulusModule):
         return self._connected
 
     @property
+    def events_enabled(self) -> bool:
+        return self._events_enabled
+
+    @events_enabled.setter
+    def events_enabled(self, value: bool) -> None:
+        self._events_enabled = value
+        if not value:
+            self._follow_buffer.clear()
+            self._first_follow_time = 0.0
+            self._has_follow_trigger = False
+
+    @property
+    def events_connected(self) -> bool:
+        return self._events_connected
+
+    @property
     def recent_messages(self) -> list[str]:
         """Formatted message strings for dashboard display."""
         return [f"{m.username}: {m.text}" for m in self._buffer]
@@ -282,9 +348,15 @@ class TwitchModule(StimulusModule):
             self._thread.join(timeout=5.0)
 
         self._connected = False
+        self._events_connected = False
         self._buffer.clear()
+        self._follow_buffer.clear()
+        self._first_follow_time = 0.0
+        self._has_follow_trigger = False
         self._twitch = None
         self._chat = None
+        self._eventsub = None
+        self._broadcaster_id = None
         self._loop = None
         self._thread = None
         logger.info("Twitch module stopped")
@@ -300,11 +372,32 @@ class TwitchModule(StimulusModule):
             if m.sent_timestamp_ms <= 0 or (now_ms - m.sent_timestamp_ms) <= threshold_ms
         )
 
+    def _follow_buffer_ready(self) -> bool:
+        """Check if the follow accumulation window has closed and events are pending."""
+        if not self._follow_buffer:
+            return False
+        if self._has_follow_trigger:
+            return True
+        if len(self._follow_buffer) >= _FOLLOW_BUFFER_CAP:
+            return True
+        if self._first_follow_time > 0 and (time.monotonic() - self._first_follow_time) >= _FOLLOW_ACCUMULATION_WINDOW:
+            return True
+        return False
+
     def has_stimulus(self) -> bool:
-        return self._enabled and self._running and self._count_fresh_messages() > 0
+        return self._enabled and self._running and (
+            self._follow_buffer_ready() or self._count_fresh_messages() > 0
+        )
 
     def get_stimulus(self) -> Optional[StimulusData]:
-        if not self._enabled or not self._running or not self._buffer:
+        if not self._enabled or not self._running:
+            return None
+
+        # NANO-132: Follow events take priority over chat messages
+        if self._follow_buffer_ready():
+            return self._drain_follow_buffer()
+
+        if not self._buffer:
             return None
 
         # Drain buffer and apply staleness filter
@@ -399,7 +492,95 @@ class TwitchModule(StimulusModule):
         )
 
     def health_check(self) -> bool:
-        return self._connected
+        return self._connected or self._events_connected
+
+    # ── NANO-132: Follow event handling ─────────────────────────────
+
+    def _drain_follow_buffer(self) -> Optional[StimulusData]:
+        """Drain accumulated follow events into a single stimulus."""
+        if not self._follow_buffer:
+            return None
+
+        # Deduplicate by user_id, preserving arrival order
+        seen: set[str] = set()
+        unique: list[TwitchFollowEntry] = []
+        for entry in self._follow_buffer:
+            if entry.user_id not in seen:
+                seen.add(entry.user_id)
+                unique.append(entry)
+
+        self._follow_buffer.clear()
+        self._first_follow_time = 0.0
+        self._has_follow_trigger = False
+
+        if not unique:
+            return None
+
+        names = [e.user_name or e.user_login for e in unique]
+        formatted = _format_follow_names(names)
+        count = len(unique)
+
+        if count <= 3:
+            user_input = f"**{formatted} just followed the channel!** Welcome them by name."
+        else:
+            user_input = (
+                f"**{formatted} just followed the channel!** "
+                "Welcome them — name the first few, acknowledge the rest."
+            )
+
+        overlay_message = f"✦ {formatted} just followed!"
+
+        print(
+            f"[Twitch] Follow event: {count} follower(s) — {formatted}",
+            flush=True,
+        )
+
+        return StimulusData(
+            source=StimulusSource.TWITCH_EVENT,
+            user_input=user_input,
+            metadata={
+                "event_type": "follow",
+                "weight": _FOLLOW_WEIGHT,
+                "follower_count": count,
+                "followers": [
+                    {"user_id": e.user_id, "user_login": e.user_login, "user_name": e.user_name}
+                    for e in unique
+                ],
+                "overlay_message": overlay_message,
+                "usernames": names,
+            },
+        )
+
+    def _buffer_follow(self, user_id: str, user_login: str, user_name: str) -> None:
+        """Buffer a follow event and handle barge-in if engine is busy."""
+        if not self._events_enabled:
+            return
+
+        entry = TwitchFollowEntry(
+            user_id=user_id,
+            user_login=user_login,
+            user_name=user_name,
+            timestamp=time.monotonic(),
+        )
+
+        if not self._follow_buffer:
+            self._first_follow_time = time.monotonic()
+
+        self._follow_buffer.append(entry)
+
+        print(
+            f"[Twitch] Follow buffered: {user_name} ({user_id}), buffer={len(self._follow_buffer)}",
+            flush=True,
+        )
+
+        # Check if accumulation window has closed and handle barge-in
+        if self._follow_buffer_ready():
+            if self._is_engine_idle is None or self._is_engine_idle():
+                self._has_follow_trigger = True
+            elif self._trigger_barge_in is not None:
+                self._has_follow_trigger = True
+                self._trigger_barge_in()
+                print(f"[NANO-132] Follow barge-in triggered (followers={len(self._follow_buffer)})", flush=True)
 
     # ── Message filtering (extensibility point) ─────────────────────
 
@@ -432,7 +613,7 @@ class TwitchModule(StimulusModule):
             self._loop.close()
 
     async def _run_async(self) -> None:
-        """Async main — connect to Twitch and listen for chat."""
+        """Async main — connect to Twitch and listen for chat + EventSub."""
         try:
             from twitchAPI.twitch import Twitch
             from twitchAPI.oauth import UserAuthenticator
@@ -445,12 +626,38 @@ class TwitchModule(StimulusModule):
             return
 
         user_scope = [AuthScope.CHAT_READ]
+        if self._events_enabled:
+            user_scope.append(AuthScope.MODERATOR_READ_FOLLOWERS)
 
         try:
             twitch = await Twitch(self.resolved_app_id, self.resolved_app_secret)
-            auth = UserAuthenticator(twitch, user_scope)
+            auth = UserAuthenticator(twitch, user_scope, force_verify=self._events_enabled)
             token, refresh_token = await auth.authenticate()
+            if self._events_enabled:
+                print(
+                    "[Twitch] Auth completed with EventSub scopes "
+                    "(force_verify=True for moderator:read:followers)",
+                    flush=True,
+                )
             await twitch.set_user_authentication(token, user_scope, refresh_token)
+
+            # NANO-132: Resolve broadcaster user ID for EventSub subscriptions
+            if self._events_enabled:
+                try:
+                    users = [u async for u in twitch.get_users(logins=[self._channel])]
+                    if users:
+                        self._broadcaster_id = users[0].id
+                        print(
+                            f"[Twitch] Resolved broadcaster ID: {self._channel} -> {self._broadcaster_id}",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[Twitch] Could not resolve broadcaster ID for '{self._channel}' — EventSub disabled",
+                            flush=True,
+                        )
+                except Exception as e:
+                    print(f"[Twitch] Failed to resolve broadcaster ID — EventSub disabled: {e}", flush=True)
 
             chat = await Chat(twitch)
             self._twitch = twitch
@@ -499,6 +706,39 @@ class TwitchModule(StimulusModule):
             chat.register_event(ChatEvent.MESSAGE, on_message)
             chat.start()
 
+            # NANO-132: Start EventSub WebSocket for platform events
+            if self._events_enabled and self._broadcaster_id:
+                try:
+                    from twitchAPI.eventsub.websocket import EventSubWebsocket
+
+                    eventsub = EventSubWebsocket(twitch)
+                    eventsub.start()
+
+                    async def on_follow(event) -> None:
+                        data = event.event
+                        self._buffer_follow(
+                            user_id=data.user_id,
+                            user_login=data.user_login,
+                            user_name=data.user_name,
+                        )
+
+                    await eventsub.listen_channel_follow_v2(
+                        broadcaster_user_id=self._broadcaster_id,
+                        moderator_user_id=self._broadcaster_id,
+                        callback=on_follow,
+                    )
+
+                    self._eventsub = eventsub
+                    self._events_connected = True
+                    print(
+                        f"[Twitch] EventSub WebSocket started (channel.follow subscribed, broadcaster={self._broadcaster_id})",
+                        flush=True,
+                    )
+                except Exception as e:
+                    print(f"[Twitch] EventSub WebSocket failed to start — chat still active: {e}", flush=True)
+                    self._events_connected = False
+                    self._events_connected = False
+
             # Block until stop is requested
             while not self._stop_event.is_set():
                 await asyncio.sleep(0.5)
@@ -513,6 +753,9 @@ class TwitchModule(StimulusModule):
     async def _shutdown_async(self) -> None:
         """Graceful shutdown of twitchAPI resources."""
         try:
+            if self._eventsub:
+                await self._eventsub.stop()
+                self._events_connected = False
             if self._chat:
                 self._chat.stop()
             if self._twitch:

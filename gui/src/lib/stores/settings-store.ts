@@ -85,6 +85,7 @@ export interface StimuliConfig {
   patience_prompts: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled: boolean;
+  twitch_events_enabled: boolean;
   twitch_channel: string;
   twitch_app_id: string;
   twitch_app_secret: string;
@@ -167,6 +168,7 @@ export interface GameStateStatus {
 // Twitch module status (NANO-056b)
 export interface TwitchStatus {
   connected: boolean;
+  events_connected: boolean;
   channel: string;
   buffer_count: number;
   recent_messages: string[];
@@ -467,6 +469,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   patience_seconds: 60,
   patience_prompts: ["Continue the conversation naturally. You have been idle. Think of something interesting to say or ask."],
   twitch_enabled: false,
+  twitch_events_enabled: false,
   twitch_channel: "",
   twitch_app_id: "",
   twitch_app_secret: "",

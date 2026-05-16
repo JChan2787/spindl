@@ -111,6 +111,7 @@ def build_stimuli_hydration(cfg) -> dict:
         "twitch_chat_tts_speed": cfg.twitch_chat_tts_speed,
         "twitch_chat_tts_format": cfg.twitch_chat_tts_format,
         "twitch_chat_tts_max_length": cfg.twitch_chat_tts_max_length,
+        "twitch_events_enabled": cfg.twitch_events_enabled,
         "twitch_has_credentials": bool(
             resolved_channel and resolved_app_id and resolved_app_secret
         ),
@@ -178,6 +179,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
 
             # Twitch fields (NANO-056b)
             twitch_enabled = data.get("twitch_enabled")
+            twitch_events_enabled = data.get("twitch_events_enabled")
             twitch_channel = data.get("twitch_channel")
             twitch_app_id = data.get("twitch_app_id")
             twitch_app_secret = data.get("twitch_app_secret")
@@ -231,6 +233,8 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             # Twitch type coercion (NANO-056b)
             if twitch_enabled is not None:
                 twitch_enabled = bool(twitch_enabled)
+            if twitch_events_enabled is not None:
+                twitch_events_enabled = bool(twitch_events_enabled)
             if twitch_channel is not None:
                 twitch_channel = str(twitch_channel).strip()
             if twitch_app_id is not None:
@@ -547,6 +551,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 patience_seconds=patience_seconds,
                 patience_prompts=patience_prompts,
                 twitch_enabled=twitch_enabled,
+                twitch_events_enabled=twitch_events_enabled,
                 twitch_channel=twitch_channel,
                 twitch_app_id=twitch_app_id,
                 twitch_app_secret=twitch_app_secret,
@@ -744,6 +749,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 "twitch_status",
                 {
                     "connected": False,
+                    "events_connected": False,
                     "channel": "",
                     "buffer_count": 0,
                     "recent_messages": [],
@@ -759,6 +765,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                     "twitch_status",
                     {
                         "connected": module.connected,
+                        "events_connected": module.events_connected,
                         "channel": module.channel,
                         "buffer_count": module.buffer_count,
                         "recent_messages": module.recent_messages,
@@ -772,6 +779,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
             "twitch_status",
             {
                 "connected": False,
+                "events_connected": False,
                 "channel": "",
                 "buffer_count": 0,
                 "recent_messages": [],

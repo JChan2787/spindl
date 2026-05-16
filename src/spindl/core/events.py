@@ -61,6 +61,9 @@ class EventType(Enum):
     # Approved chat overlay (NANO-131)
     TWITCH_MESSAGE_APPROVED = auto()  # Selection pass picked a Twitch message winner
 
+    # Twitch EventSub events (NANO-132)
+    TWITCH_FOLLOW_EVENT = auto()  # Channel follow via EventSub
+
     # Error events
     PIPELINE_ERROR = auto()  # Processing error occurred
 
@@ -451,3 +454,18 @@ class TwitchMessageApprovedEvent(Event):
     message_text: str = ""
     candidate_count: int = 0
     stale_dropped: int = 0
+
+
+@dataclass
+class TwitchFollowEvent(Event):
+    """
+    Fired when one or more viewers follow the channel (NANO-132).
+
+    The approved-chat OBS overlay uses this to display follow
+    notifications inline with the curated chat feed.
+    """
+
+    event_type: EventType = field(default=EventType.TWITCH_FOLLOW_EVENT, init=False)
+    message: str = ""
+    usernames: list[str] = field(default_factory=list)
+    follower_count: int = 0

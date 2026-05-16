@@ -1243,6 +1243,16 @@ class GUIServer:
             "message_text": message_text,
         })
 
+    async def emit_twitch_follow_event(
+        self, message: str, usernames: list[str], follower_count: int
+    ) -> None:
+        """Emit follow event for OBS overlay (NANO-132)."""
+        await self.sio.emit("twitch_follow_event", {
+            "message": message,
+            "usernames": usernames,
+            "follower_count": follower_count,
+        })
+
     async def emit_avatar_load_model(
         self,
         vrm_path: str,

@@ -105,6 +105,14 @@ export function TwitchChatCard() {
     [updatePendingStimuli, emitChanges]
   );
 
+  const handleEventsEnabledChange = useCallback(
+    (checked: boolean) => {
+      updatePendingStimuli({ twitch_events_enabled: checked });
+      emitChanges({ twitch_events_enabled: checked });
+    },
+    [updatePendingStimuli, emitChanges]
+  );
+
   // Local state for prompt template — emit on blur
   const [localTwitchPrompt, setLocalTwitchPrompt] = useState(effectiveConfig.twitch_prompt_template);
   const twitchPromptSyncedRef = useRef(effectiveConfig.twitch_prompt_template);
@@ -357,6 +365,30 @@ export function TwitchChatCard() {
 
         {effectiveConfig.twitch_enabled && hasCredentials && (
           <div className="space-y-3">
+            {/* NANO-132: EventSub follow callouts toggle */}
+            <div className="flex items-center justify-between">
+              <Label className="flex items-center gap-2 text-sm">
+                Follow Callouts
+                {twitchStatus?.events_connected && (
+                  <Wifi className="h-3 w-3 text-green-500" />
+                )}
+              </Label>
+              <button
+                onClick={() => handleEventsEnabledChange(!effectiveConfig.twitch_events_enabled)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  effectiveConfig.twitch_events_enabled
+                    ? "bg-primary"
+                    : "bg-muted"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    effectiveConfig.twitch_events_enabled ? "translate-x-4" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
             <Slider
               label="Buffer Size"
               value={effectiveConfig.twitch_buffer_size}

@@ -97,6 +97,17 @@ body, html {
     word-wrap: break-word;
 }
 
+.follow-event {
+    background: rgba(169, 112, 255, 0.15);
+    border-left: 3px solid #a970ff;
+    color: #e4e6eb;
+}
+
+.follow-event .follow-text {
+    color: #e4e6eb;
+    word-wrap: break-word;
+}
+
 #spacer {
     width: 100%;
     padding: 0;
@@ -330,6 +341,57 @@ body, html {
             addMessage(data.username, data.message_text);
         }
     });
+
+    socket.on("twitch_follow_event", function(data) {
+        if (data && data.message) {
+            addFollowMessage(data.message);
+        }
+    });
+
+    function addFollowMessage(text) {
+        messageCounter += 1;
+        var msgId = "msg-" + Date.now() + "-" + messageCounter;
+
+        var messageDiv = document.createElement("div");
+        messageDiv.classList.add("message", "follow-event");
+        messageDiv.id = msgId;
+        messageTimestamps.set(msgId, Date.now());
+
+        messageDiv.innerHTML = '<span class="follow-text">' + escapeHtml(text) + '</span>';
+
+        if (reversed) {
+            var firstMessage = messageListWrapper.querySelector(".message");
+            if (firstMessage) {
+                messageListWrapper.insertBefore(messageDiv, firstMessage);
+            } else {
+                messageListWrapper.appendChild(messageDiv);
+            }
+        } else {
+            messageListWrapper.appendChild(messageDiv);
+        }
+
+        void messageDiv.offsetWidth;
+        messageDiv.classList.add("visible");
+
+        var messages = getOverlayMessages();
+        if (messages.length > MAX_MESSAGES) {
+            var oldest = reversed ? messages[messages.length - 1] : messages[0];
+            if (oldest) {
+                if (!reversed) {
+                    var style = getComputedStyle(oldest);
+                    var marginBottom = parseFloat(style.marginBottom) || 0;
+                    var space = oldest.offsetHeight + marginBottom;
+                    var currentHeight = parseFloat(topSpacer.style.height) || 0;
+                    var newHeight = currentHeight + space;
+                    if (newHeight > MAX_SPACER_HEIGHT_BEFORE_RESET) newHeight = 0;
+                    topSpacer.style.height = newHeight + "px";
+                }
+                removeOverlayMessage(oldest);
+            }
+        }
+
+        adjustMessageWrapperScroll();
+    }
 </script>
 </body>
 </html>

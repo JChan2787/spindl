@@ -695,6 +695,9 @@ class VoiceAgentOrchestrator:
                     stimuli_cfg.twitch_selection_pass_api_key
                     or self._config.llm_config.provider_config.get("api_key", "")
                 ),
+                events_enabled=stimuli_cfg.twitch_events_enabled,
+                is_engine_idle=self._stimuli_engine.is_idle,
+                trigger_barge_in=self._handle_self_barge_in,
             )
             self._stimuli_engine.register_module(twitch)
             logger.info(
@@ -2185,6 +2188,7 @@ class VoiceAgentOrchestrator:
         patience_seconds: Optional[float] = None,
         patience_prompts: Optional[list[str]] = None,
         twitch_enabled: Optional[bool] = None,
+        twitch_events_enabled: Optional[bool] = None,
         twitch_channel: Optional[str] = None,
         twitch_app_id: Optional[str] = None,
         twitch_app_secret: Optional[str] = None,
@@ -2346,11 +2350,17 @@ class VoiceAgentOrchestrator:
                         )
                         module.selection_pass_api_key = effective_key
                         cfg.twitch_selection_pass_api_key = twitch_selection_pass_api_key
+                    # NANO-132: EventSub events toggle
+                    if twitch_events_enabled is not None:
+                        module.events_enabled = twitch_events_enabled
+                        cfg.twitch_events_enabled = twitch_events_enabled
                     break
 
             # Update config even if module isn't registered yet
             if twitch_enabled is not None:
                 cfg.twitch_enabled = twitch_enabled
+            if twitch_events_enabled is not None:
+                cfg.twitch_events_enabled = twitch_events_enabled
             if twitch_channel is not None:
                 cfg.twitch_channel = twitch_channel
             if twitch_app_id is not None:

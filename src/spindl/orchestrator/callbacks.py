@@ -29,6 +29,7 @@ from ..core.events import (
     StateChangedEvent,
     AvatarMoodEvent,
     TwitchMessageApprovedEvent,
+    TwitchFollowEvent,
 )
 from ..history.snapshot_store import append_snapshot
 from ..llm import LLMPipeline
@@ -79,6 +80,8 @@ def tag_user_input(
     """
     if stimulus_source == "twitch":
         tag = "[Message Type - Twitch Chat]"
+    elif stimulus_source == "twitch_event":
+        tag = "[Message Type - Twitch Event]"
     elif stimulus_source == "game_state":
         tag = "[Message Type - Game State]"
     elif stimulus_source or input_modality == InputModality.STIMULUS:
@@ -1383,6 +1386,20 @@ class OrchestratorCallbacks:
                         )
                     )
 
+                # NANO-132: Emit follow event for OBS overlay
+                if (
+                    stimulus_source == "twitch_event"
+                    and self._event_bus is not None
+                    and stimulus_metadata
+                ):
+                    self._event_bus.emit(
+                        TwitchFollowEvent(
+                            message=stimulus_metadata.get("overlay_message", ""),
+                            usernames=stimulus_metadata.get("usernames", []),
+                            follower_count=stimulus_metadata.get("follower_count", 0),
+                        )
+                    )
+
                 # NANO-130 Phase 2: Chat-TTS — read the selected Twitch
                 # message aloud before the LLM responds.
                 if (
@@ -1403,6 +1420,38 @@ class OrchestratorCallbacks:
                         if not self._chat_tts_playback.wait(timeout=max_duration):
                             print("[NANO-130] Chat-TTS playback timed out — skipping", flush=True)
                             self._chat_tts_playback.stop()
+
+                # NANO-132: Chat-TTS for follow events — read announcement aloud
+                if (
+                    stimulus_source == "twitch_event"
+                    and self._chat_tts_client is not None
+                    and self._chat_tts_playback is not None
+                    and stimulus_metadata
+                    and stimulus_metadata.get("overlay_message")
+                ):
+                    follow_text = stimulus_metadata["overlay_message"]
+                    try:
+                        if self._chat_tts_client.is_server_available():
+                            chat_audio = self._chat_tts_client.synthesize(
+                                text=follow_text,
+                                voice=self._chat_tts_voice,
+                                speed=self._chat_tts_speed,
+                                use_blend=False,
+                            )
+                            if chat_audio is not None and len(chat_audio) > 0:
+                                print(
+                                    f"[NANO-132] Chat-TTS follow: {follow_text} ({len(chat_audio) / 24000.0:.1f}s)",
+                                    flush=True,
+                                )
+                                max_duration = len(chat_audio) / 24000.0 + 5.0
+                                self._chat_tts_playback.play(chat_audio)
+                                if not self._chat_tts_playback.wait(timeout=max_duration):
+                                    print("[NANO-132] Chat-TTS follow playback timed out — skipping", flush=True)
+                                    self._chat_tts_playback.stop()
+                        else:
+                            print("[NANO-132] Chat-TTS server not available for follow", flush=True)
+                    except Exception as e:
+                        print(f"[NANO-132] Chat-TTS follow synthesis failed: {e}", flush=True)
 
                 result = self._pipeline.run(
                     tagged_input,
