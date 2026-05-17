@@ -12,6 +12,7 @@ provider.generate() call with tool execution logic.
 """
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -245,7 +246,7 @@ class ToolExecutor:
                 "type": "function",
                 "function": {
                     "name": tc.name,
-                    "arguments": str(tc.arguments) if tc.arguments else "{}",
+                    "arguments": json.dumps(tc.arguments) if isinstance(tc.arguments, dict) else (tc.arguments or "{}"),
                 },
             })
 
