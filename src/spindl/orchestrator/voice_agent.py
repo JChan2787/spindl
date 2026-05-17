@@ -882,6 +882,12 @@ class VoiceAgentOrchestrator:
         # Initialize tools from config
         self._tool_registry.initialize_tools(tools_raw)
 
+        # NANO-133: Inject GameStateModule into game_state_query tool
+        game_query_tool = self._tool_registry.get_tool("game_state_query")
+        if game_query_tool and self._game_state_module:
+            game_query_tool.set_game_state_module(self._game_state_module)
+            logger.debug("Injected GameStateModule into game_state_query tool")
+
         # Check if any tools are enabled
         enabled_tools = self._tool_registry.get_enabled_tools()
         if not enabled_tools:
@@ -2210,6 +2216,7 @@ class VoiceAgentOrchestrator:
         twitch_chat_tts_format: Optional[str] = None,
         twitch_chat_tts_max_length: Optional[int] = None,
         addressing_others_contexts: Optional[list] = None,
+        game_state_profile: Optional[str] = None,
         game_state_enabled: Optional[bool] = None,
         game_state_host: Optional[str] = None,
         game_state_port: Optional[int] = None,
@@ -2502,6 +2509,8 @@ class VoiceAgentOrchestrator:
                     break
 
         # Update config even if game_state module isn't registered yet
+        if game_state_profile is not None:
+            cfg.game_state_profile = game_state_profile
         if game_state_enabled is not None:
             cfg.game_state_enabled = game_state_enabled
         if game_state_host is not None:

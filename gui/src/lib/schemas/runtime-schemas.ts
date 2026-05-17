@@ -216,6 +216,7 @@ export const StimuliConfigUpdatedSchema = z.object({
   twitch_events_enabled: z.boolean().default(false),
   twitch_has_credentials: z.boolean(),
   // NANO-116: Game-state bridge integration
+  game_state_profile: z.enum(["none", "pragmata"]).default("none"),
   game_state_enabled: z.boolean(),
   game_state_host: z.string(),
   game_state_port: z.number().int().min(1).max(65535),

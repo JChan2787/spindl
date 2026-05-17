@@ -113,6 +113,7 @@ export interface StimuliConfig {
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: AddressingContextEntry[];
   // NANO-116: Game-state bridge
+  game_state_profile: string;
   game_state_enabled: boolean;
   game_state_host: string;
   game_state_port: number;
@@ -495,6 +496,7 @@ const DEFAULT_STIMULI: StimuliConfig = {
   twitch_has_credentials: false,
   addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
   // NANO-116: Game-state bridge
+  game_state_profile: "none",
   game_state_enabled: false,
   game_state_host: "127.0.0.1",
   game_state_port: 53817,

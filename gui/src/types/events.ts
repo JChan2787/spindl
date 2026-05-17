@@ -581,6 +581,7 @@ export interface PatienceProgressEvent {
 // NANO-056b: Twitch module status
 export interface TwitchStatusEvent {
   connected: boolean;
+  events_connected: boolean;
   channel: string;
   buffer_count: number;
   recent_messages: string[];
@@ -625,6 +626,7 @@ export interface SetStimuliConfigPayload {
   // NANO-110: Addressing-others contexts
   addressing_others_contexts?: AddressingContext[];
   // NANO-116: Game-state bridge
+  game_state_profile?: string;
   game_state_enabled?: boolean;
   game_state_host?: string;
   game_state_port?: number;
@@ -765,6 +767,9 @@ export interface SetAvatarConfigPayload {
   stream_deck_enabled?: boolean; // NANO-110
   avatar_always_on_top?: boolean;
   subtitle_always_on_top?: boolean;
+  idle_clamp_once?: boolean;
+  curious_hold_duration?: number;
+  angry_hold_duration?: number;
 }
 
 export interface RequestVTSHotkeysPayload {

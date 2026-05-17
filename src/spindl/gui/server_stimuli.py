@@ -116,6 +116,7 @@ def build_stimuli_hydration(cfg) -> dict:
             resolved_channel and resolved_app_id and resolved_app_secret
         ),
         # NANO-116: Game-state bridge integration
+        "game_state_profile": cfg.game_state_profile,
         "game_state_enabled": cfg.game_state_enabled,
         "game_state_host": cfg.game_state_host,
         "game_state_port": cfg.game_state_port,
@@ -331,6 +332,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                     addressing_others_contexts = None
 
             # Game-state bridge fields (NANO-116)
+            game_state_profile = data.get("game_state_profile")
             game_state_enabled = data.get("game_state_enabled")
             game_state_host = data.get("game_state_host")
             game_state_port = data.get("game_state_port")
@@ -400,6 +402,10 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                     arbitration_weight_overrides = None
 
             # Game-state type coercion (NANO-116)
+            if game_state_profile is not None:
+                game_state_profile = str(game_state_profile).strip().lower()
+                if game_state_profile not in ("none", "pragmata"):
+                    game_state_profile = "none"
             if game_state_enabled is not None:
                 game_state_enabled = bool(game_state_enabled)
                 print(f"[GUI] game_state_enabled={game_state_enabled}", flush=True)
@@ -573,6 +579,7 @@ def register_stimuli_handlers(server: "GUIServer") -> None:
                 twitch_chat_tts_format=twitch_chat_tts_format,
                 twitch_chat_tts_max_length=twitch_chat_tts_max_length,
                 addressing_others_contexts=addressing_others_contexts,
+                game_state_profile=game_state_profile,
                 game_state_enabled=game_state_enabled,
                 game_state_host=game_state_host,
                 game_state_port=game_state_port,

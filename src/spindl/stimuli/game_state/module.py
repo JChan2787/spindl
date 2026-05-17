@@ -62,6 +62,12 @@ _GAMEPLAY_EVENT_TYPES = frozenset({
     "chapter_status_changed",
 })
 
+# NANO-133: Hack lifecycle events routed to dedicated state buffer
+_HACK_EVENT_TYPES = frozenset({
+    "hack_started",
+    "hack_ended",
+})
+
 # NANO-123: High-signal events that fire independently (no probability, no batch)
 _PRIORITY_EVENT_TYPES = frozenset({
     "boss_battle_started",
@@ -195,6 +201,10 @@ class GameStateModule(StimulusModule):
         # Snapshot — updated from bridge, read-only context for combat chatter bundling
         self._current_snapshot: dict[str, Any] | None = None
 
+        # NANO-133: Hack lifecycle state buffer (tool-queryable)
+        self._current_hack: dict[str, Any] | None = None
+        self._last_hack_outcome: dict[str, Any] | None = None
+
         self._connected = False
         self._running = False
         self._version_mismatch = False
@@ -228,6 +238,8 @@ class GameStateModule(StimulusModule):
             self._gameplay_event_buffer.clear()
             self._gameplay_first_event_time = None
             self._current_snapshot = None
+            self._current_hack = None
+            self._last_hack_outcome = None
 
     @property
     def connected(self) -> bool:
@@ -470,6 +482,26 @@ class GameStateModule(StimulusModule):
 
     def health_check(self) -> bool:
         return self._connected and not self._version_mismatch
+
+    # -- NANO-133: Hack state query (tool-facing API) --------------------------
+
+    def get_hack_state(self) -> dict[str, Any]:
+        """Return current hack state for tool queries.
+
+        Returns a dict with:
+          - active: bool (hack in progress)
+          - current: dict | None (hack_started payload if active)
+          - last_outcome: dict | None (hack_ended payload from last hack)
+          - snapshot: dict | None (latest game snapshot for combat context)
+        """
+        return {
+            "active": self._current_hack is not None,
+            "current": dict(self._current_hack) if self._current_hack else None,
+            "last_outcome": (
+                dict(self._last_hack_outcome) if self._last_hack_outcome else None
+            ),
+            "snapshot": dict(self._current_snapshot) if self._current_snapshot else None,
+        }
 
     # -- Dialogue stimulus (NANO-116 B.2) ------------------------------------
 
@@ -930,6 +962,25 @@ class GameStateModule(StimulusModule):
                                 self._barge_in_arrival_count,
                                 self._barge_in_count,
                             )
+
+        # NANO-133: Route hack lifecycle events to dedicated state buffer
+        if event_type in _HACK_EVENT_TYPES:
+            if event_type == "hack_started":
+                self._current_hack = dict(payload)
+                self._current_hack["timestamp"] = event.get("timestamp", "")
+                self._last_hack_outcome = None
+            elif event_type == "hack_ended":
+                self._last_hack_outcome = dict(payload)
+                self._last_hack_outcome["timestamp"] = event.get("timestamp", "")
+                if self._current_hack:
+                    self._last_hack_outcome["target_name"] = (
+                        payload.get("target_name")
+                        or self._current_hack.get("target_name")
+                    )
+                    self._last_hack_outcome["puzzle_type"] = self._current_hack.get(
+                        "puzzle_type"
+                    )
+                self._current_hack = None
 
         # NANO-122: Route gameplay combat events to gameplay buffer
         game_event = GameEvent(

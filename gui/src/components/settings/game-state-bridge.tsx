@@ -135,6 +135,25 @@ export function GameStateBridge() {
           sends in-game dialogue and gameplay events for AI co-host commentary.
         </p>
 
+        {/* NANO-133: Game Integration Profile */}
+        <div className="space-y-1">
+          <Label className="text-xs">Game Integration</Label>
+          <select
+            value={effectiveConfig.game_state_profile}
+            onChange={(e) => {
+              updatePendingStimuli({ game_state_profile: e.target.value });
+              emitChanges({ game_state_profile: e.target.value });
+            }}
+            className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="none">None</option>
+            <option value="pragmata">Pragmata</option>
+          </select>
+          <p className="text-[10px] text-muted-foreground">
+            Selects game-specific tools for the LLM (e.g. hack status queries).
+          </p>
+        </div>
+
         <div className="grid grid-cols-[1fr_80px] gap-2">
           <div className="space-y-1">
             <Label className="flex items-center gap-2 text-xs">

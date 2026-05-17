@@ -534,6 +534,7 @@ class StimuliConfig(BaseModel):
     twitch_chat_tts_max_length: int = Field(default=100, ge=20, le=500)
 
     # Game-state bridge integration (NANO-116)
+    game_state_profile: str = Field(default="none", pattern=r"^(none|pragmata)$")
     game_state_enabled: bool = False
     game_state_host: str = "127.0.0.1"
     game_state_port: int = Field(default=53817, ge=1, le=65535)
@@ -720,6 +721,9 @@ class StimuliConfig(BaseModel):
             twitch_chat_tts_max_length=twitch.get(
                 "chat_tts", {}
             ).get("max_length", defaults.twitch_chat_tts_max_length),
+            game_state_profile=game_state.get(
+                "profile", defaults.game_state_profile
+            ),
             game_state_enabled=game_state.get(
                 "enabled", defaults.game_state_enabled
             ),
