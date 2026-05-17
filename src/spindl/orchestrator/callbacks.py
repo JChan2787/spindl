@@ -424,8 +424,10 @@ class OrchestratorCallbacks:
                             result.block_contents,
                         )
 
-                    # Check for empty response
+                    # Check for empty response — must still transition state
                     if not response or response.strip() == "":
+                        if self._on_tts_skipped is not None:
+                            self._on_tts_skipped()
                         return
 
                     _voice_tts_off_chunks = None
