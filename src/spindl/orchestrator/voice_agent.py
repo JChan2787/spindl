@@ -740,6 +740,12 @@ class VoiceAgentOrchestrator:
                 )
             self._stimuli_engine.register_module(game_state)
             self._game_state_module = game_state
+            # NANO-133: Late injection — tool system inits before game_state module
+            if self._tool_registry:
+                game_query_tool = self._tool_registry.get_tool("game_state_query")
+                if game_query_tool:
+                    game_query_tool.set_game_state_module(game_state)
+                    logger.debug("Late-injected GameStateModule into game_state_query tool")
             logger.info(
                 "Game-state module registered (target=%s:%d, enabled=%s, "
                 "dialogue_buffer=%d, barge_in=%s)",
@@ -884,8 +890,9 @@ class VoiceAgentOrchestrator:
 
         # NANO-133: Inject GameStateModule into game_state_query tool
         game_query_tool = self._tool_registry.get_tool("game_state_query")
-        if game_query_tool and self._game_state_module:
-            game_query_tool.set_game_state_module(self._game_state_module)
+        game_state_mod = getattr(self, "_game_state_module", None)
+        if game_query_tool and game_state_mod:
+            game_query_tool.set_game_state_module(game_state_mod)
             logger.debug("Injected GameStateModule into game_state_query tool")
 
         # Check if any tools are enabled
