@@ -188,6 +188,7 @@ class OpenRouterProvider(LLMProvider):
             supports_streaming=True,
             context_length=self._context_size or 8192,
             supports_tools=True,  # Most models support it; silently dropped if not
+            supports_tool_role=False,  # NANO-133: safe default — collapse to role:"user"
         )
 
     def generate(
