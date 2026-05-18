@@ -77,6 +77,7 @@ _HACK_EVENT_TYPES = frozenset({
 _PRIORITY_EVENT_TYPES = frozenset({
     "boss_battle_started",
     "boss_battle_ended",
+    "chapter_status_changed",
 })
 
 # Snapshot dirty-check fields (NANO-122 Phase 2)

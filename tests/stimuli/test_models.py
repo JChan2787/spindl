@@ -29,7 +29,7 @@ class TestStimulusSource:
         assert StimulusSource.GAME_STATE.value == "game_state"
 
     def test_enum_members(self):
-        assert len(StimulusSource) == 5  # PATIENCE, TWITCH, GAME_STATE, CUSTOM, MODULE
+        assert len(StimulusSource) == 6  # PATIENCE, TWITCH, TWITCH_EVENT, GAME_STATE, CUSTOM, MODULE
 
 
 class TestStimulusData:
