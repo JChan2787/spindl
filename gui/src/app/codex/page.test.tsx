@@ -69,6 +69,7 @@ describe("CodexPage", () => {
       globalEntries: [],
       globalCodexName: "Global Codex",
       isLoadingGlobal: false,
+      volumes: [{ id: "vol_default", name: "Default", enabled: true, insertion_order: 0 }],
       characterEntries: [],
       characterCodexId: null,
       isLoadingCharacter: false,
