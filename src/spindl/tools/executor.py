@@ -113,6 +113,8 @@ class ToolExecutor:
             })
         return definitions
 
+    TOOL_PATH_TIMEOUT: float = 60.0
+
     async def execute(
         self,
         provider: LLMProvider,
@@ -142,6 +144,14 @@ class ToolExecutor:
 
         # Make a copy of messages to avoid mutating the original
         working_messages = list(messages)
+
+        # Detect forced tool_choice — after the forced call executes,
+        # the next iteration must be text-only (no tools) to get narration.
+        forced_tool_choice = kwargs.get("tool_choice") not in (None, "auto", "none")
+
+        # Shorter per-call timeout for tool path (2 sequential calls)
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = self.TOOL_PATH_TIMEOUT
 
         while iterations < self._max_iterations:
             iterations += 1
@@ -205,10 +215,18 @@ class ToolExecutor:
                     "content": "\n\n".join(tool_content_parts),
                 })
 
-        # Max iterations reached - return last response
-        logger.warning(f"Tool executor: max iterations ({self._max_iterations}) reached")
+            # Forced tool_choice: tool executed, now get narration only.
+            # Without this, the LLM re-calls the tool every iteration
+            # because it sees tool definitions and a successful result
+            # as an invitation to call again.
+            if forced_tool_choice:
+                logger.debug("Tool executor: forced tool_choice fulfilled — switching to narration-only")
+                break
 
-        # Do one final call without tools to get a response
+        # Loop exhausted or forced-call break — one final text-only call
+        if iterations >= self._max_iterations:
+            logger.warning(f"Tool executor: max iterations ({self._max_iterations}) reached")
+
         final_response = await loop.run_in_executor(
             None,
             lambda: provider.generate(

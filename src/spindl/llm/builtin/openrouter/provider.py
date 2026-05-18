@@ -259,6 +259,9 @@ class OpenRouterProvider(LLMProvider):
         if "presence_penalty" in kwargs and kwargs["presence_penalty"] != 0.0:
             payload["presence_penalty"] = kwargs["presence_penalty"]
 
+        # Per-call timeout override (tool executor passes shorter timeout)
+        call_timeout = kwargs.get("timeout", self._timeout)
+
         # Make request
         print(f"[OpenRouter] payload: model={payload['model']}, max_tokens={payload['max_tokens']}, temperature={payload['temperature']}", flush=True)
         try:
@@ -266,7 +269,7 @@ class OpenRouterProvider(LLMProvider):
                 f"{self._base_url}{CHAT_ENDPOINT}",
                 headers=self._build_headers(),
                 json=payload,
-                timeout=self._timeout,
+                timeout=call_timeout,
             )
             self._check_response_errors(response)
             data = response.json()
