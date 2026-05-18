@@ -93,6 +93,14 @@ class CodexActivatorPlugin(PreProcessor):
         context.metadata["codex_content"] = codex_content
         context.metadata["codex_tokens_estimate"] = token_estimate
 
+        # Extract tool_choice_override from activated entries (NANO-134 reliability)
+        for r in results:
+            print(f"[DIAG] Codex entry '{r.entry_name}': activated={r.activated}, extensions={r.extensions}", flush=True)
+            if r.activated and r.extensions.get("tool_choice_override"):
+                context.metadata["tool_choice_override"] = r.extensions["tool_choice_override"]
+                print(f"[DIAG] tool_choice_override SET from '{r.entry_name}': {r.extensions['tool_choice_override']}", flush=True)
+                break
+
         if results:
             activated_names = [
                 r.entry_name or f"entry_{r.entry_id}"

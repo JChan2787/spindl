@@ -248,6 +248,8 @@ def activate_entry(
         ActivationResult with activation details
     """
     # Base result for non-activation
+    if entry.extensions:
+        print(f"[DIAG] activate_entry '{entry.name}': entry.extensions={entry.extensions}", flush=True)
     base_result = ActivationResult(
         entry_id=entry_id,
         entry_name=entry.name,
@@ -257,6 +259,7 @@ def activate_entry(
         position=entry.position or "after_char",
         priority=entry.priority or 0,
         insertion_order=entry.insertion_order,
+        extensions=entry.extensions or {},
     )
 
     # Skip disabled entries
@@ -289,6 +292,7 @@ def activate_entry(
             position=entry.position or "after_char",
             priority=entry.priority or 0,
             insertion_order=entry.insertion_order,
+            extensions=entry.extensions or {},
         )
 
     # Check if sticky is still active (even without new keyword match)
@@ -303,6 +307,7 @@ def activate_entry(
             position=entry.position or "after_char",
             priority=entry.priority or 0,
             insertion_order=entry.insertion_order,
+            extensions=entry.extensions or {},
         )
 
     # Can't activate due to timed effects
@@ -340,6 +345,7 @@ def activate_entry(
         position=entry.position or "after_char",
         priority=entry.priority or 0,
         insertion_order=entry.insertion_order,
+        extensions=entry.extensions or {},
     )
 
 

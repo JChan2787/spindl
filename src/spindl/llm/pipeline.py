@@ -371,6 +371,13 @@ class LLMPipeline:
         # 3. Resolve generation parameters
         params = self._resolve_generation_params(persona, generation_params)
 
+        # 3b. Inject tool_choice override from Codex activation (NANO-134 reliability)
+        if "tool_choice_override" in context.metadata:
+            params["tool_choice"] = context.metadata["tool_choice_override"]
+            print(f"[DIAG] tool_choice_override INJECTED: {params['tool_choice']}", flush=True)
+        else:
+            print(f"[DIAG] tool_choice_override NOT in metadata. Keys: {list(context.metadata.keys())}", flush=True)
+
         # DEBUG: Dump full prompt to log for vision debugging
         # TODO: Remove or gate behind debug flag after NANO-023 testing
         # Unwrap ProviderHolder to show the actual inner provider
@@ -531,6 +538,10 @@ class LLMPipeline:
 
         # 3. Resolve generation parameters
         params = self._resolve_generation_params(persona, generation_params)
+
+        # 3b. Inject tool_choice override from Codex activation (NANO-134 reliability)
+        if "tool_choice_override" in context.metadata:
+            params["tool_choice"] = context.metadata["tool_choice_override"]
 
         # DEBUG: Dump full prompt to log (same as run())
         from .provider_holder import ProviderHolder
@@ -781,6 +792,11 @@ class LLMPipeline:
             Final LLMResponse after tool loop completes
         """
         async def _async_execute():
+            extra_kwargs = {}
+            if "tool_choice" in params:
+                extra_kwargs["tool_choice"] = params["tool_choice"]
+            if "model" in params:
+                extra_kwargs["model"] = params["model"]
             result = await self._tool_executor.execute(
                 provider=self.provider,
                 messages=messages,
@@ -788,6 +804,7 @@ class LLMPipeline:
                 max_tokens=params.get("max_tokens", 256),
                 top_p=params.get("top_p"),
                 stop=params.get("stop"),
+                **extra_kwargs,
             )
             return result.response
 

@@ -76,6 +76,7 @@ class ActivationResult:
     position: str = "after_char"  # "before_char" or "after_char"
     priority: int = 0
     insertion_order: int = 0
+    extensions: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

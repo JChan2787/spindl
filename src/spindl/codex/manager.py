@@ -117,6 +117,9 @@ class CodexManager:
             book = CharacterBook.model_validate(data)
             self._global_entries = book.entries
             self._volumes = book.volumes
+            for e in self._global_entries:
+                if e.extensions:
+                    print(f"[DIAG] Codex load '{e.name}': extensions={e.extensions}", flush=True)
             logger.info("Loaded %d global codex entries", len(self._global_entries))
 
         except (json.JSONDecodeError, Exception) as e:
