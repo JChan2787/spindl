@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import torch
 
 # Suppress non-blocking warnings from Kokoro/PyTorch internals
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -60,6 +61,7 @@ class KokoroTTSServer:
         self.pipeline: Optional[KPipeline] = None
         self._socket: Optional[socket.socket] = None
         self._shutdown: bool = False
+        self._blended_voice: Optional[torch.FloatTensor] = None
 
         # Model paths - must be provided externally
         if models_dir is None:
@@ -122,7 +124,7 @@ class KokoroTTSServer:
             raise ValueError(f"Voice '{voice}' not found. Available: {available}")
         return voice_path
 
-    def synthesize(self, text: str, voice: str = "af_bella", lang: str = "a") -> np.ndarray:
+    def synthesize(self, text: str, voice: str = "af_bella", lang: str = "a", speed: float = 1.0) -> np.ndarray:
         """
         Synthesize speech from text.
 
@@ -130,6 +132,7 @@ class KokoroTTSServer:
             text: Text to synthesize
             voice: Voice ID (e.g., 'af_bella', 'am_adam')
             lang: Language code ('a' for American, 'b' for British)
+            speed: Playback speed multiplier (default: 1.0)
 
         Returns:
             float32 numpy array of audio samples at 24000 Hz
@@ -149,7 +152,7 @@ class KokoroTTSServer:
             )
 
         # Generate audio (may yield multiple chunks)
-        generator = self.pipeline(text, voice=str(voice_path))
+        generator = self.pipeline(text, voice=str(voice_path), speed=speed)
 
         # Concatenate all chunks
         audio_chunks = []
@@ -160,6 +163,52 @@ class KokoroTTSServer:
             return np.array([], dtype=np.float32)
 
         return np.concatenate(audio_chunks).astype(np.float32)
+
+    def synthesize_with_blend(self, text: str, lang: str = "a", speed: float = 1.0) -> np.ndarray:
+        """Synthesize using the cached blended voice tensor."""
+        if self.pipeline is None:
+            raise RuntimeError("Model not loaded")
+        if self._blended_voice is None:
+            raise RuntimeError("No blended voice cached")
+
+        if self.pipeline.lang_code != lang:
+            self.pipeline = KPipeline(
+                lang_code=lang,
+                repo_id="hexgrad/Kokoro-82M",
+                model=self.model,
+            )
+
+        generator = self.pipeline(text, voice=self._blended_voice, speed=speed)
+        audio_chunks = []
+        for gs, ps, audio in generator:
+            audio_chunks.append(audio)
+
+        if not audio_chunks:
+            return np.array([], dtype=np.float32)
+
+        return np.concatenate(audio_chunks).astype(np.float32)
+
+    def compute_blend(self, weights: dict[str, float]) -> tuple[Optional[torch.FloatTensor], list[str]]:
+        """Weighted interpolation of voice embeddings. Returns (tensor, missing_voices)."""
+        tensors = []
+        w_vals = []
+        missing = []
+        for voice_id, weight in weights.items():
+            if weight <= 0:
+                continue
+            try:
+                voice_path = self.get_voice_path(voice_id)
+                tensor = torch.load(str(voice_path), weights_only=True)
+                tensors.append(tensor * weight)
+                w_vals.append(weight)
+            except ValueError:
+                missing.append(voice_id)
+                print(f"[WARN] Voice '{voice_id}' not found — skipped from blend", flush=True)
+        if not tensors:
+            return None, missing
+        total_weight = sum(w_vals)
+        blended = torch.stack(tensors).sum(dim=0) / total_weight
+        return blended, missing
 
     def handle_request(self, data: str) -> dict:
         """
@@ -179,34 +228,42 @@ class KokoroTTSServer:
             return {"status": "error", "error": f"Invalid JSON: {e}"}
 
         action = request.get("action")
-        if action != "synthesize":
+
+        if action == "synthesize":
+            return self._handle_synthesize(request, start)
+        elif action == "blend_voices":
+            return self._handle_blend_voices(request, start)
+        elif action == "list_voices":
+            return self._handle_list_voices()
+        else:
             return {"status": "error", "error": f"Unknown action: {action}"}
 
-        # Get text (required)
+    def _handle_synthesize(self, request: dict, start: float) -> dict:
         text = request.get("text")
         if not text:
             return {"status": "error", "error": "Missing 'text' field"}
 
-        # Get voice (optional, default: af_bella)
         voice = request.get("voice", "af_bella")
-
-        # Get language (optional, default: a)
         lang = request.get("lang", "a")
+        use_blend = request.get("use_blend", False)
+        speed = request.get("speed", 1.0)
+
         if lang not in ("a", "b"):
             return {"status": "error", "error": f"Invalid lang: {lang} (expected 'a' or 'b')"}
 
-        # Synthesize
         try:
-            audio = self.synthesize(text, voice, lang)
+            if use_blend and self._blended_voice is not None:
+                print(f"[TTS] Synthesize via blended voice ({len(text)} chars, speed={speed})", flush=True)
+                audio = self.synthesize_with_blend(text, lang, speed=speed)
+            else:
+                print(f"[TTS] Synthesize via single voice '{voice}' ({len(text)} chars, speed={speed})", flush=True)
+                audio = self.synthesize(text, voice, lang, speed=speed)
         except ValueError as e:
-            # Voice not found
             return {"status": "error", "error": str(e)}
         except Exception as e:
             return {"status": "error", "error": f"Synthesis failed: {e}"}
 
-        # Encode audio as hex
         audio_hex = audio.tobytes().hex()
-
         elapsed_ms = int((time.time() - start) * 1000)
 
         return {
@@ -215,6 +272,46 @@ class KokoroTTSServer:
             "sample_rate": self.SAMPLE_RATE,
             "duration_ms": elapsed_ms,
         }
+
+    def _handle_blend_voices(self, request: dict, start: float) -> dict:
+        weights = request.get("weights", {})
+        if not isinstance(weights, dict):
+            return {"status": "error", "error": "weights must be a dict of voice_id -> float"}
+
+        active_weights = {k: v for k, v in weights.items() if isinstance(v, (int, float)) and v > 0}
+
+        if not active_weights:
+            self._blended_voice = None
+            print("[BLEND] Cleared — no active weights", flush=True)
+            return {"status": "success", "voice_count": 0, "total_weight": 0, "missing": []}
+
+        blended, missing = self.compute_blend(active_weights)
+        self._blended_voice = blended
+
+        voice_count = len(active_weights) - len(missing)
+        total_weight = sum(v for k, v in active_weights.items() if k not in missing)
+        elapsed_ms = int((time.time() - start) * 1000)
+
+        if blended is not None:
+            print(
+                f"[BLEND] Computed: {voice_count} voices, "
+                f"total_weight={total_weight:.2f}, {elapsed_ms}ms"
+                + (f", missing: {missing}" if missing else ""),
+                flush=True,
+            )
+        else:
+            print(f"[BLEND] Failed — all voices missing: {missing}", flush=True)
+
+        return {
+            "status": "success",
+            "voice_count": voice_count,
+            "total_weight": total_weight,
+            "missing": missing,
+        }
+
+    def _handle_list_voices(self) -> dict:
+        voices = sorted([f.stem for f in self.voices_dir.glob("*.pt")])
+        return {"status": "success", "voices": voices}
 
     def handle_connection(self, conn: socket.socket, addr: tuple) -> None:
         """Handle a single client connection."""

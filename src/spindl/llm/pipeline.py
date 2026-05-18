@@ -362,11 +362,21 @@ class LLMPipeline:
         # 2d. Inject persistent audience chat transcript (NANO-115)
         self._inject_audience_chat(context)
 
-        # 2e. Patch deferred block char counts now that injections are done (NANO-045b)
+        # 2e. Inject character knowledge from game dialogue (NANO-116 B.2)
+        self._inject_character_knowledge(context)
+
+        # 2f. Patch deferred block char counts now that injections are done (NANO-045b)
         self._update_deferred_block_contents(context)
 
         # 3. Resolve generation parameters
         params = self._resolve_generation_params(persona, generation_params)
+
+        # 3b. Inject tool_choice override from Codex activation (NANO-134 reliability)
+        if "tool_choice_override" in context.metadata:
+            params["tool_choice"] = context.metadata["tool_choice_override"]
+            print(f"[DIAG] tool_choice_override INJECTED: {params['tool_choice']}", flush=True)
+        else:
+            print(f"[DIAG] tool_choice_override NOT in metadata. Keys: {list(context.metadata.keys())}", flush=True)
 
         # DEBUG: Dump full prompt to log for vision debugging
         # TODO: Remove or gate behind debug flag after NANO-023 testing
@@ -523,10 +533,15 @@ class LLMPipeline:
         self._inject_codex_content(context)
         self._inject_rag_content(context)
         self._inject_audience_chat(context)
+        self._inject_character_knowledge(context)
         self._update_deferred_block_contents(context)
 
         # 3. Resolve generation parameters
         params = self._resolve_generation_params(persona, generation_params)
+
+        # 3b. Inject tool_choice override from Codex activation (NANO-134 reliability)
+        if "tool_choice_override" in context.metadata:
+            params["tool_choice"] = context.metadata["tool_choice_override"]
 
         # DEBUG: Dump full prompt to log (same as run())
         from .provider_holder import ProviderHolder
@@ -695,6 +710,7 @@ class LLMPipeline:
         self._inject_codex_content(context)
         self._inject_rag_content(context)
         self._inject_audience_chat(context)
+        self._inject_character_knowledge(context)
         self._update_deferred_block_contents(context)
 
         # Estimate tokens via tiktoken
@@ -776,6 +792,11 @@ class LLMPipeline:
             Final LLMResponse after tool loop completes
         """
         async def _async_execute():
+            extra_kwargs = {}
+            if "tool_choice" in params:
+                extra_kwargs["tool_choice"] = params["tool_choice"]
+            if "model" in params:
+                extra_kwargs["model"] = params["model"]
             result = await self._tool_executor.execute(
                 provider=self.provider,
                 messages=messages,
@@ -783,6 +804,7 @@ class LLMPipeline:
                 max_tokens=params.get("max_tokens", 256),
                 top_p=params.get("top_p"),
                 stop=params.get("stop"),
+                **extra_kwargs,
             )
             return result.response
 
@@ -923,6 +945,26 @@ class LLMPipeline:
             system_prompt = context.messages[0]["content"]
 
             system_prompt = system_prompt.replace("[AUDIENCE_CHAT]", audience_content)
+
+            import re
+            system_prompt = re.sub(r"\n{3,}", "\n\n", system_prompt)
+
+            context.messages[0]["content"] = system_prompt
+
+    def _inject_character_knowledge(self, context: PipelineContext) -> None:
+        """
+        Inject game dialogue character knowledge into the system prompt (NANO-116 B.2).
+
+        Replaces [CHARACTER_KNOWLEDGE] placeholder with the formatted content
+        prepared by DialogueKnowledgeInjector preprocessor. If no content,
+        placeholder collapses to empty string.
+        """
+        knowledge_content = context.metadata.get("character_knowledge_formatted", "")
+
+        if context.messages and context.messages[0].get("role") == "system":
+            system_prompt = context.messages[0]["content"]
+
+            system_prompt = system_prompt.replace("[CHARACTER_KNOWLEDGE]", knowledge_content)
 
             import re
             system_prompt = re.sub(r"\n{3,}", "\n\n", system_prompt)

@@ -98,15 +98,51 @@ body {
   }
 }
 
-/* ── Drag region (top edge) ──────────────────────────── */
+/* ── Mic passthrough toggle (NANO-125) ────────────────── */
 
-body::before {
-  content: "";
-  display: block;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 6px;
+.deck-btn.mic-passthrough {
+  border-color: #44403c;
+  margin-top: 4px;
+}
+
+.deck-btn.mic-passthrough.active {
+  background: #d97706;
+  border-color: #f59e0b;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.3);
+  animation: pulse-amber 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-amber {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(245, 158, 11, 0.5);
+  }
+}
+
+/* ── Drag grip (top bar) ────────────────────────────── */
+
+.drag-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 0;
+  cursor: grab;
   -webkit-app-region: drag;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.drag-grip:hover {
+  opacity: 0.9;
+}
+
+.drag-grip span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #52525b;
 }

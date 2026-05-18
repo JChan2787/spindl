@@ -1,0 +1,8 @@
+Vendored from: spindl-game-bridge (SPNDL-001)
+Protocol version: 0.1.2
+Source commit: ed7ffa6 (main)
+Vendored date: 2026-04-25
+Vendored by: NANO-116 Phase B.1
+
+Update this file when re-vendoring. Name the SPNDL-001 release tag
+or commit hash. Do not pull from nightlies.

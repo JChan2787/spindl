@@ -76,6 +76,19 @@ class CharacterBookEntry(BaseModel):
     cooldown: int | None = None  # Cannot re-trigger for N messages
     delay: int | None = None  # Activate N messages after trigger
 
+    # SpindL-native: Volume assignment (NANO-128)
+    volume_id: str | None = None
+
+
+class CodexVolume(BaseModel):
+    """A named, toggleable group of codex entries (NANO-128)."""
+
+    id: str
+    name: str
+    enabled: bool = True
+    insertion_order: int = 0
+    description: str | None = None
+
 
 class CharacterBook(BaseModel):
     """
@@ -85,6 +98,7 @@ class CharacterBook(BaseModel):
     """
 
     entries: list[CharacterBookEntry] = Field(default_factory=list)
+    volumes: list[CodexVolume] = Field(default_factory=list)
     name: str | None = None
     description: str | None = None
     scan_depth: int | None = None

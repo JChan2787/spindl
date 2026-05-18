@@ -104,6 +104,8 @@ def register_memory_handlers(server: "GUIServer") -> None:
                         "top_k": config.memory_config.rag_top_k,
                         "relevance_threshold": config.memory_config.relevance_threshold,
                         "dedup_threshold": config.memory_config.dedup_threshold,
+                        "distance_metric": config.memory_config.distance_metric,
+                        "cross_activation": config.memory_config.cross_activation,
                         "reflection_interval": config.memory_config.reflection_interval,
                         "reflection_prompt": config.memory_config.reflection_prompt,
                         "reflection_system_message": config.memory_config.reflection_system_message,
@@ -113,6 +115,102 @@ def register_memory_handlers(server: "GUIServer") -> None:
                     },
                     to=sid,
                 )
+
+    # ============================================================
+    # NANO-126: Distance Metric + Migration — Socket Handlers
+    # ============================================================
+
+    @sio.event
+    async def set_distance_metric(sid: str, data: dict) -> None:
+        """Client switches distance metric (NANO-126)."""
+        metric = data.get("distance_metric", "").strip().lower()
+        if metric not in ("l2", "cosine"):
+            await sio.emit("distance_metric_updated", {"success": False, "error": "Invalid metric"}, to=sid)
+            return
+        if not server._orchestrator:
+            return
+
+        config = server._orchestrator._config
+        config.memory_config.distance_metric = metric
+
+        store = server._orchestrator.memory_store
+        if store:
+            store._distance_metric = metric
+            store._collections = store._open_collections(store._character_id, metric)
+            store._inactive_collections = store._open_inactive_collections(store._character_id, metric)
+            store._global_collection = store._open_global(store._global_client, metric)
+            store._global_inactive = store._open_global_inactive(store._global_client, metric)
+
+        if server._orchestrator._rag_injector:
+            server._orchestrator._rag_injector.update_config(distance_metric=metric)
+
+        persisted = False
+        if server._config_path:
+            try:
+                config.save_to_yaml(server._config_path)
+                persisted = True
+            except Exception as e:
+                print(f"[GUI] Failed to persist distance metric: {e}", flush=True)
+
+        print(f"[GUI] Distance metric set to: {metric} (persisted={persisted})", flush=True)
+        await sio.emit(
+            "distance_metric_updated",
+            {"success": True, "distance_metric": metric, "persisted": persisted},
+        )
+
+    @sio.event
+    async def set_cross_activation(sid: str, data: dict) -> None:
+        """Toggle RAG→Codex cross-activation (NANO-127)."""
+        enabled = bool(data.get("enabled", False))
+        if not server._orchestrator:
+            return
+
+        config = server._orchestrator._config
+        config.memory_config.cross_activation = enabled
+
+        if server._orchestrator._cross_activator:
+            server._orchestrator._cross_activator.enabled = enabled
+
+        persisted = False
+        if server._config_path:
+            try:
+                config.save_to_yaml(server._config_path)
+                persisted = True
+            except Exception as e:
+                print(f"[GUI] Failed to persist cross_activation: {e}", flush=True)
+
+        print(f"[GUI] Cross-activation set to: {enabled} (persisted={persisted})", flush=True)
+        await sio.emit(
+            "cross_activation_updated",
+            {"success": True, "enabled": enabled, "persisted": persisted},
+        )
+
+    @sio.event
+    async def migrate_memory(sid: str, data: dict) -> None:
+        """Migrate a memory from inactive metric to active metric (NANO-126)."""
+        collection = data.get("collection", "")
+        doc_id = data.get("id", "")
+        if not server._orchestrator or not collection or not doc_id:
+            await sio.emit("memory_migrated", {"success": False, "error": "Invalid request"}, to=sid)
+            return
+
+        store = server._orchestrator.memory_store
+        if not store:
+            await sio.emit("memory_migrated", {"success": False, "error": "Memory store unavailable"}, to=sid)
+            return
+
+        loop = asyncio.get_event_loop()
+        try:
+            new_id = await loop.run_in_executor(None, store.migrate_memory, collection, doc_id)
+            if new_id:
+                await sio.emit("memory_migrated", {
+                    "success": True, "collection": collection,
+                    "old_id": doc_id, "new_id": new_id,
+                }, to=sid)
+            else:
+                await sio.emit("memory_migrated", {"success": False, "error": "Source not found"}, to=sid)
+        except Exception as e:
+            await sio.emit("memory_migrated", {"success": False, "error": str(e)}, to=sid)
 
     # ============================================================
     # NANO-102: Memory Curation Config — Socket Handler
@@ -188,10 +286,13 @@ def register_memory_handlers(server: "GUIServer") -> None:
             return
 
         try:
-            counts = server._orchestrator.memory_store.counts
+            store = server._orchestrator.memory_store
+            counts = store.counts
+            inactive = store.inactive_counts
+            metric = store._distance_metric
             await sio.emit(
                 "memory_counts",
-                {**counts, "enabled": True},
+                {**counts, "enabled": True, "inactive_counts": inactive, "distance_metric": metric},
                 to=sid,
             )
         except Exception as e:
@@ -219,10 +320,24 @@ def register_memory_handlers(server: "GUIServer") -> None:
             return
 
         try:
-            memories = server._orchestrator.memory_store.get_all(collection)
+            store = server._orchestrator.memory_store
+            metric = store._distance_metric
+            other_metric = "cosine" if metric == "l2" else "l2"
+
+            active_memories = store.get_all(collection)
+            for m in active_memories:
+                m["active"] = True
+                m["distance_metric"] = metric
+
+            inactive_memories = store.get_all_inactive(collection)
+            for m in inactive_memories:
+                m["active"] = False
+                m["distance_metric"] = other_metric
+
+            combined = active_memories + inactive_memories
             await sio.emit(
                 "memory_list",
-                {"collection": collection, "memories": memories},
+                {"collection": collection, "memories": combined},
                 to=sid,
             )
         except Exception as e:

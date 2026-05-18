@@ -842,7 +842,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     // Codex events (NANO-034 Phase 5)
     socket.on("global_codex", (event) => {
-      setGlobalCodex(event.entries, event.name);
+      setGlobalCodex(event.entries, event.name, event.volumes);
     });
 
     socket.on("character_codex", (event) => {
@@ -923,6 +923,26 @@ export function SocketProvider({ children }: SocketProviderProps) {
         clearAllFlashcards();
       }
       setMemoryActionResult("clear", event.success, event.error);
+    });
+
+    socket.on("distance_metric_updated", (event) => {
+      if (event.success) {
+        socket.emit("request_memory_counts", {});
+        socket.emit("request_memories", { collection: "global" });
+        socket.emit("request_memories", { collection: "general" });
+        socket.emit("request_memories", { collection: "flashcards" });
+        socket.emit("request_memories", { collection: "summaries" });
+      }
+    });
+
+    socket.on("cross_activation_updated", () => {});
+
+    socket.on("memory_migrated", (event) => {
+      if (event.success && event.collection) {
+        socket.emit("request_memories", { collection: event.collection as MemoryCollectionType });
+        socket.emit("request_memory_counts", {});
+      }
+      setMemoryActionResult("migrate", event.success ?? false, event.error);
     });
 
     // Connect
@@ -1017,6 +1037,9 @@ export function SocketProvider({ children }: SocketProviderProps) {
       socket.off("memory_promoted");
       socket.off("memory_search_results");
       socket.off("flashcards_cleared");
+      socket.off("distance_metric_updated");
+      socket.off("cross_activation_updated");
+      socket.off("memory_migrated");
       disconnectSocket();
     };
   }, [

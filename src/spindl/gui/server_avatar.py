@@ -9,7 +9,7 @@ Extracted from server.py (NANO-113). Handles:
 - Avatar model reload (reload_avatar_model)
 - Avatar config (set_avatar_config)
 - Animation rescan (avatar_rescan_animations)
-- Tauri install check/trigger (check_tauri_install, install_tauri_apps)
+- Tauri install check/trigger (check_tauri_install, install_tauri_apps, rebuild_tauri_apps)
 
 Also exposes Tauri binary helpers as standalone functions:
 tauri_binary_path(), tauri_binary_exists(),
@@ -23,6 +23,7 @@ and _launch_services_async.
 import asyncio
 import platform
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -414,6 +415,9 @@ def register_avatar_handlers(server: "GUIServer") -> None:
             show_emotion_in_chat = data.get("show_emotion_in_chat")
             emotion_confidence_threshold = data.get("emotion_confidence_threshold")
             expression_fade_delay = data.get("expression_fade_delay")
+            curious_hold_duration = data.get("curious_hold_duration")
+            angry_hold_duration = data.get("angry_hold_duration")
+            idle_clamp_once = data.get("idle_clamp_once")
             subtitles_enabled = data.get("subtitles_enabled")
             subtitle_fade_delay = data.get("subtitle_fade_delay")
             avatar_always_on_top = data.get("avatar_always_on_top")
@@ -447,6 +451,25 @@ def register_avatar_handlers(server: "GUIServer") -> None:
                         updated = True
                 except (ValueError, TypeError):
                     pass
+            if curious_hold_duration is not None:
+                try:
+                    dur = float(curious_hold_duration)
+                    if 0.0 <= dur <= 30.0:
+                        config.avatar_config.curious_hold_duration = dur
+                        updated = True
+                except (ValueError, TypeError):
+                    pass
+            if angry_hold_duration is not None:
+                try:
+                    dur = float(angry_hold_duration)
+                    if 0.0 <= dur <= 30.0:
+                        config.avatar_config.angry_hold_duration = dur
+                        updated = True
+                except (ValueError, TypeError):
+                    pass
+            if idle_clamp_once is not None:
+                config.avatar_config.idle_clamp_once = bool(idle_clamp_once)
+                updated = True
             if subtitles_enabled is not None:
                 config.avatar_config.subtitles_enabled = bool(subtitles_enabled)
                 updated = True
@@ -501,6 +524,9 @@ def register_avatar_handlers(server: "GUIServer") -> None:
                         "show_emotion_in_chat": cfg.show_emotion_in_chat,
                         "emotion_confidence_threshold": cfg.emotion_confidence_threshold,
                         "expression_fade_delay": cfg.expression_fade_delay,
+                        "curious_hold_duration": cfg.curious_hold_duration,
+                        "angry_hold_duration": cfg.angry_hold_duration,
+                        "idle_clamp_once": cfg.idle_clamp_once,
                         "subtitles_enabled": cfg.subtitles_enabled,
                         "subtitle_fade_delay": cfg.subtitle_fade_delay,
                         "avatar_always_on_top": cfg.avatar_always_on_top,
@@ -629,3 +655,32 @@ def register_avatar_handlers(server: "GUIServer") -> None:
         # Shared workspace means first build compiles all deps,
         # subsequent builds are near-instant (seconds).
         tauri_install_all_in_background(server, missing)
+
+    @sio.event
+    async def rebuild_tauri_apps(sid: str, data: dict) -> None:
+        """Kill running Tauri processes, clear frontend dist, rebuild all binaries."""
+        project_root = Path(__file__).parent.parent.parent.parent
+
+        # Kill any running overlay processes before rebuilding —
+        # Windows locks running .exe files.
+        server._avatar_kill()
+        server._subtitle_kill()
+        server._stream_deck_kill()
+
+        apps = [
+            (project_root / "spindl-avatar", "Avatar"),
+            (project_root / "spindl-subtitles", "Subtitle"),
+            (project_root / "spindl-stream-deck", "Stream Deck"),
+        ]
+
+        # Remove frontend dist/ so the build step regenerates them
+        for app_dir, _ in apps:
+            dist = app_dir / "dist"
+            if dist.exists():
+                shutil.rmtree(dist, ignore_errors=True)
+
+        present = [(d, n) for d, n in apps if d.exists()]
+        if not present:
+            return
+
+        tauri_install_all_in_background(server, present)

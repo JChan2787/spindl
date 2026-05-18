@@ -32,6 +32,9 @@ export function connectStatus(
   state: AvatarState,
   onMessage?: (msg: StatusMessage) => void,
   onFadeDelayUpdate?: (delay: number) => void,
+  onCuriousHoldUpdate?: (duration: number) => void,
+  onAngryHoldUpdate?: (duration: number) => void,
+  onIdleClampOnceUpdate?: (value: boolean) => void,
 ): void {
   const socket: Socket = io(url, {
     reconnection: true,
@@ -49,7 +52,7 @@ export function connectStatus(
   });
 
   // Initial config hydration — mirrors subtitle renderer pattern
-  socket.on('config_loaded', (data: { settings?: { avatar?: { avatar_always_on_top?: boolean; expression_fade_delay?: number } } }) => {
+  socket.on('config_loaded', (data: { settings?: { avatar?: { avatar_always_on_top?: boolean; expression_fade_delay?: number; curious_hold_duration?: number; angry_hold_duration?: number; idle_clamp_once?: boolean } } }) => {
     const avatarCfg = data.settings?.avatar;
     if (!avatarCfg) return;
     if (avatarCfg.avatar_always_on_top !== undefined) {
@@ -57,6 +60,15 @@ export function connectStatus(
     }
     if (avatarCfg.expression_fade_delay !== undefined && onFadeDelayUpdate) {
       onFadeDelayUpdate(avatarCfg.expression_fade_delay);
+    }
+    if (avatarCfg.curious_hold_duration !== undefined && onCuriousHoldUpdate) {
+      onCuriousHoldUpdate(avatarCfg.curious_hold_duration);
+    }
+    if (avatarCfg.angry_hold_duration !== undefined && onAngryHoldUpdate) {
+      onAngryHoldUpdate(avatarCfg.angry_hold_duration);
+    }
+    if (avatarCfg.idle_clamp_once !== undefined && onIdleClampOnceUpdate) {
+      onIdleClampOnceUpdate(avatarCfg.idle_clamp_once);
     }
   });
 
@@ -121,10 +133,19 @@ export function connectStatus(
     onMessage?.(msg);
   });
 
-  // Avatar config updates (expression_fade_delay, always_on_top, etc.)
-  socket.on('avatar_config_updated', (data: { expression_fade_delay?: number; avatar_always_on_top?: boolean }) => {
+  // Avatar config updates (expression_fade_delay, curious_hold_duration, always_on_top, etc.)
+  socket.on('avatar_config_updated', (data: { expression_fade_delay?: number; curious_hold_duration?: number; angry_hold_duration?: number; idle_clamp_once?: boolean; avatar_always_on_top?: boolean }) => {
     if (data.expression_fade_delay !== undefined && onFadeDelayUpdate) {
       onFadeDelayUpdate(data.expression_fade_delay);
+    }
+    if (data.curious_hold_duration !== undefined && onCuriousHoldUpdate) {
+      onCuriousHoldUpdate(data.curious_hold_duration);
+    }
+    if (data.angry_hold_duration !== undefined && onAngryHoldUpdate) {
+      onAngryHoldUpdate(data.angry_hold_duration);
+    }
+    if (data.idle_clamp_once !== undefined && onIdleClampOnceUpdate) {
+      onIdleClampOnceUpdate(data.idle_clamp_once);
     }
     if (data.avatar_always_on_top !== undefined) {
       getCurrentWindow().setAlwaysOnTop(data.avatar_always_on_top);

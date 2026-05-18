@@ -126,6 +126,9 @@ class GUIServer:
         self._stream_deck_process: Optional[subprocess.Popen] = None
         self._stream_deck_spawned_by_us: bool = False
 
+        # NANO-130 Phase 2: Chat-TTS Kokoro server process
+        self._chat_tts_process: Optional[subprocess.Popen] = None
+
         # Callback for when services are ready (standalone mode)
         # Can be sync or async callable
         self._on_services_ready: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
@@ -833,10 +836,11 @@ class GUIServer:
                     print(f"[GUI] Error stopping orchestrator: {e}", flush=True)
                     # Continue with shutdown even if orchestrator stop fails
 
-            # Step 1b: Stop avatar, subtitle, and stream deck processes
+            # Step 1b: Stop avatar, subtitle, stream deck, and chat-TTS processes
             self._avatar_kill()
             self._subtitle_kill()
             self._stream_deck_kill()
+            self._chat_tts_kill()
 
             # Step 2: Stop services
             if self._service_runner:
@@ -1041,6 +1045,8 @@ class GUIServer:
                     "reflection_prompt": config.memory_config.reflection_prompt,
                     "reflection_system_message": config.memory_config.reflection_system_message,
                     "reflection_delimiter": config.memory_config.reflection_delimiter,
+                    "distance_metric": config.memory_config.distance_metric,
+                    "cross_activation": config.memory_config.cross_activation,
                     "enabled": config.memory_config.enabled,
                     "curation": {
                         "enabled": config.memory_config.curation.enabled,
@@ -1057,6 +1063,9 @@ class GUIServer:
                     "codex_suffix": config.prompt_config.codex_suffix,
                     "example_dialogue_prefix": config.prompt_config.example_dialogue_prefix,
                     "example_dialogue_suffix": config.prompt_config.example_dialogue_suffix,
+                    "voice_state_barge_in": config.prompt_config.voice_state_barge_in,
+                    "voice_state_empty_transcription": config.prompt_config.voice_state_empty_transcription,
+                    "voice_state_error": config.prompt_config.voice_state_error,
                 },
                 "generation": {
                     "temperature": config.llm_config.provider_config.get("temperature", 0.7),
@@ -1086,6 +1095,9 @@ class GUIServer:
                     "show_emotion_in_chat": config.avatar_config.show_emotion_in_chat,
                     "emotion_confidence_threshold": config.avatar_config.emotion_confidence_threshold,
                     "expression_fade_delay": config.avatar_config.expression_fade_delay,
+                    "curious_hold_duration": config.avatar_config.curious_hold_duration,
+                    "angry_hold_duration": config.avatar_config.angry_hold_duration,
+                    "idle_clamp_once": config.avatar_config.idle_clamp_once,
                     "subtitles_enabled": config.avatar_config.subtitles_enabled,
                     "subtitle_fade_delay": config.avatar_config.subtitle_fade_delay,
                     "avatar_always_on_top": config.avatar_config.avatar_always_on_top,
@@ -1222,6 +1234,23 @@ class GUIServer:
         await self.sio.emit("barge_in_truncated", {
             "truncated_text": truncated_text,
             "delivered_sentences": delivered_sentences,
+        })
+
+    async def emit_twitch_message_approved(self, username: str, message_text: str) -> None:
+        """Emit approved Twitch message for OBS chat overlay (NANO-131)."""
+        await self.sio.emit("twitch_message_approved", {
+            "username": username,
+            "message_text": message_text,
+        })
+
+    async def emit_twitch_follow_event(
+        self, message: str, usernames: list[str], follower_count: int
+    ) -> None:
+        """Emit follow event for OBS overlay (NANO-132)."""
+        await self.sio.emit("twitch_follow_event", {
+            "message": message,
+            "usernames": usernames,
+            "follower_count": follower_count,
         })
 
     async def emit_avatar_load_model(
@@ -1552,6 +1581,33 @@ class GUIServer:
         finally:
             self._stream_deck_process = None
             self._stream_deck_spawned_by_us = False
+
+    # ============================================================
+    # NANO-130: Chat-TTS Kokoro Server Process Management
+    # ============================================================
+
+    def _chat_tts_kill(self) -> None:
+        """Kill the chat-TTS Kokoro server process if running."""
+        if not self._chat_tts_process:
+            return
+
+        if self._chat_tts_process.poll() is not None:
+            self._chat_tts_process = None
+            return
+
+        try:
+            terminated, force_killed = kill_process_tree(
+                self._chat_tts_process.pid, timeout=5.0
+            )
+            print(
+                f"[GUI] Chat-TTS process killed "
+                f"(terminated: {len(terminated)}, force-killed: {len(force_killed)})",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"[GUI] Failed to kill chat-TTS process: {e}", flush=True)
+        finally:
+            self._chat_tts_process = None
 
     @property
     def client_count(self) -> int:

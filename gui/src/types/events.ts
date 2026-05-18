@@ -196,7 +196,7 @@ export interface ConfigLoadedEvent {
       enabled: boolean;
       patience_enabled: boolean;
       patience_seconds: number;
-      patience_prompt: string;
+      patience_prompts: string[];
     };
     // NANO-065a: Tools runtime config
     tools?: {
@@ -547,7 +547,7 @@ export interface StimuliConfigUpdatedEvent {
   enabled: boolean;
   patience_enabled: boolean;
   patience_seconds: number;
-  patience_prompt: string;
+  patience_prompts: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled: boolean;
   twitch_channel: string;
@@ -559,6 +559,14 @@ export interface StimuliConfigUpdatedEvent {
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: AddressingContext[];
+  // NANO-121: Model cycling
+  model_rotation_enabled: boolean;
+  model_rotation_models: string[];
+  model_rotation_api_key: string;
+  // NANO-117: Weighted arbitration
+  arbitration_decay_multiplier: number;
+  arbitration_recovery_per_cycle: number;
+  arbitration_weight_overrides: Record<string, number>;
   persisted: boolean;
 }
 
@@ -573,6 +581,7 @@ export interface PatienceProgressEvent {
 // NANO-056b: Twitch module status
 export interface TwitchStatusEvent {
   connected: boolean;
+  events_connected: boolean;
   channel: string;
   buffer_count: number;
   recent_messages: string[];
@@ -588,9 +597,10 @@ export interface SetStimuliConfigPayload {
   enabled?: boolean;
   patience_enabled?: boolean;
   patience_seconds?: number;
-  patience_prompt?: string;
+  patience_prompts?: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled?: boolean;
+  twitch_events_enabled?: boolean;
   twitch_channel?: string;
   twitch_app_id?: string;
   twitch_app_secret?: string;
@@ -599,8 +609,82 @@ export interface SetStimuliConfigPayload {
   twitch_prompt_template?: string;
   twitch_audience_window?: number;
   twitch_audience_char_cap?: number;
+  // NANO-130: Selection pass + staleness filter
+  twitch_max_message_age_seconds?: number;
+  twitch_selection_mode?: string;
+  twitch_selection_pass_model?: string;
+  twitch_selection_pass_api_key?: string;
+  // NANO-130 Phase 2: Chat-TTS
+  twitch_chat_tts_enabled?: boolean;
+  twitch_chat_tts_host?: string;
+  twitch_chat_tts_port?: number;
+  twitch_chat_tts_device?: string;
+  twitch_chat_tts_voice?: string;
+  twitch_chat_tts_speed?: number;
+  twitch_chat_tts_format?: string;
+  twitch_chat_tts_max_length?: number;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts?: AddressingContext[];
+  // NANO-116: Game-state bridge
+  game_state_profile?: string;
+  game_state_enabled?: boolean;
+  game_state_host?: string;
+  game_state_port?: number;
+  game_state_buffer_size?: number;
+  game_state_prompt_template?: string;
+  // NANO-116 B.2: Dialogue pipeline
+  game_state_dialogue_enabled?: boolean;
+  game_state_dialogue_buffer_size?: number;
+  game_state_dialogue_prompt_templates?: string[];
+  game_state_dialogue_token_budget?: number;
+  game_state_dialogue_summary_max_tokens?: number;
+  game_state_dialogue_min_lines?: number;
+  game_state_dialogue_drain_delay?: number;
+  game_state_dialogue_summarizer_model?: string;
+  game_state_dialogue_summarizer_api_key?: string;
+  game_state_dialogue_summarizer_persona?: string;
+  // NANO-122: Gameplay stimulus
+  game_state_gameplay_enabled?: boolean;
+  game_state_gameplay_base_probability?: number;
+  game_state_gameplay_escalation_step?: number;
+  game_state_gameplay_probability_ceiling?: number;
+  game_state_gameplay_dirty_hp_threshold?: number;
+  game_state_gameplay_event_batch_window?: number;
+  // NANO-124: Self-barge-in
+  game_state_barge_in_enabled?: boolean;
+  game_state_barge_in_escalation?: number[];
+  game_state_barge_in_fatigue?: number[];
+  game_state_barge_in_prompt_templates?: string[];
+  // NANO-121: Model cycling
+  model_rotation_enabled?: boolean;
+  model_rotation_models?: string[];
+  model_rotation_api_key?: string;
+  // NANO-117: Weighted arbitration
+  arbitration_decay_multiplier?: number;
+  arbitration_recovery_per_cycle?: number;
+  arbitration_weight_overrides?: Record<string, number>;
+}
+
+// NANO-116: Game-state bridge status
+export interface GameStateStatus {
+  connected: boolean;
+  protocol_version: string | null;
+  buffer_count: number;
+  recent_lines: string[];
+  enabled: boolean;
+  dialogue_enabled: boolean;
+  current_summary: string;
+  // NANO-122: Gameplay stimulus status
+  gameplay_enabled: boolean;
+  gameplay_event_buffer_count: number;
+  gameplay_snapshot_probability: number;
+}
+
+// NANO-116: Game-state connection test result
+export interface GameStateConnectionResult {
+  success: boolean;
+  error: string | null;
+  protocol_version?: string | null;
 }
 
 // NANO-060b: VTubeStudio events
@@ -683,6 +767,9 @@ export interface SetAvatarConfigPayload {
   stream_deck_enabled?: boolean; // NANO-110
   avatar_always_on_top?: boolean;
   subtitle_always_on_top?: boolean;
+  idle_clamp_once?: boolean;
+  curious_hold_duration?: number;
+  angry_hold_duration?: number;
 }
 
 export interface RequestVTSHotkeysPayload {
@@ -751,6 +838,8 @@ export interface MemoryDocument {
     promoted_at?: string;
     [key: string]: unknown;
   };
+  active?: boolean;
+  distance_metric?: "l2" | "cosine";
 }
 
 export interface MemorySearchResult extends MemoryDocument {
@@ -767,6 +856,8 @@ export interface MemoryCountsEvent {
   summaries: number;
   enabled: boolean;
   error?: string;
+  inactive_counts?: { global: number; general: number; flashcards: number; summaries: number };
+  distance_metric?: "l2" | "cosine";
 }
 
 export interface MemoryListEvent {
@@ -942,8 +1033,17 @@ export interface AvatarDataEventExtended extends AvatarDataEvent {
 }
 
 // NANO-034 Phase 5: Codex Management Events
+export interface CodexVolume {
+  id: string;
+  name: string;
+  enabled: boolean;
+  insertion_order: number;
+  description?: string;
+}
+
 export interface GlobalCodexEvent {
   entries: CharacterBookEntry[];
+  volumes: CodexVolume[];
   name: string;
   error?: string;
 }
@@ -1024,10 +1124,12 @@ export interface CharacterBookEntry {
   sticky?: number;
   cooldown?: number;
   delay?: number;
+  volume_id?: string | null;
 }
 
 export interface CharacterBook {
   entries: CharacterBookEntry[];
+  volumes?: CodexVolume[];
   name?: string;
   description?: string;
   scan_depth?: number;
@@ -1369,6 +1471,9 @@ export interface ServerToClientEvents {
   patience_progress: (event: PatienceProgressEvent) => void;
   twitch_status: (event: TwitchStatusEvent) => void;
   twitch_credentials_result: (event: { success: boolean; error: string | null }) => void;
+  // NANO-116: Game-state bridge events
+  game_state_status: (event: GameStateStatus) => void;
+  game_state_connection_result: (event: GameStateConnectionResult) => void;
   stimulus_fired: (event: StimulusFiredEvent) => void;
   // NANO-110: Addressing-others state
   addressing_others_state: (event: AddressingOthersStateEvent) => void;
@@ -1398,16 +1503,26 @@ export interface ServerToClientEvents {
   memory_promoted: (event: MemoryPromotedEvent) => void;
   memory_search_results: (event: MemorySearchResultsEvent) => void;
   flashcards_cleared: (event: FlashcardsClearedEvent) => void;
+  distance_metric_updated: (event: { success: boolean; distance_metric?: string; persisted?: boolean; error?: string }) => void;
+  cross_activation_updated: (event: { success: boolean; enabled?: boolean; persisted?: boolean }) => void;
+  memory_migrated: (event: { success: boolean; collection?: string; old_id?: string; new_id?: string; error?: string }) => void;
   // NANO-069: Audio output level for portrait
   audio_level: (event: AudioLevelEvent) => void;
   // NANO-073b: Mic input level for voice overlay
   mic_level: (event: MicLevelEvent) => void;
+  // NANO-118: Voice list + blend status
+  voice_list: (event: { voices: string[]; error?: string }) => void;
+  voice_blend_status: (event: { missing: string[]; enabled: boolean }) => void;
   // NANO-111: Streaming LLM sentence chunks
   llm_chunk: (event: { text: string; is_final: boolean; emotion?: string; emotion_confidence?: number }) => void;
   // NANO-111: Token-level LLM text for real-time display
   llm_token: (event: { token: string; is_final: boolean }) => void;
   // NANO-111 Phase 2.5: Barge-in truncated response
   barge_in_truncated: (event: { truncated_text: string; delivered_sentences: number }) => void;
+  // NANO-130: Chat-TTS server lifecycle
+  chat_tts_launched: (event: { success: boolean; error?: string; already_running?: boolean }) => void;
+  chat_tts_stopped: (event: { success: boolean }) => void;
+  chat_tts_status: (event: { running: boolean; process_alive: boolean; reachable: boolean; host: string; port: number }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -1420,6 +1535,10 @@ export interface ClientToServerEvents {
   set_vad_config: (payload: SetVADConfigPayload) => void;
   set_pipeline_config: (payload: SetPipelineConfigPayload) => void;
   set_memory_config: (payload: SetMemoryConfigPayload) => void;
+  // NANO-054b: Qwen3 TTS runtime config
+  set_tts_config: (payload: Record<string, unknown>) => void;
+  // NANO-118: Request voice list from TTS provider
+  get_voice_list: (payload: Record<string, never>) => void;
   // NANO-102: Memory curation config
   set_curation_config: (payload: Record<string, unknown>) => void;
   // NANO-045d: Prompt injection wrappers
@@ -1453,10 +1572,14 @@ export interface ClientToServerEvents {
   request_patience_progress: (payload: Record<string, never>) => void;
   request_twitch_status: (payload: Record<string, never>) => void;
   test_twitch_credentials: (payload: { app_id: string; app_secret: string; channel: string }) => void;
+  // NANO-116: Game-state bridge
+  request_game_state_status: (payload: Record<string, never>) => void;
+  test_game_state_connection: (payload: { host: string; port: number }) => void;
   typing_active: (payload: { active: boolean }) => void;
   // NANO-110: Tauri install
   check_tauri_install: (payload: Record<string, never>) => void;
   install_tauri_apps: (payload: Record<string, never>) => void;
+  rebuild_tauri_apps: (payload: Record<string, never>) => void;
   // NANO-110: Addressing-others
   addressing_others_start: (payload: { context_id: string }) => void;
   addressing_others_stop: (payload: Record<string, never>) => void;
@@ -1529,4 +1652,11 @@ export interface ClientToServerEvents {
   promote_memory: (payload: PromoteMemoryPayload) => void;
   search_memories: (payload: SearchMemoriesPayload) => void;
   clear_flashcards: (payload: ClearFlashcardsPayload) => void;
+  set_distance_metric: (payload: { distance_metric: string }) => void;
+  set_cross_activation: (payload: { enabled: boolean }) => void;
+  migrate_memory: (payload: { collection: string; id: string }) => void;
+  // NANO-130: Chat-TTS server lifecycle
+  launch_chat_tts: (payload: { host: string; port: number; device: string }) => void;
+  stop_chat_tts: (payload: Record<string, never>) => void;
+  request_chat_tts_status: (payload: Record<string, never>) => void;
 }

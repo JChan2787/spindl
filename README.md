@@ -2,7 +2,7 @@
 
 A local-first AI character engine. Give your character a voice, a face, memory, and screen vision; all running on your hardware. Stream them on Twitch with OBS, or just talk. Technically speaking, it can run in your machine, otherwise this app provides cloud provider options (OpenRouter mostly).
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Tests: 2,400+](https://img.shields.io/badge/tests-2%2C400%2B-brightgreen)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Tests: 2,600+](https://img.shields.io/badge/tests-2%2C600%2B-brightgreen)
 
 DEMO VIDEO: [Youtube](https://www.youtube.com/watch?v=WwQ7wQR-7rw)
 
@@ -20,7 +20,11 @@ You talk, it listens, it talks back. The whole voice loop runs locally — mic �
 
 - **Avatar** — Standalone Tauri 2 + Three.js desktop overlay. Loads VRM models, does lipsync, tracks your cursor, and reacts with facial expressions and body animations based on what it's saying. Emotion classifier picks the mood, which drives both per-character expression composites (custom blend shape recipes) and base animation slots (idle, happy, sad, angry, curious) using Mixamo FBX clips retargeted to VRM skeletons. Assign different VRM models and animation sets per character.
 - **Stream Subtitles** — Separate Tauri 2 window for OBS compositing. Typewriter text synced to TTS duration, chroma key backgrounds, configurable fade. Just window-capture it in OBS.
-- **Stimuli** — The character doesn't just wait for you. It'll start talking on its own if you go idle, and it reads Twitch chat. You can write your own stimulus modules too.
+- **Stimuli** — The character doesn't just wait for you. It'll start talking on its own if you go idle, and it reads Twitch chat. Weighted lottery scheduling picks which stimulus fires — modules set priority weights, fired stimuli decay, idle stimuli recover. You can write your own stimulus modules too.
+- **Function Calling** — The LLM can call tools mid-conversation. Built-in tools: screen vision (describe what's on screen), game state query (ask about the current game), and invoke hack (send commands to a connected game). Tool executor supports forced invocation from lorebook triggers, with per-call timeouts to prevent dead air on provider failures.
+- **Game Bridge** — TCP bridge to game processes via [SpindL Game Bridge](https://github.com/JChan2787/spindl-game-bridge). The character receives real-time game events (combat, dialogue, inventory, chapter transitions) as stimulus and can send commands back (e.g., solving puzzle grids). Bidirectional newline-delimited JSON on a local socket. Currently supports Pragmata via REFramework.
+- **Twitch EventSub** — Channel follow notifications via Twitch EventSub WebSocket. Approved chat messages emit overlay events for OBS compositing.
+- **Chat Overlay** — Lightweight OBS browser source (`/approved-chat.html`) that displays only Twitch messages approved by the selection pass. Connects to SpindL's Socket.IO server and renders a filtered chat feed — no raw spam, no rejected messages, just the curated picks the character actually responds to. Point an OBS browser source at `localhost:3000/approved-chat.html`.
 - **Twitch Audience Memory** — Persistent per-stream audience transcript (sidecar JSONL) with self-recall. The character remembers viewers by username across the whole stream — both their messages and her own replies — so she doesn't re-answer questions or forget who's been talking. Configurable rolling window (25–300 messages) and per-message char cap (50–500). Every user-role turn carries a structural source tag (`[Message Type - Voice | Direct Keyboard | Twitch Chat | Stimuli]`) that persists into history, so the character can tell where any past message came from.
 - **Stream Deck** — Standalone Tauri 2 overlay with hold-to-activate buttons. Signal when you're talking to chat, mods, Discord, or someone in the room — the character suppresses responses while held and gets context-aware prompting on release. Multiple named contexts, each with its own button and custom prompt. Dynamic add/remove from the dashboard.
 - **Prompt Workshop** — Block-based prompt editor. See exactly how many tokens each section costs, reorder them, override individual blocks with your own text, wrap them with injection prefixes/suffixes.
@@ -46,6 +50,9 @@ flowchart TD
     M -->|"addressing start/stop"| C
     C -.->|query| K[Memory]
     C -.->|capture| L[Screen Vision]
+    C -.->|tool calls| N[Tool Executor]
+    N -.->|commands| O[Game Bridge]
+    O -->|"TCP events"| F
 ```
 
 One launcher script starts everything. One config file controls it all.
@@ -127,7 +134,7 @@ For headless mode, avatar setup, subtitles, tests, and more — see the [Usage G
 
 ```
 spindl/
-├── src/spindl/               # Backend (Python, ~38,170 lines, 144 files)
+├── src/spindl/               # Backend (Python, ~45,500 lines, 162 files)
 │   ├── audio/                #   Mic capture, speaker playback, Silero VAD
 │   ├── avatar/               #   Emotion classifier (DistilBERT/ONNX), tool mood mapping
 │   ├── characters/           #   SillyTavern V2 card models, import/export
@@ -142,24 +149,27 @@ spindl/
 │   │   ├── providers/        #     Pipeline content providers (history, persona, etc.)
 │   │   └── plugins/          #     History, budget, codex, reasoning, TTS cleanup (dual-output)
 │   ├── memory/               #   ChromaDB store, RAG injector, reflection, summaries
-│   ├── orchestrator/         #   Central voice agent loop, config (Pydantic v2)
-│   ├── stimuli/              #   Autonomous behavior engine (idle timer, Twitch chat, custom modules)
+│   ├── orchestrator/         #   Central voice agent loop, config (Pydantic v2), service capabilities
+│   ├── personas/             #   Persona loading
+│   ├── stimuli/              #   Autonomous behavior engine (weighted lottery, idle, Twitch, game state)
+│   │   └── game_state/       #     Game bridge consumer — TCP events, dialogue buffer, summarizer
 │   ├── stt/                  #   Speech-to-text providers (Whisper, Parakeet)
-│   ├── tools/                #   Function calling framework (screen vision, etc.)
-│   ├── tts/                  #   Text-to-speech providers (Kokoro, extensible)
+│   ├── tools/                #   Function calling framework + tool executor
+│   │   └── builtin/          #     screen_vision, game_state_query, invoke_hack
+│   ├── tts/                  #   Text-to-speech providers (Kokoro, Qwen3)
 │   ├── utils/                #   Shared utilities
 │   ├── vision/               #   Screen capture + VLM providers (local, cloud, unified)
 │   └── vts/                  #   VTubeStudio WebSocket driver
-├── gui/                      # Frontend (Next.js + React + TypeScript, ~34,150 lines, 158 files)
+├── gui/                      # Frontend (Next.js + React + TypeScript, ~38,200 lines, 166 files)
 │   └── src/
-│       ├── app/              #   9 pages (dashboard, launcher, characters, settings, etc.)
-│       ├── components/       #   100+ feature components + Radix UI design system
-│       └── lib/              #   12 Zustand stores, Socket.IO client, Zod schemas
+│       ├── app/              #   8 pages (dashboard, launcher, characters, settings, etc.)
+│       ├── components/       #   90+ feature components + Radix UI design system
+│       └── lib/              #   13 Zustand stores, Socket.IO client, Zod schemas
 ├── spindl-avatar/            # Standalone avatar renderer (Tauri 2 + Three.js + VRM)
 ├── spindl-subtitles/         # Stream subtitle overlay (Tauri 2, OBS-compositable)
 ├── spindl-stream-deck/       # Addressing-others button overlay (Tauri 2, hold-to-activate)
 ├── Cargo.toml                # Workspace root — shared target/ across all Tauri apps
-├── tests/                    # 98 unit test modules (~30,400 lines)
+├── tests/                    # 106 unit test modules (~33,500 lines)
 ├── tests_e2e/                # 8 E2E test modules (Playwright, 5-config matrix)
 ├── scripts/                  # Launcher, migration, standalone GUI
 ├── config/                   # spindl.yaml.example template
@@ -182,7 +192,7 @@ spindl/
 | Component | Local | Cloud |
 |-----------|-------|-------|
 | **LLM** | llama.cpp (any GGUF model) | DeepSeek, OpenRouter (200+ models) |
-| **TTS** | Kokoro | — |
+| **TTS** | Kokoro, Qwen3 | — |
 | **STT** | Whisper, Parakeet | — |
 | **VLM** | llama.cpp (Gemma 3, LLaVA, etc.) or unified mode (LLM handles vision) | Any OpenAI-compatible API (xAI, OpenAI, etc.) or unified mode (multimodal cloud LLM) |
 | **Embeddings** | llama.cpp (`--embedding` mode) | — |

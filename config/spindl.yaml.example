@@ -80,6 +80,12 @@ llm:
       temperature: 0.7
       max_tokens: 2048
       top_p: 0.95
+      # provider_routing:               # Upstream provider selection (optional)
+      #   ignore: [Chutes, Azure]        # Exclude slow/unreliable providers
+      #   # order: [DeepInfra, OpenAI]   # Priority order (disables load balancing)
+      #   # only: [DeepInfra]            # Restrict to specific provider(s)
+      #   # allow_fallbacks: true        # Fall back if preferred unavailable
+      #   # sort: throughput             # Sort by: price, throughput, or latency
 
 
 # ============================================================================
@@ -220,6 +226,12 @@ stimuli:
     buffer_size: 10                       # Max messages buffered before firing (1-50)
     max_message_length: 300               # Ignore messages longer than this
     prompt_template: "Recent Twitch chat messages:\n{messages}\nPick the most interesting message and respond to it naturally."
+  game_state:                             # OPTIONAL — SPNDL-001 game-state bridge (NANO-116)
+    enabled: false
+    host: "127.0.0.1"                     # Bridge TCP address
+    port: 53817                           # Bridge TCP port
+    buffer_size: 20                       # Max events buffered before firing (1-100)
+    prompt_template: "**New game events from the bridge.** These are in-game events — commentate on what's happening, don't address game characters directly.\n\n{events}\n"
 
 
 # ============================================================================
@@ -278,7 +290,7 @@ audio:
   chunk_size: 512
 
 character:
-  default: spindle                        # Character persona loaded at startup
+  default: spinny                         # Character persona loaded at startup
   directory: ./characters
 
 vad:

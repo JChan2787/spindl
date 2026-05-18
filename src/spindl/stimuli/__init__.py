@@ -13,15 +13,19 @@ Core components:
 
 from .base import StimulusModule
 from .engine import StimuliEngine
+from .game_state import GameStateModule
 from .models import StimulusData, StimulusSource
 from .patience import PatienceModule
 from .twitch import TwitchModule
+from .weighted_rotator import WeightedRotator
 
 __all__ = [
     "StimuliEngine",
     "StimulusModule",
     "StimulusData",
     "StimulusSource",
+    "GameStateModule",
     "PatienceModule",
     "TwitchModule",
+    "WeightedRotator",
 ]

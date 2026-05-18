@@ -199,7 +199,7 @@ def check_secondary_keys(
 def can_activate_entry(
     entry: "CharacterBookEntry",
     state: CodexState,
-    entry_id: int,
+    entry_id: str,
 ) -> tuple[bool, str]:
     """
     Check if an entry can activate based on timed effects.
@@ -230,7 +230,7 @@ def can_activate_entry(
 def activate_entry(
     text: str,
     entry: "CharacterBookEntry",
-    entry_id: int,
+    entry_id: str,
     state: CodexState,
     match_whole_words: bool = False,
 ) -> ActivationResult:
@@ -248,6 +248,8 @@ def activate_entry(
         ActivationResult with activation details
     """
     # Base result for non-activation
+    if entry.extensions:
+        print(f"[DIAG] activate_entry '{entry.name}': entry.extensions={entry.extensions}", flush=True)
     base_result = ActivationResult(
         entry_id=entry_id,
         entry_name=entry.name,
@@ -257,6 +259,7 @@ def activate_entry(
         position=entry.position or "after_char",
         priority=entry.priority or 0,
         insertion_order=entry.insertion_order,
+        extensions=entry.extensions or {},
     )
 
     # Skip disabled entries
@@ -289,6 +292,7 @@ def activate_entry(
             position=entry.position or "after_char",
             priority=entry.priority or 0,
             insertion_order=entry.insertion_order,
+            extensions=entry.extensions or {},
         )
 
     # Check if sticky is still active (even without new keyword match)
@@ -303,6 +307,7 @@ def activate_entry(
             position=entry.position or "after_char",
             priority=entry.priority or 0,
             insertion_order=entry.insertion_order,
+            extensions=entry.extensions or {},
         )
 
     # Can't activate due to timed effects
@@ -340,6 +345,7 @@ def activate_entry(
         position=entry.position or "after_char",
         priority=entry.priority or 0,
         insertion_order=entry.insertion_order,
+        extensions=entry.extensions or {},
     )
 
 
@@ -370,8 +376,11 @@ def activate_entries(
     results: list[ActivationResult] = []
 
     for i, entry in enumerate(entries):
-        # Use entry.id if available, otherwise use list index
-        entry_id = entry.id if entry.id is not None else i
+        # Use runtime ID (set by CodexManager._merge_entries) if available,
+        # otherwise fall back to stringified entry.id or list index
+        entry_id: str = getattr(entry, "_runtime_id", None) or str(
+            entry.id if entry.id is not None else i
+        )
 
         result = activate_entry(text, entry, entry_id, state, match_whole_words)
 

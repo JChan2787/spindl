@@ -52,6 +52,8 @@ class KokoroTTS:
         text: str,
         voice: str = "af_bella",
         lang: str = "a",
+        use_blend: bool = False,
+        speed: float = 1.0,
     ) -> np.ndarray:
         """
         Send text to server for speech synthesis.
@@ -86,6 +88,8 @@ class KokoroTTS:
             "text": text,
             "voice": voice,
             "lang": lang,
+            "use_blend": use_blend,
+            "speed": speed,
         }
         request_json = json.dumps(request) + "\n"
 
@@ -167,6 +171,81 @@ class KokoroTTS:
 
         finally:
             sock.close()
+
+    def blend_voices(self, weights: dict[str, float]) -> dict:
+        """
+        Send blend_voices action to server.
+
+        Args:
+            weights: Dict of voice_id -> weight (0.0-1.0)
+
+        Returns:
+            Response dict with status, voice_count, total_weight, missing
+
+        Raises:
+            ConnectionError: Server unreachable
+            RuntimeError: Server returned error
+        """
+        request = {
+            "action": "blend_voices",
+            "weights": weights,
+        }
+        request_json = json.dumps(request) + "\n"
+
+        last_error: Optional[Exception] = None
+        for attempt in range(self.max_retries):
+            try:
+                response = self._send_request(request_json)
+                break
+            except (ConnectionError, socket.error) as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                continue
+        else:
+            raise ConnectionError(
+                f"Failed to connect to TTS server at {self.host}:{self.port} "
+                f"after {self.max_retries} attempts: {last_error}"
+            )
+
+        if response.get("status") == "error":
+            raise RuntimeError(f"TTS server error: {response.get('error')}")
+
+        return response
+
+    def list_voices(self) -> list[str]:
+        """
+        Request voice list from server.
+
+        Returns:
+            Sorted list of voice IDs
+
+        Raises:
+            ConnectionError: Server unreachable
+            RuntimeError: Server returned error
+        """
+        request_json = json.dumps({"action": "list_voices"}) + "\n"
+
+        last_error: Optional[Exception] = None
+        for attempt in range(self.max_retries):
+            try:
+                response = self._send_request(request_json)
+                break
+            except (ConnectionError, socket.error) as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                continue
+        else:
+            raise ConnectionError(
+                f"Failed to connect to TTS server at {self.host}:{self.port} "
+                f"after {self.max_retries} attempts: {last_error}"
+            )
+
+        if response.get("status") == "error":
+            raise RuntimeError(f"TTS server error: {response.get('error')}")
+
+        return response.get("voices", [])
 
     def is_server_available(self) -> bool:
         """

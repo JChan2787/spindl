@@ -11,15 +11,16 @@ from typing import Optional
 
 from .base import StimulusModule
 from .models import StimulusData, StimulusSource
+from .weighted_rotator import WeightedRotator
 
 import logging
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PROMPT = (
+_DEFAULT_PROMPTS = [
     "Continue the conversation naturally. "
     "You have been idle. Think of something interesting to say or ask."
-)
+]
 
 
 class PatienceModule(StimulusModule):
@@ -32,17 +33,20 @@ class PatienceModule(StimulusModule):
     Supports pause/resume: when paused, elapsed reports 0 and the timer
     does not accumulate. On resume, the timer restarts from zero.
 
+    Supports weighted prompt rotation (NANO-120) via WeightedRotator.
+
     Priority 0 — lowest. Only fires when no other module has a stimulus.
     """
 
     def __init__(
         self,
         timeout_seconds: float = 60.0,
-        prompt: Optional[str] = None,
+        prompts: Optional[list[str]] = None,
         enabled: bool = True,
     ):
         self._timeout = timeout_seconds
-        self._prompt = prompt or _DEFAULT_PROMPT
+        self._prompts = prompts if prompts else list(_DEFAULT_PROMPTS)
+        self._rotator = WeightedRotator(self._prompts)
         self._enabled = enabled
         self._last_activity_time = time.monotonic()
         self._running = False
@@ -73,12 +77,13 @@ class PatienceModule(StimulusModule):
         self._timeout = max(0.0, value)
 
     @property
-    def prompt(self) -> str:
-        return self._prompt
+    def prompts(self) -> list[str]:
+        return self._prompts
 
-    @prompt.setter
-    def prompt(self, value: str) -> None:
-        self._prompt = value
+    @prompts.setter
+    def prompts(self, value: list[str]) -> None:
+        self._prompts = value if value else list(_DEFAULT_PROMPTS)
+        self._rotator.items = self._prompts
 
     @property
     def paused(self) -> bool:
@@ -123,12 +128,16 @@ class PatienceModule(StimulusModule):
         elapsed = self._elapsed()
         # Reset timer after firing (prevents re-fire next cycle)
         self._last_activity_time = time.monotonic()
+
+        prompt = self._rotator.select() or self._prompts[0]
+
         return StimulusData(
             source=StimulusSource.PATIENCE,
-            user_input=self._prompt,
+            user_input=prompt,
             metadata={
                 "elapsed_seconds": round(elapsed, 1),
                 "timeout_seconds": self._timeout,
+                "weight": 0.5,
             },
         )
 

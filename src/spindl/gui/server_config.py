@@ -330,6 +330,110 @@ def register_config_handlers(server: "GUIServer") -> None:
                 )
 
     @sio.event
+    async def set_tts_config(sid: str, data: dict) -> None:
+        """Client updates TTS provider configuration at runtime."""
+        if server._orchestrator:
+            callbacks = getattr(server._orchestrator, "_callbacks", None)
+            provider = getattr(callbacks, "_tts_provider", None) if callbacks else None
+            updated = False
+
+            if provider is not None:
+                if "speaker" in data and hasattr(provider, "_speaker"):
+                    provider._speaker = str(data["speaker"])
+                    updated = True
+                if "temperature" in data and hasattr(provider, "_temperature"):
+                    provider._temperature = float(data["temperature"])
+                    updated = True
+                if "instruct_template" in data and hasattr(provider, "_instruct_template"):
+                    provider._instruct_template = str(data["instruct_template"])
+                    updated = True
+                if "seed" in data and hasattr(provider, "_seed"):
+                    provider._seed = int(data["seed"])
+                    updated = True
+                if "speed" in data and hasattr(provider, "_speed"):
+                    provider._speed = max(0.5, min(2.0, float(data["speed"])))
+                    updated = True
+
+            if "voice_blend" in data and provider is not None:
+                blend_data = data["voice_blend"]
+                if hasattr(provider, "set_voice_blend") and isinstance(blend_data, dict):
+                    enabled = blend_data.get("enabled", False)
+                    weights = blend_data.get("weights", {})
+                    missing = provider.set_voice_blend(enabled=enabled, weights=weights)
+                    updated = True
+                    # Send missing voices back to frontend
+                    await sio.emit(
+                        "voice_blend_status",
+                        {"missing": missing, "enabled": enabled},
+                        to=sid,
+                    )
+
+            if updated:
+                # Sync provider_config dict so save_to_yaml persists the changes
+                config = server._orchestrator._config
+                pc = config.tts_config.provider_config
+                if "speaker" in data:
+                    pc["speaker"] = str(data["speaker"])
+                if "temperature" in data:
+                    pc["temperature"] = float(data["temperature"])
+                if "instruct_template" in data:
+                    pc["instruct_template"] = str(data["instruct_template"])
+                if "seed" in data:
+                    pc["seed"] = int(data["seed"])
+                if "speed" in data:
+                    pc["speed"] = max(0.5, min(2.0, float(data["speed"])))
+                if "voice_blend" in data:
+                    pc["voice_blend"] = data["voice_blend"]
+
+                if hasattr(provider, "_speaker"):
+                    log_detail = (
+                        f"speaker={getattr(provider, '_speaker', '?')}, "
+                        f"temperature={getattr(provider, '_temperature', '?')}, "
+                        f"instruct_template={'set' if getattr(provider, '_instruct_template', '') else 'empty'}"
+                    )
+                else:
+                    log_detail = (
+                        f"voice={getattr(provider, '_default_voice', '?')}, "
+                        f"lang={getattr(provider, '_default_language', '?')}, "
+                        f"blend={'on' if getattr(provider, '_voice_blend_enabled', False) else 'off'}"
+                    )
+                print(f"[GUI] TTS config updated at runtime: {log_detail}", flush=True)
+
+                persisted = False
+                if server._config_path:
+                    try:
+                        config.save_to_yaml(server._config_path)
+                        persisted = True
+                        print(f"[GUI] TTS config persisted to {Path(server._config_path).name}", flush=True)
+                    except Exception as e:
+                        print(f"[GUI] Failed to persist TTS config: {e}", flush=True)
+
+                await sio.emit(
+                    "tts_config_updated",
+                    {"persisted": persisted},
+                    to=sid,
+                )
+
+    @sio.event
+    async def get_voice_list(sid: str, data: dict) -> None:
+        """Client requests list of available TTS voices."""
+        if server._orchestrator:
+            callbacks = getattr(server._orchestrator, "_callbacks", None)
+            provider = getattr(callbacks, "_tts_provider", None) if callbacks else None
+            if provider and hasattr(provider, "list_voices"):
+                try:
+                    voices = provider.list_voices()
+                    await sio.emit("voice_list", {"voices": voices}, to=sid)
+                except Exception as e:
+                    await sio.emit(
+                        "voice_list",
+                        {"voices": [], "error": str(e)},
+                        to=sid,
+                    )
+            else:
+                await sio.emit("voice_list", {"voices": []}, to=sid)
+
+    @sio.event
     async def set_pipeline_config(sid: str, data: dict) -> None:
         """Client updates pipeline configuration."""
         if server._orchestrator:
@@ -402,6 +506,19 @@ def register_config_handlers(server: "GUIServer") -> None:
                 example_dialogue_suffix = str(data["example_dialogue_suffix"])
                 updated = True
 
+            voice_state_barge_in = ...
+            voice_state_empty_transcription = ...
+            voice_state_error = ...
+            if "voice_state_barge_in" in data:
+                voice_state_barge_in = str(data["voice_state_barge_in"])
+                updated = True
+            if "voice_state_empty_transcription" in data:
+                voice_state_empty_transcription = str(data["voice_state_empty_transcription"])
+                updated = True
+            if "voice_state_error" in data:
+                voice_state_error = str(data["voice_state_error"])
+                updated = True
+
             if updated:
                 server._orchestrator.update_prompt_config(
                     rag_prefix=rag_prefix,
@@ -410,6 +527,9 @@ def register_config_handlers(server: "GUIServer") -> None:
                     codex_suffix=codex_suffix,
                     example_dialogue_prefix=example_dialogue_prefix,
                     example_dialogue_suffix=example_dialogue_suffix,
+                    voice_state_barge_in=voice_state_barge_in,
+                    voice_state_empty_transcription=voice_state_empty_transcription,
+                    voice_state_error=voice_state_error,
                 )
 
                 pc = server._orchestrator._config.prompt_config
@@ -439,6 +559,9 @@ def register_config_handlers(server: "GUIServer") -> None:
                         "codex_suffix": pc.codex_suffix,
                         "example_dialogue_prefix": pc.example_dialogue_prefix,
                         "example_dialogue_suffix": pc.example_dialogue_suffix,
+                        "voice_state_barge_in": pc.voice_state_barge_in,
+                        "voice_state_empty_transcription": pc.voice_state_empty_transcription,
+                        "voice_state_error": pc.voice_state_error,
                         "persisted": persisted,
                     },
                     to=sid,

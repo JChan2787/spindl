@@ -28,6 +28,8 @@ from ..core.events import (
     PromptSnapshotEvent,
     StateChangedEvent,
     AvatarMoodEvent,
+    TwitchMessageApprovedEvent,
+    TwitchFollowEvent,
 )
 from ..history.snapshot_store import append_snapshot
 from ..llm import LLMPipeline
@@ -41,12 +43,22 @@ logger = logging.getLogger(__name__)
 
 
 # NANO-115 item #1: Source labeling.
+# Default voice state injection text (used as fallback when config is unavailable)
+_DEFAULT_VOICE_STATE: dict[str, str] = {
+    "barge_in": "The User interrupted you mid-sentence.",
+    "empty_transcription": "The User made a sound but no words were detected.",
+    "error": "An error occurred. Acknowledge briefly and continue.",
+}
+
+
 # Every user-role message gets a structural `[Message Type - Subtype] ` prefix
 # so modality/origin survives into conversation history.
 def tag_user_input(
     user_input: str,
     input_modality: InputModality,
     stimulus_source: Optional[str] = None,
+    state_trigger: Optional[str] = None,
+    voice_state_config: Optional[object] = None,
 ) -> str:
     """
     Prefix user_input with a message-type tag derived from modality + stimulus_source.
@@ -54,19 +66,45 @@ def tag_user_input(
     Voice                        -> [Message Type - Voice]
     Text (Dashboard typed)       -> [Message Type - Direct Keyboard]
     Stimulus (source="twitch")   -> [Message Type - Twitch Chat]
+    Stimulus (source="game_state") -> [Message Type - Game State]
     Stimulus (any other source)  -> [Message Type - Stimuli]  (catch-all)
+
+    When state_trigger is set and input is voice, a voice state injection
+    line is inserted between the tag and the transcription:
+        [Message Type - Voice]
+        The User interrupted you mid-sentence.
+        actual transcription here
 
     Tag uses ASCII hyphen for JSONL/YAML robustness. Preserves the original
     payload verbatim — only the prefix is added.
     """
     if stimulus_source == "twitch":
         tag = "[Message Type - Twitch Chat]"
+    elif stimulus_source == "twitch_event":
+        tag = "[Message Type - Twitch Event]"
+    elif stimulus_source == "game_state":
+        tag = "[Message Type - Game State]"
     elif stimulus_source or input_modality == InputModality.STIMULUS:
         tag = "[Message Type - Stimuli]"
     elif input_modality == InputModality.VOICE:
         tag = "[Message Type - Voice]"
     else:
         tag = "[Message Type - Direct Keyboard]"
+
+    # Inject voice state context between tag and content for voice inputs
+    if state_trigger and input_modality == InputModality.VOICE:
+        if voice_state_config is not None:
+            config_key = f"voice_state_{state_trigger}"
+            injection = getattr(voice_state_config, config_key, None)
+        else:
+            injection = None
+        if not injection:
+            injection = _DEFAULT_VOICE_STATE.get(state_trigger)
+        if injection:
+            if user_input:
+                return f"{tag}\n{injection}\n{user_input}"
+            return f"{tag}\n{injection}"
+
     return f"{tag} {user_input}" if user_input else tag
 
 
@@ -97,6 +135,7 @@ class OrchestratorCallbacks:
         event_bus: Optional[EventBus] = None,
         context_manager: Optional[ContextManager] = None,
         context_limit_getter: Optional[Callable[[], int]] = None,
+        orchestrator_config: Optional[object] = None,
     ):
         """
         Initialize orchestrator callbacks.
@@ -121,6 +160,7 @@ class OrchestratorCallbacks:
         self._tts_provider = tts_provider
         self._pipeline = llm_pipeline
         self._persona = persona
+        self._orchestrator_config = orchestrator_config
 
         self._on_response_ready = on_response_ready
         self._on_barge_in_triggered = on_barge_in_triggered
@@ -133,16 +173,40 @@ class OrchestratorCallbacks:
         self._on_response_ready_streaming: Optional[Callable[[np.ndarray], None]] = None
         self._append_playback_audio: Optional[Callable[[np.ndarray], None]] = None
         self._finalize_playback_streaming: Optional[Callable[[], None]] = None
+        self._is_playback_active: Optional[Callable[[], bool]] = None
+        # NANO-054b: Session TTS playback control
+        self._suppress_playback_complete: Optional[Callable[[], None]] = None
+        self._restore_playback_complete: Optional[Callable[[], None]] = None
+        self._on_session_playback_complete: Optional[Callable[[], None]] = None
         # NANO-112: Called when voice path completes without TTS (no playback to trigger state transition)
         self._on_tts_skipped: Optional[Callable[[], None]] = None
+        # Stimulus barge-in: transitions state machine LISTENING→PROCESSING
+        # so the TTS chain (PROCESSING→SYSTEM_SPEAKING→barge-in) works.
+        self._on_start_processing: Optional[Callable[[], None]] = None
         self._event_bus = event_bus
         self._context_manager = context_manager
+
+        # NANO-130 Phase 2: Chat-TTS client for reading Twitch messages aloud
+        self._chat_tts_client: Optional[object] = None
+        self._chat_tts_playback: Optional[object] = None
+        self._chat_tts_voice: str = "af_sarah"
+        self._chat_tts_speed: float = 1.1
+        self._chat_tts_format: str = "{username} says: {message}"
+        self._chat_tts_max_length: int = 100
 
         # NANO-115: Twitch audience transcript dual-write callback
         self._on_twitch_response: Optional[Callable[[str, list[str]], None]] = None
 
+        # NANO-116 B.2: Game dialogue dual-write + summarization callbacks
+        self._on_game_state_response: Optional[Callable[[str, list[int]], None]] = None
+        self._on_game_state_check_summarize: Optional[Callable[[], None]] = None
+
         # Runtime generation parameter overrides (NANO-053)
         self._generation_params: Optional[dict] = None
+
+        # NANO-121: Model cycling for stimulus responses
+        self._model_rotator = None
+        self._model_cycling_enabled: bool = False
 
         # NANO-076: Session file getter for snapshot sidecar persistence.
         # Set by VoiceAgentOrchestrator after construction.
@@ -154,6 +218,9 @@ class OrchestratorCallbacks:
         # NANO-110: Addressing-others state getters (set by orchestrator)
         self._is_addressing_others: Optional[Callable[[], bool]] = None
         self._consume_addressing_others_prompt: Optional[Callable[[], Optional[str]]] = None
+
+        # NANO-125: Mic passthrough state getter (set by orchestrator)
+        self._is_mic_passthrough: Optional[Callable[[], bool]] = None
 
         # Processing state
         self._processing_thread: Optional[threading.Thread] = None
@@ -215,6 +282,13 @@ class OrchestratorCallbacks:
                 # NANO-110: Suppress voice pipeline while addressing others
                 if self._is_addressing_others and self._is_addressing_others():
                     logger.info("[NANO-110] Voice input suppressed — addressing others")
+                    if self._on_empty_transcription is not None:
+                        self._on_empty_transcription()
+                    return
+
+                # NANO-125: Suppress voice pipeline during mic passthrough
+                if self._is_mic_passthrough and self._is_mic_passthrough():
+                    logger.debug("[NANO-125] Voice input suppressed — mic passthrough")
                     if self._on_empty_transcription is not None:
                         self._on_empty_transcription()
                     return
@@ -290,7 +364,11 @@ class OrchestratorCallbacks:
                     # 5. Generate response via LLM pipeline (returns PipelineResult)
                     # NANO-115 item #1: Tag user input with source prefix so
                     # modality persists into conversation history.
-                    tagged_input = tag_user_input(transcription, InputModality.VOICE)
+                    tagged_input = tag_user_input(
+                        transcription, InputModality.VOICE,
+                        state_trigger=state_trigger,
+                        voice_state_config=self._orchestrator_config.prompt_config if self._orchestrator_config else None,
+                    )
                     result = self._pipeline.run(
                         tagged_input,
                         self._persona,
@@ -346,8 +424,10 @@ class OrchestratorCallbacks:
                             result.block_contents,
                         )
 
-                    # Check for empty response
+                    # Check for empty response — must still transition state
                     if not response or response.strip() == "":
+                        if self._on_tts_skipped is not None:
+                            self._on_tts_skipped()
                         return
 
                     _voice_tts_off_chunks = None
@@ -357,9 +437,14 @@ class OrchestratorCallbacks:
                         # completed response. Split into sentences, fire TTS threads,
                         # delivery thread feeds playback in order.
                         if self._on_response_ready_streaming is not None:
-                            audio_response, _ = self._parallel_tts_delivery(
-                                tts_response, tts_config, display_text=response,
-                            )
+                            if self._tts_provider.get_properties().supports_streaming:
+                                audio_response, _ = self._session_tts_delivery(
+                                    tts_response, tts_config, display_text=response,
+                                )
+                            else:
+                                audio_response, _ = self._parallel_tts_delivery(
+                                    tts_response, tts_config, display_text=response,
+                                )
                             if audio_response is not None:
                                 self._total_turns += 1
                         else:
@@ -580,6 +665,139 @@ class OrchestratorCallbacks:
         audio = np.concatenate(ordered) if ordered else None
         return audio, sentence_chunks
 
+    def _session_tts_delivery(
+        self,
+        tts_text: str,
+        tts_config: dict,
+        display_text: Optional[str] = None,
+        suppress_final: bool = False,
+    ) -> tuple[Optional[np.ndarray], Optional[list]]:
+        """
+        Serial per-sentence TTS delivery for streaming providers (NANO-054b).
+
+        Orchestrator owns the sentence loop. Each sentence is an independent
+        synthesize() call with a fixed seed for voice consistency. Decoder
+        state resets per sentence (no carry-over) to eliminate boundary
+        stutter. Barge-in is a simple loop break.
+        """
+        import re
+        from ..llm.sentence_segmenter import merge_punctuation_fragments
+        from ..core.events import LLMChunkEvent
+
+        tts_sentences = re.split(r'(?<=[.!?。！？])\s+', tts_text.strip())
+        tts_sentences = [s.strip() for s in tts_sentences if s.strip()]
+        tts_sentences = merge_punctuation_fragments(tts_sentences)
+
+        raw = display_text or tts_text
+        display_sentences = re.split(r'(?<=[.!?。！？])\s+', raw.strip())
+        display_sentences = [s.strip() for s in display_sentences if s.strip()]
+        display_sentences = merge_punctuation_fragments(display_sentences)
+
+        sentence_chunks = [{"text": ds} for ds in display_sentences]
+
+        instruct_per_sentence: list[str] | None = None
+        instruct_template = tts_config.get("instruct_template") or getattr(self._tts_provider, "instruct_template", "")
+        if instruct_template and "{emotion}" in instruct_template and self._emotion_classifier:
+            instruct_per_sentence = []
+            for sent in tts_sentences:
+                emotion, _ = self._emotion_classifier.classify(sent)
+                if emotion:
+                    instruct_per_sentence.append(
+                        instruct_template.replace("{emotion}", emotion)
+                    )
+                else:
+                    instruct_per_sentence.append("")
+
+        with self._delivery_lock:
+            self._delivered_sentences = []
+
+        speaker = tts_config.get("speaker")
+        temperature = tts_config.get("temperature")
+        base_instruct = tts_config.get("instruct")
+        provider_seed = getattr(self._tts_provider, "_seed", 0)
+        seed = provider_seed if provider_seed else hash(tts_text) & 0x7FFFFFFF
+
+        audio_parts = []
+        playback_started = False
+        total = len(tts_sentences)
+
+        try:
+            if self._suppress_playback_complete is not None:
+                self._suppress_playback_complete()
+
+            for i, sentence in enumerate(tts_sentences):
+                if self._pending_state_trigger == "barge_in":
+                    break
+
+                sent_instruct = base_instruct
+                if instruct_per_sentence and i < len(instruct_per_sentence):
+                    sent_instruct = instruct_per_sentence[i]
+
+                result = self._tts_provider.synthesize(
+                    text=sentence,
+                    speaker=speaker,
+                    temperature=temperature,
+                    instruct=sent_instruct,
+                    seed=seed,
+                )
+
+                audio = np.frombuffer(result.data, dtype=np.float32)
+                if len(audio) == 0:
+                    continue
+
+                audio_parts.append(audio)
+
+                # Build callback that emits sub-bubble + tracks delivery
+                # when playback actually reaches this sentence
+                def _make_on_start(idx: int, is_final_sent: bool):
+                    def _on_start():
+                        if idx < len(display_sentences):
+                            with self._delivery_lock:
+                                self._delivered_sentences.append(display_sentences[idx])
+                        if idx < len(sentence_chunks) and self._event_bus is not None:
+                            chunk_final = is_final_sent and not suppress_final
+                            self._event_bus.emit(LLMChunkEvent(
+                                text=sentence_chunks[idx]["text"],
+                                is_final=chunk_final,
+                            ))
+                    return _on_start
+
+                on_start = _make_on_start(i, i == total - 1)
+
+                # Queue audio via streaming playback (one continuous stream)
+                if not playback_started:
+                    self._on_response_ready_streaming(audio, on_chunk_start=on_start)
+                    playback_started = True
+                else:
+                    self._append_playback_audio(audio, on_chunk_start=on_start)
+
+            if playback_started and self._pending_state_trigger != "barge_in":
+                self._finalize_playback_streaming()
+                # Block until all audio finishes playing
+                if self._is_playback_active is not None:
+                    logger.info("[NANO-054b] Waiting for playback to finish...")
+                    wait_start = time.time()
+                    while self._is_playback_active():
+                        if self._pending_state_trigger == "barge_in":
+                            logger.info("[NANO-054b] Barge-in during playback wait")
+                            break
+                        time.sleep(0.05)
+                    logger.info("[NANO-054b] Playback wait done (%.1fs)", time.time() - wait_start)
+        except Exception as e:
+            logger.warning(f"[NANO-054b] Session TTS delivery error: {e}")
+            if playback_started:
+                self._finalize_playback_streaming()
+        finally:
+            if self._restore_playback_complete is not None:
+                self._restore_playback_complete()
+            # Fire state transition only on normal completion (not barge-in)
+            if playback_started and self._pending_state_trigger != "barge_in":
+                if self._on_session_playback_complete is not None:
+                    self._on_session_playback_complete()
+
+        full_audio = np.concatenate(audio_parts) if audio_parts else None
+        return full_audio, sentence_chunks
+
     def _emit_text_only_chunks(self, response: str) -> Optional[list]:
         """
         NANO-112: Segment response into sentence chunks without TTS.
@@ -651,117 +869,26 @@ class OrchestratorCallbacks:
         from ..llm.pipeline import StreamingPipelineChunk
         from ..core.events import LLMChunkEvent
 
+        session_tts = self._tts_provider.get_properties().supports_streaming
+
         audio_results: dict[int, np.ndarray] = {}  # index → audio
         sentence_texts: dict[int, str] = {}  # index → display text for delivery-synced rendering
-        # sentence_emotions removed — emotion is classified once on full response
-        tts_threads: list[threading.Thread] = []
+        sentence_tts: dict[int, str] = {}  # index → tts text for re-dispatch
         lock = threading.Lock()
-        tts_semaphore = threading.Semaphore(3)  # NANO-111: cap concurrent Kokoro calls
-        total_chunks_dispatched = 0
-        all_chunks_dispatched = threading.Event()  # set when LLM stream ends
-
-        def synthesize_chunk(tts_text: str, index: int):
-            """Synthesize one sentence in a thread."""
-            with tts_semaphore:
-                try:
-                    result = self._tts_provider.synthesize(
-                        tts_text,
-                        voice=tts_config.get("voice"),
-                        **{k: v for k, v in tts_config.items() if k != "voice"},
-                    )
-                    audio = np.frombuffer(result.data, dtype=np.float32)
-                    with lock:
-                        audio_results[index] = audio
-                except Exception as e:
-                    logger.warning(f"[NANO-111] TTS failed for chunk {index}: {e}")
-                    with lock:
-                        audio_results[index] = np.array([], dtype=np.float32)
-
-        # Separate delivery thread: continuously delivers TTS audio to playback
-        # in order, independent of the LLM generation loop.
-        playback_started = False
-
-        def _make_chunk_start_cb(
-            display_text: str,
-            is_final: bool,
-        ):
-            """Create a closure that emits sentence text when playback reaches this chunk."""
-            def cb():
-                # Phase 2.5: Track delivery at playback time, not queue time.
-                if display_text:
-                    with self._delivery_lock:
-                        self._delivered_sentences.append(display_text)
-                if display_text and self._event_bus is not None:
-                    from ..core.events import LLMChunkEvent
-                    self._event_bus.emit(LLMChunkEvent(
-                        text=display_text,
-                        is_final=is_final,
-                    ))
-            return cb
 
         # NANO-111 Phase 2.5: Reset delivery tracking for this response
         with self._delivery_lock:
             self._delivered_sentences = []
 
-        def delivery_loop():
-            nonlocal playback_started
-            next_to_deliver = 0
-            while True:
-                # Check if the next chunk is ready
-                with lock:
-                    ready = next_to_deliver in audio_results
-                    total = total_chunks_dispatched
-                    done = all_chunks_dispatched.is_set()
-
-                if ready:
-                    with lock:
-                        audio_chunk = audio_results[next_to_deliver]
-                        display_text = sentence_texts.get(next_to_deliver, "")
-
-                    # NANO-111 Session 606: Text renders when playback
-                    # reaches this chunk — [text][tts][text][tts] via playback callbacks.
-                    is_final_chunk = done and next_to_deliver >= total - 1
-                    start_cb = _make_chunk_start_cb(
-                        display_text, is_final_chunk,
-                    )
-
-                    if len(audio_chunk) > 0:
-                        if not playback_started:
-                            # First chunk: fire text callback immediately from
-                            # delivery thread — don't wait for monitor's 10ms poll.
-                            # The monitor would check pos >= 0 which is always true,
-                            # but by then response event may have already arrived.
-                            start_cb()
-                            self._on_response_ready_streaming(audio_chunk)
-                            playback_started = True
-                        else:
-                            self._append_playback_audio(
-                                audio_chunk,
-                                on_chunk_start=start_cb,
-                            )
-                    next_to_deliver += 1
-                elif done and next_to_deliver >= total:
-                    # All chunks dispatched and delivered
-                    break
-                else:
-                    # Not ready yet — poll briefly
-                    time.sleep(0.02)
-
-            self._finalize_playback_streaming()
-
-        delivery_thread = threading.Thread(target=delivery_loop, daemon=True)
-        delivery_thread.start()
-
         full_display_text = []
         full_tts_text = []
 
-        # NANO-111 Session 606: No per-token callback on voice path.
-        # Text renders in sync with TTS delivery, not LLM generation.
-        # The delivery thread emits LLMChunkEvent per sentence right
-        # before audio plays — [text][tts][text][tts] ordering.
-
         # NANO-115 item #1: Tag user input with source prefix.
-        tagged_input = tag_user_input(transcription, InputModality.VOICE)
+        tagged_input = tag_user_input(
+            transcription, InputModality.VOICE,
+            state_trigger=state_trigger,
+            voice_state_config=self._orchestrator_config.prompt_config if self._orchestrator_config else None,
+        )
         for chunk in self._pipeline.run_stream(
             tagged_input,
             self._persona,
@@ -774,28 +901,121 @@ class OrchestratorCallbacks:
             full_display_text.append(chunk.display_text)
             full_tts_text.append(chunk.tts_text)
 
-            # Fire TTS in parallel thread if there's text to speak
             if chunk.tts_text.strip():
-                # Store display text for delivery-synced rendering
                 with lock:
                     sentence_texts[chunk.index] = chunk.display_text
-                t = threading.Thread(
-                    target=synthesize_chunk,
-                    args=(chunk.tts_text, chunk.index),
-                    daemon=True,
-                )
-                t.start()
-                tts_threads.append(t)
-                with lock:
-                    total_chunks_dispatched += 1
+                    sentence_tts[chunk.index] = chunk.tts_text
 
-        # LLM stream complete — signal delivery thread
-        for t in tts_threads:
-            t.join()
-        all_chunks_dispatched.set()
+        if session_tts:
+            tts_text_joined = " ".join(t for t in full_tts_text if t.strip())
+            display_text_joined = " ".join(t for t in full_display_text if t.strip())
+            self._last_response = display_text_joined
+            session_audio, _ = self._session_tts_delivery(
+                tts_text_joined, tts_config, display_text=display_text_joined,
+                suppress_final=True,
+            )
+            if session_audio is not None:
+                audio_results[0] = session_audio
+        else:
+            # Parallel per-sentence TTS (Kokoro): fire threads during LLM
+            # stream, deliver audio in sentence order.
+            tts_threads: list[threading.Thread] = []
+            tts_semaphore = threading.Semaphore(3)
+            total_chunks_dispatched = 0
+            all_chunks_dispatched = threading.Event()
 
-        # Wait for delivery to finish
-        delivery_thread.join()
+            def synthesize_chunk(tts_text: str, index: int):
+                with tts_semaphore:
+                    try:
+                        result = self._tts_provider.synthesize(
+                            tts_text,
+                            voice=tts_config.get("voice"),
+                            **{k: v for k, v in tts_config.items() if k != "voice"},
+                        )
+                        audio = np.frombuffer(result.data, dtype=np.float32)
+                        with lock:
+                            audio_results[index] = audio
+                    except Exception as e:
+                        logger.warning(f"[NANO-111] TTS failed for chunk {index}: {e}")
+                        with lock:
+                            audio_results[index] = np.array([], dtype=np.float32)
+
+            playback_started = False
+
+            def _make_chunk_start_cb(
+                display_text: str,
+                is_final: bool,
+            ):
+                def cb():
+                    if display_text:
+                        with self._delivery_lock:
+                            self._delivered_sentences.append(display_text)
+                    if display_text and self._event_bus is not None:
+                        from ..core.events import LLMChunkEvent
+                        self._event_bus.emit(LLMChunkEvent(
+                            text=display_text,
+                            is_final=is_final,
+                        ))
+                return cb
+
+            def delivery_loop():
+                nonlocal playback_started
+                next_to_deliver = 0
+                while True:
+                    with lock:
+                        ready = next_to_deliver in audio_results
+                        total = total_chunks_dispatched
+                        done = all_chunks_dispatched.is_set()
+
+                    if ready:
+                        with lock:
+                            audio_chunk = audio_results[next_to_deliver]
+                            display_text = sentence_texts.get(next_to_deliver, "")
+
+                        is_final_chunk = done and next_to_deliver >= total - 1
+                        start_cb = _make_chunk_start_cb(
+                            display_text, is_final_chunk,
+                        )
+
+                        if len(audio_chunk) > 0:
+                            if not playback_started:
+                                start_cb()
+                                self._on_response_ready_streaming(audio_chunk)
+                                playback_started = True
+                            else:
+                                self._append_playback_audio(
+                                    audio_chunk,
+                                    on_chunk_start=start_cb,
+                                )
+                        next_to_deliver += 1
+                    elif done and next_to_deliver >= total:
+                        break
+                    else:
+                        time.sleep(0.02)
+
+                self._finalize_playback_streaming()
+
+            delivery_thread = threading.Thread(target=delivery_loop, daemon=True)
+            delivery_thread.start()
+
+            # Re-dispatch accumulated chunks to parallel TTS threads
+            for idx in sorted(sentence_tts.keys()):
+                tts_text = sentence_tts[idx]
+                if tts_text.strip():
+                    t = threading.Thread(
+                        target=synthesize_chunk,
+                        args=(tts_text, idx),
+                        daemon=True,
+                    )
+                    t.start()
+                    tts_threads.append(t)
+                    with lock:
+                        total_chunks_dispatched += 1
+
+            for t in tts_threads:
+                t.join()
+            all_chunks_dispatched.set()
+            delivery_thread.join()
 
         # --- Deferred post-processor results (NANO-111 Session 606) ---
         # run_stream() now runs post-processors after the stream ends and
@@ -804,27 +1024,33 @@ class OrchestratorCallbacks:
 
         if result is not None:
             response = result.content
-            self._last_response = response
+            barged = self._pending_state_trigger == "barge_in"
+            if not barged:
+                self._last_response = response
 
             # Classify emotion on full response for final event
             emotion, emotion_confidence = self._classify_emotion(response or "")
 
-            # Build per-sentence chunks list for sub-bubble display (text only)
+            # Build per-sentence chunks list for sub-bubble display (text only).
+            # Session TTS already emitted LLMChunkEvents during playback —
+            # don't duplicate with response_chunks or the frontend renders
+            # two bubbles.
             response_chunks = None
-            with lock:
-                if sentence_texts:
-                    response_chunks = []
-                    for idx in sorted(sentence_texts.keys()):
-                        response_chunks.append({
-                            "text": sentence_texts[idx],
-                        })
+            if not session_tts:
+                with lock:
+                    if sentence_texts:
+                        response_chunks = []
+                        for idx in sorted(sentence_texts.keys()):
+                            response_chunks.append({
+                                "text": sentence_texts[idx],
+                            })
 
-            # Emit response event with full metadata + chunks
+            display_response = self._last_response if barged else response
             print(f"[NANO-111] response_chunks={response_chunks}", flush=True)
             if self._event_bus is not None:
                 self._event_bus.emit(
                     ResponseReadyEvent(
-                        text=response or "",
+                        text=display_response or "",
                         user_input=transcription,
                         activated_codex_entries=result.activated_codex_entries,
                         retrieved_memories=result.retrieved_memories,
@@ -875,9 +1101,9 @@ class OrchestratorCallbacks:
                     result.block_contents,
                 )
         else:
-            # Fallback: no stream result (shouldn't happen, but defensive)
             response = " ".join(full_display_text)
-            self._last_response = response
+            if self._pending_state_trigger != "barge_in":
+                self._last_response = response
 
         if not response or response.strip() == "":
             return None
@@ -931,6 +1157,40 @@ class OrchestratorCallbacks:
         if self._on_barge_in_triggered is not None:
             self._on_barge_in_triggered()
 
+    def trigger_self_barge_in(self) -> None:
+        """Handle game-event self-interruption during TTS (NANO-124).
+
+        Called by GameStateModule when the barge-in probability roll
+        succeeds. Reuses the same truncation logic as audio barge-in
+        but does not set a state trigger — the LLM doesn't need to
+        know it interrupted itself; the barge-in prompt template
+        carries all context.
+        """
+        with self._delivery_lock:
+            delivered = list(self._delivered_sentences)
+
+        if delivered and self._last_response:
+            truncated = " ".join(delivered)
+            if len(truncated) < len(self._last_response):
+                logger.info(
+                    "[NANO-124] Self-barge-in truncation: %d/%d chars delivered (%d sentences)",
+                    len(truncated), len(self._last_response), len(delivered),
+                )
+                self._last_response = truncated
+
+                if self._history_manager is not None:
+                    self._history_manager.amend_last_assistant_content(truncated)
+
+                if self._event_bus is not None:
+                    from ..core.events import BargeInTruncatedEvent
+                    self._event_bus.emit(BargeInTruncatedEvent(
+                        truncated_text=truncated,
+                        delivered_sentences=len(delivered),
+                    ))
+
+        if self._on_barge_in_triggered is not None:
+            self._on_barge_in_triggered()
+
     def _emit_state_change(self, from_state: str, to_state: str, trigger: str) -> None:
         """
         Emit a synthetic state change event.
@@ -946,6 +1206,60 @@ class OrchestratorCallbacks:
                     trigger=trigger,
                 )
             )
+
+    def _reconnect_chat_tts_client(self, cfg) -> None:
+        """Rebuild the chat-TTS KokoroTTS client from current config."""
+        from ..tts.builtin.kokoro.client import KokoroTTS
+
+        self._chat_tts_client = KokoroTTS(
+            host=cfg.twitch_chat_tts_host,
+            port=cfg.twitch_chat_tts_port,
+            timeout=10.0,
+            max_retries=1,
+            retry_delay=0.5,
+        )
+        self._chat_tts_voice = cfg.twitch_chat_tts_voice
+        self._chat_tts_speed = cfg.twitch_chat_tts_speed
+        self._chat_tts_format = cfg.twitch_chat_tts_format
+        self._chat_tts_max_length = cfg.twitch_chat_tts_max_length
+        print(
+            f"[NANO-130] Chat-TTS client connected: {cfg.twitch_chat_tts_host}:{cfg.twitch_chat_tts_port} "
+            f"voice={cfg.twitch_chat_tts_voice} speed={cfg.twitch_chat_tts_speed:.1f}",
+            flush=True,
+        )
+
+    def _synthesize_chat_tts(self, username: str, message: str) -> Optional[np.ndarray]:
+        """Synthesize a chat message via the dedicated chat-TTS Kokoro instance.
+
+        Returns float32 audio array at 24000 Hz, or None on failure.
+        """
+        if self._chat_tts_client is None:
+            return None
+
+        tts_text = self._chat_tts_format.format(
+            username=username,
+            message=message[:self._chat_tts_max_length],
+        )
+
+        try:
+            if not self._chat_tts_client.is_server_available():
+                print("[NANO-130] Chat-TTS server not available", flush=True)
+                return None
+
+            audio = self._chat_tts_client.synthesize(
+                text=tts_text,
+                voice=self._chat_tts_voice,
+                speed=self._chat_tts_speed,
+                use_blend=False,
+            )
+            print(
+                f"[NANO-130] Chat-TTS synthesized: {tts_text[:60]} ({len(audio) / 24000.0 if len(audio) > 0 else 0.0:.1f}s)",
+                flush=True,
+            )
+            return audio
+        except Exception as e:
+            print(f"[NANO-130] Chat-TTS synthesis failed: {e}", flush=True)
+            return None
 
     def process_text_input(
         self,
@@ -970,12 +1284,17 @@ class OrchestratorCallbacks:
                 Twitch chat content for prompt block injection). NANO-056b.
         """
         def process():
-            # Suppress VAD during text input to prevent phantom triggers
-            if self._on_pause_listening is not None:
+            # For stimulus sources, use real state machine transitions so
+            # barge-in works during TTS playback.  For keyboard text input,
+            # suppress VAD to prevent phantom triggers (existing behavior).
+            use_state_machine = bool(stimulus_source) and self._on_start_processing is not None
+            if use_state_machine:
+                self._on_start_processing()
+            elif self._on_pause_listening is not None:
                 self._on_pause_listening()
 
             self._processing_start_time = time.time()
-            current_state = "idle"  # Track state for synthetic transitions
+            current_state = "listening" if use_state_machine else "idle"
 
             try:
                 # Store as transcription (matches normal flow)
@@ -1028,15 +1347,123 @@ class OrchestratorCallbacks:
                 # NANO-115 item #1: Tag user input with source prefix so
                 # modality/origin persists into conversation history.
                 tagged_input = tag_user_input(transcription, modality, stimulus_source)
+
+                # NANO-121: Model cycling for stimulus responses
+                gen_params = self._generation_params
+                effective_metadata = stimulus_metadata
+                if (
+                    stimulus_source
+                    and self._model_cycling_enabled
+                    and self._model_rotator is not None
+                ):
+                    cycled_model = self._model_rotator.select()
+                    if cycled_model:
+                        gen_params = dict(gen_params) if gen_params else {}
+                        gen_params["model"] = cycled_model
+                        if effective_metadata is None:
+                            effective_metadata = {}
+                        effective_metadata["cycled_model"] = cycled_model
+                        logger.info(
+                            "Model cycling: stimulus=%s, model=%s",
+                            stimulus_source,
+                            cycled_model,
+                        )
+
+                # NANO-131: Emit approved message for OBS overlay
+                # (before chat-TTS so the message appears on screen as it's read aloud)
+                if (
+                    stimulus_source == "twitch"
+                    and self._event_bus is not None
+                    and stimulus_metadata
+                    and stimulus_metadata.get("messages")
+                ):
+                    _approved = stimulus_metadata["messages"][0]
+                    _sel_info = stimulus_metadata.get("selection", {})
+                    self._event_bus.emit(
+                        TwitchMessageApprovedEvent(
+                            username=_approved.get("username", ""),
+                            message_text=_approved.get("text", ""),
+                            candidate_count=_sel_info.get("candidates", 0),
+                            stale_dropped=_sel_info.get("stale_dropped", 0),
+                        )
+                    )
+
+                # NANO-132: Emit follow event for OBS overlay
+                if (
+                    stimulus_source == "twitch_event"
+                    and self._event_bus is not None
+                    and stimulus_metadata
+                ):
+                    self._event_bus.emit(
+                        TwitchFollowEvent(
+                            message=stimulus_metadata.get("overlay_message", ""),
+                            usernames=stimulus_metadata.get("usernames", []),
+                            follower_count=stimulus_metadata.get("follower_count", 0),
+                        )
+                    )
+
+                # NANO-130 Phase 2: Chat-TTS — read the selected Twitch
+                # message aloud before the LLM responds.
+                if (
+                    stimulus_source == "twitch"
+                    and self._chat_tts_client is not None
+                    and self._chat_tts_playback is not None
+                    and stimulus_metadata
+                    and stimulus_metadata.get("messages")
+                ):
+                    selected = stimulus_metadata["messages"][0]
+                    chat_audio = self._synthesize_chat_tts(
+                        username=selected.get("username", "someone"),
+                        message=selected.get("text", ""),
+                    )
+                    if chat_audio is not None and len(chat_audio) > 0:
+                        max_duration = len(chat_audio) / 24000.0 + 5.0
+                        self._chat_tts_playback.play(chat_audio)
+                        if not self._chat_tts_playback.wait(timeout=max_duration):
+                            print("[NANO-130] Chat-TTS playback timed out — skipping", flush=True)
+                            self._chat_tts_playback.stop()
+
+                # NANO-132: Chat-TTS for follow events — read announcement aloud
+                if (
+                    stimulus_source == "twitch_event"
+                    and self._chat_tts_client is not None
+                    and self._chat_tts_playback is not None
+                    and stimulus_metadata
+                    and stimulus_metadata.get("overlay_message")
+                ):
+                    follow_text = stimulus_metadata["overlay_message"]
+                    try:
+                        if self._chat_tts_client.is_server_available():
+                            chat_audio = self._chat_tts_client.synthesize(
+                                text=follow_text,
+                                voice=self._chat_tts_voice,
+                                speed=self._chat_tts_speed,
+                                use_blend=False,
+                            )
+                            if chat_audio is not None and len(chat_audio) > 0:
+                                print(
+                                    f"[NANO-132] Chat-TTS follow: {follow_text} ({len(chat_audio) / 24000.0:.1f}s)",
+                                    flush=True,
+                                )
+                                max_duration = len(chat_audio) / 24000.0 + 5.0
+                                self._chat_tts_playback.play(chat_audio)
+                                if not self._chat_tts_playback.wait(timeout=max_duration):
+                                    print("[NANO-132] Chat-TTS follow playback timed out — skipping", flush=True)
+                                    self._chat_tts_playback.stop()
+                        else:
+                            print("[NANO-132] Chat-TTS server not available for follow", flush=True)
+                    except Exception as e:
+                        print(f"[NANO-132] Chat-TTS follow synthesis failed: {e}", flush=True)
+
                 result = self._pipeline.run(
                     tagged_input,
                     self._persona,
-                    generation_params=self._generation_params,
+                    generation_params=gen_params,
                     state_trigger=state_trigger,
                     input_modality=modality,
                     last_assistant_message=None,
                     stimulus_source=stimulus_source,
-                    stimulus_metadata=stimulus_metadata,
+                    stimulus_metadata=effective_metadata,
                 )
                 response = result.content
                 tts_response = result.tts_text or response  # NANO-109
@@ -1054,6 +1481,15 @@ class OrchestratorCallbacks:
                     reply_text = tts_response if tts_response else response
                     if reply_text:
                         self._on_twitch_response(reply_text, usernames)
+
+                # NANO-116 B.2: Dual-write assistant reply to dialogue store
+                # + trigger summarization if overflow
+                if stimulus_source == "game_state" and self._on_game_state_response:
+                    reply_text = tts_response if tts_response else response
+                    if reply_text:
+                        self._on_game_state_response(reply_text, [])
+                    if self._on_game_state_check_summarize:
+                        self._on_game_state_check_summarize()
 
                 # Classify emotion for avatar + chat display (NANO-094)
                 emotion, emotion_confidence = self._classify_emotion(response or "")
@@ -1109,8 +1545,10 @@ class OrchestratorCallbacks:
 
                 # Check for empty response
                 if not response or response.strip() == "":
-                    # Return to idle on empty response
+                    # Return to idle/listening on empty response
                     self._emit_state_change(current_state, "idle", "empty_response")
+                    if use_state_machine and self._on_tts_skipped is not None:
+                        self._on_tts_skipped()
                     return
 
                 # Synthesize speech via provider (unless skip_tts requested)
@@ -1125,9 +1563,15 @@ class OrchestratorCallbacks:
 
                     # NANO-111: Parallel TTS delivery for text input path
                     if self._on_response_ready_streaming is not None:
-                        audio_response, _text_input_chunks = self._parallel_tts_delivery(
-                            tts_response, tts_config, display_text=response,
-                        )
+                        if self._tts_provider.get_properties().supports_streaming:
+                            audio_response, _text_input_chunks = self._session_tts_delivery(
+                                tts_response, tts_config, display_text=response,
+                                suppress_final=True,
+                            )
+                        else:
+                            audio_response, _text_input_chunks = self._parallel_tts_delivery(
+                                tts_response, tts_config, display_text=response,
+                            )
                         if audio_response is not None:
                             self._total_turns += 1
                     else:
@@ -1150,6 +1594,8 @@ class OrchestratorCallbacks:
                     _text_input_chunks = self._emit_text_only_chunks(response)
                     self._total_turns += 1
                     self._emit_state_change(current_state, "idle", "response_complete")
+                    if use_state_machine and self._on_tts_skipped is not None:
+                        self._on_tts_skipped()
 
                 # NANO-111 Session 606: Emit response event AFTER TTS.
                 # When streaming callbacks are wired, llm_chunk events already
@@ -1199,10 +1645,14 @@ class OrchestratorCallbacks:
 
                 # NANO-031: Return to idle on error
                 self._emit_state_change(current_state, "idle", "error")
+                if use_state_machine and self._on_tts_skipped is not None:
+                    self._on_tts_skipped()
 
             finally:
-                # Re-enable VAD after text input processing completes
-                if self._on_resume_listening is not None:
+                # Re-enable VAD after text input processing completes.
+                # Stimulus sources use real state machine transitions instead
+                # of VAD suppression — state machine handles the return to LISTENING.
+                if not use_state_machine and self._on_resume_listening is not None:
                     self._on_resume_listening()
 
         # Run processing in background thread
@@ -1243,6 +1693,11 @@ class OrchestratorCallbacks:
             params: Dict with temperature/max_tokens/top_p overrides, or None.
         """
         self._generation_params = params
+
+    def update_model_rotation(self, enabled: bool, rotator) -> None:
+        """Update model cycling state (NANO-121)."""
+        self._model_cycling_enabled = enabled
+        self._model_rotator = rotator
 
     @property
     def last_transcription(self) -> Optional[str]:

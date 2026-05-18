@@ -10,9 +10,12 @@ import {
   connect,
   emitAddressingStart,
   emitAddressingStop,
+  emitMicPassthroughOn,
+  emitMicPassthroughOff,
   setOnContextsUpdated,
   setOnStateChanged,
   setOnConnectionChanged,
+  setOnMicPassthroughChanged,
   type AddressingContext,
 } from "./ws-client";
 
@@ -25,6 +28,7 @@ let contexts: AddressingContext[] = [
 ];
 let activeContextId: string | null = null;
 let connected = false;
+let micPassthroughActive = false;
 
 // ── DOM ──────────────────────────────────────────────────────────────
 
@@ -32,6 +36,14 @@ const app = document.getElementById("app")!;
 
 function render(): void {
   app.innerHTML = "";
+
+  // Drag grip bar
+  const grip = document.createElement("div");
+  grip.className = "drag-grip";
+  for (let i = 0; i < 5; i++) {
+    grip.appendChild(document.createElement("span"));
+  }
+  app.appendChild(grip);
 
   // Status bar
   const status = document.createElement("div");
@@ -76,6 +88,17 @@ function render(): void {
   }
 
   app.appendChild(grid);
+
+  // NANO-125: Mic passthrough toggle
+  const micBtn = document.createElement("button");
+  micBtn.className = `deck-btn mic-passthrough ${micPassthroughActive ? "active" : ""}`;
+  micBtn.textContent = micPassthroughActive ? "MIC LIVE" : "MIC PASS";
+  micBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    toggleMicPassthrough();
+  });
+  micBtn.addEventListener("contextmenu", (e) => e.preventDefault());
+  app.appendChild(micBtn);
 }
 
 // ── Actions ──────────────────────────────────────────────────────────
@@ -97,6 +120,16 @@ function deactivateContext(): void {
   render();
 }
 
+function toggleMicPassthrough(): void {
+  micPassthroughActive = !micPassthroughActive;
+  if (micPassthroughActive) {
+    emitMicPassthroughOn();
+  } else {
+    emitMicPassthroughOff();
+  }
+  render();
+}
+
 // ── Window resize ────────────────────────────────────────────────────
 
 function resizeWindow(): void {
@@ -104,8 +137,10 @@ function resizeWindow(): void {
   const buttonHeight = 48;
   const gap = 8;
   const statusHeight = 24;
+  const dragGripHeight = 15;
   const padding = 24; // 12px top + 12px bottom
-  const targetHeight = statusHeight + padding + contexts.length * buttonHeight + (contexts.length - 1) * gap;
+  const totalButtons = contexts.length + 1; // +1 for mic passthrough
+  const targetHeight = dragGripHeight + statusHeight + padding + totalButtons * buttonHeight + (totalButtons - 1) * gap;
 
   // Dynamically resize the Tauri window
   import("@tauri-apps/api/window").then(({ getCurrentWindow, LogicalSize }) => {
@@ -131,6 +166,11 @@ setOnStateChanged((state) => {
 
 setOnConnectionChanged((isConnected) => {
   connected = isConnected;
+  render();
+});
+
+setOnMicPassthroughChanged((state) => {
+  micPassthroughActive = state.active;
   render();
 });
 

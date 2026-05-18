@@ -29,6 +29,12 @@ let animationConfig: AnimationConfig | null = null;
 // Track which clip name is currently playing for dedup
 let currentClipName: string | null = null;
 
+// Curious/Thinking hold state — body pose locks for a duration, face stays reactive
+let curiousHoldActive = false;
+let curiousHoldTimer: ReturnType<typeof setTimeout> | null = null;
+let curiousHoldDuration = 8.0; // seconds — updated from backend config
+let angryHoldDuration = 8.0; // seconds — updated from backend config
+
 // NANO-099: Base animations fallback (global defaults from Settings)
 export interface BaseAnimationsConfig {
   idle: string | null;
@@ -69,6 +75,7 @@ export function disposeMixer(): void {
   loadedClips.clear();
   clipPlaying = false;
   currentClipName = null;
+  cancelCuriousHold();
   // animationConfig is NOT cleared here — it's character-level state
   // set externally via setAnimationConfig(), not owned by the mixer.
 }
@@ -81,6 +88,57 @@ export function updateMixer(delta: number): void {
 /** True when a keyframed animation clip is driving the skeleton. */
 export function isClipPlaying(): boolean {
   return clipPlaying;
+}
+
+/** True when the Thinking/Curious body pose is locked in its hold window. */
+export function isCuriousHoldActive(): boolean {
+  return curiousHoldActive;
+}
+
+/** Set the curious hold duration (seconds). Called from config updates. */
+export function setCuriousHoldDuration(seconds: number): void {
+  curiousHoldDuration = seconds;
+}
+
+/** Set the angry hold duration (seconds). Called from config updates. */
+export function setAngryHoldDuration(seconds: number): void {
+  angryHoldDuration = seconds;
+}
+
+let idleClampOnce = localStorage.getItem('spindl-idle-clamp-once') === '1';
+let idleClampHolding = false;
+
+/** When true, idle clips play once and freeze on the last frame instead of looping. */
+export function setIdleClampOnce(value: boolean): void {
+  idleClampOnce = value;
+  localStorage.setItem('spindl-idle-clamp-once', value ? '1' : '0');
+}
+
+export function getIdleClampOnce(): boolean {
+  return idleClampOnce;
+}
+
+/** True when an idle clamp-once clip has finished playing and is frozen on the last frame. */
+export function isIdleClampHolding(): boolean {
+  return idleClampHolding;
+}
+
+/** Re-play the current idle/default clip with the current clamp mode. */
+export function replayIdle(): void {
+  const defaultClip = animationConfig?.default ?? baseAnimations.idle;
+  if (defaultClip && loadedClips.has(defaultClip)) {
+    currentClipName = null;
+    playClip(defaultClip, 0.3, idleClampOnce);
+  }
+}
+
+/** Cancel any active curious hold and release the body. */
+export function cancelCuriousHold(): void {
+  if (curiousHoldTimer) {
+    clearTimeout(curiousHoldTimer);
+    curiousHoldTimer = null;
+  }
+  curiousHoldActive = false;
 }
 
 /**
@@ -111,14 +169,23 @@ export async function loadFBXClip(name: string, filePath: string): Promise<void>
 /**
  * Crossfade to a named clip. If already playing a different clip,
  * crossfades from the current action.
+ *
+ * When `clampOnce` is true, the clip plays once and freezes on the last
+ * frame instead of looping. Used for Thinking/Curious body poses.
  */
-export function playClip(name: string, crossfadeDuration = 0.3): void {
+export function playClip(name: string, crossfadeDuration = 0.3, clampOnce = false): void {
   if (!mixer) return;
   const clip = loadedClips.get(name);
   if (!clip) return;
 
   const newAction = mixer.clipAction(clip);
-  newAction.setLoop(THREE.LoopRepeat, Infinity);
+  if (clampOnce) {
+    newAction.setLoop(THREE.LoopOnce, 1);
+    newAction.clampWhenFinished = true;
+  } else {
+    newAction.setLoop(THREE.LoopRepeat, Infinity);
+    newAction.clampWhenFinished = false;
+  }
 
   if (currentAction && currentAction !== newAction) {
     newAction.reset();
@@ -132,6 +199,17 @@ export function playClip(name: string, crossfadeDuration = 0.3): void {
   currentAction = newAction;
   currentClipName = name;
   clipPlaying = true;
+  idleClampHolding = false;
+
+  if (clampOnce) {
+    const onFinished = (e: { action: THREE.AnimationAction }) => {
+      if (e.action === newAction) {
+        mixer?.removeEventListener('finished', onFinished);
+        idleClampHolding = true;
+      }
+    };
+    mixer.addEventListener('finished', onFinished);
+  }
 }
 
 /** Fade out the current action and return to procedural idle. */
@@ -241,6 +319,10 @@ export async function loadAnimationsWithFallback(
   }
 }
 
+// Moods that clamp-and-hold: play once, freeze on last frame, hold for duration
+const CLAMP_HOLD_MOODS = new Set(['curious', 'surprised', 'annoyed']);
+const ANGRY_MOODS = new Set(['annoyed']);
+
 /**
  * Emotion-driven animation crossfade (NANO-098 Session 3).
  *
@@ -248,19 +330,28 @@ export async function loadAnimationsWithFallback(
  * animation config, crossfade to the emotion clip. Otherwise, crossfade
  * back to the default idle clip. Skips if the target clip is already playing.
  *
+ * Curious/Thinking and Angry clips play once (LoopOnce + clampWhenFinished)
+ * and hold the final pose for `curiousHoldDuration` seconds. During the
+ * hold, other emotion body animations are blocked — only the face reacts.
+ *
  * No-op when animationConfig is null (context menu behavior preserved).
  */
 export function updateEmotionAnimation(mood: string | null, confidence: number): void {
   if (!mixer) return;
-  // Allow base animations fallback even without per-character animationConfig
+
+  // During a curious hold, block all body animation changes
+  if (curiousHoldActive) return;
+
   const emotions = animationConfig?.emotions;
+  const isClampHoldMood = mood !== null && CLAMP_HOLD_MOODS.has(mood);
 
   // Check if current mood has a per-character animation above threshold
   if (mood && emotions && mood in emotions) {
     const { threshold, clip } = emotions[mood];
     if (confidence >= threshold && loadedClips.has(clip)) {
-      if (currentClipName === clip) return; // already playing
-      playClip(clip);
+      if (currentClipName === clip) return;
+      playClip(clip, 0.3, isClampHoldMood);
+      if (isClampHoldMood) startClampHold(mood);
       return;
     }
   }
@@ -271,7 +362,8 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
     const baseClip = baseAnimations[slot];
     if (baseClip && loadedClips.has(baseClip)) {
       if (currentClipName === baseClip) return;
-      playClip(baseClip);
+      playClip(baseClip, 0.3, isClampHoldMood);
+      if (isClampHoldMood) startClampHold(mood);
       return;
     }
   }
@@ -279,7 +371,28 @@ export function updateEmotionAnimation(mood: string | null, confidence: number):
   // Below threshold / no config / no base animation — return to default idle
   const defaultClip = animationConfig?.default ?? baseAnimations.idle;
   if (defaultClip && loadedClips.has(defaultClip)) {
-    if (currentClipName === defaultClip) return; // already playing
-    playClip(defaultClip);
+    if (currentClipName === defaultClip) return;
+    playClip(defaultClip, 0.3, idleClampOnce);
   }
+}
+
+/**
+ * Start the clamp hold timer. The body stays clamped on the last frame
+ * of the emotion clip. When the timer expires, crossfade back to idle.
+ * Uses angry_hold_duration for annoyed mood, curious_hold_duration for others.
+ */
+function startClampHold(mood: string): void {
+  cancelCuriousHold();
+  curiousHoldActive = true;
+  const duration = ANGRY_MOODS.has(mood) ? angryHoldDuration : curiousHoldDuration;
+  curiousHoldTimer = setTimeout(() => {
+    curiousHoldActive = false;
+    curiousHoldTimer = null;
+    const defaultClip = animationConfig?.default ?? baseAnimations.idle;
+    if (defaultClip && loadedClips.has(defaultClip)) {
+      playClip(defaultClip, 0.3, idleClampOnce);
+    } else {
+      stopClip();
+    }
+  }, duration * 1000);
 }

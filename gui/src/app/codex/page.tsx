@@ -7,8 +7,11 @@ import {
   createCodexEntryApi,
   updateCodexEntryApi,
   deleteCodexEntryApi,
+  createVolumeApi,
+  updateVolumeApi,
+  deleteVolumeApi,
 } from "@/lib/stores";
-import { CodexEntryList, CodexEntryForm } from "@/components/codex";
+import { CodexEntryList, CodexEntryForm, VolumeManager } from "@/components/codex";
 import type { CharacterBookEntry } from "@/types/events";
 
 export default function CodexPage() {
@@ -16,12 +19,14 @@ export default function CodexPage() {
     globalEntries,
     globalCodexName,
     isLoadingGlobal,
+    volumes,
     editingEntry,
     editingEntryCharacterId,
     isNewEntry,
     lastAction,
     setLoadingGlobal,
     setGlobalCodex,
+    setVolumes,
     startEditEntry,
     startNewEntry,
     updateEditingEntry,
@@ -40,7 +45,7 @@ export default function CodexPage() {
       setLoadingGlobal(true);
       try {
         const data = await fetchGlobalCodex();
-        setGlobalCodex(data.entries, data.name);
+        setGlobalCodex(data.entries, data.name, data.volumes);
       } catch (error) {
         console.error("Failed to fetch global codex:", error);
         setActionError(error instanceof Error ? error.message : "Failed to fetch global codex");
@@ -63,7 +68,7 @@ export default function CodexPage() {
     setLoadingGlobal(true);
     try {
       const data = await fetchGlobalCodex();
-      setGlobalCodex(data.entries, data.name);
+      setGlobalCodex(data.entries, data.name, data.volumes);
     } catch (error) {
       console.error("Failed to refresh global codex:", error);
       setActionError(error instanceof Error ? error.message : "Failed to refresh global codex");
@@ -124,6 +129,60 @@ export default function CodexPage() {
     [updateEntry, setActionError]
   );
 
+  const handleCreateVolume = useCallback(
+    async (name: string, description?: string) => {
+      try {
+        const result = await createVolumeApi(name, description);
+        setVolumes([...volumes, result.volume]);
+      } catch (error) {
+        console.error("Failed to create volume:", error);
+        setActionError(error instanceof Error ? error.message : "Failed to create volume");
+      }
+    },
+    [volumes, setVolumes, setActionError]
+  );
+
+  const handleUpdateVolume = useCallback(
+    async (volumeId: string, updates: Partial<Omit<import("@/types/events").CodexVolume, "id">>) => {
+      try {
+        await updateVolumeApi(volumeId, updates);
+        setVolumes(volumes.map((v) => (v.id === volumeId ? { ...v, ...updates } : v)));
+      } catch (error) {
+        console.error("Failed to update volume:", error);
+        setActionError(error instanceof Error ? error.message : "Failed to update volume");
+      }
+    },
+    [volumes, setVolumes, setActionError]
+  );
+
+  const handleDeleteVolume = useCallback(
+    async (volumeId: string) => {
+      try {
+        await deleteVolumeApi(volumeId);
+        setVolumes(volumes.filter((v) => v.id !== volumeId));
+      } catch (error) {
+        console.error("Failed to delete volume:", error);
+        setActionError(error instanceof Error ? error.message : "Failed to delete volume");
+      }
+    },
+    [volumes, setVolumes, setActionError]
+  );
+
+  const handleToggleVolume = useCallback(
+    async (volumeId: string, enabled: boolean) => {
+      const prev = volumes;
+      setVolumes(volumes.map((v) => (v.id === volumeId ? { ...v, enabled } : v)));
+      try {
+        await updateVolumeApi(volumeId, { enabled });
+      } catch (error) {
+        setVolumes(prev);
+        console.error("Failed to toggle volume:", error);
+        setActionError(error instanceof Error ? error.message : "Failed to toggle volume");
+      }
+    },
+    [volumes, setVolumes, setActionError]
+  );
+
   // Show form if editing global (null character_id)
   const isEditing = editingEntry !== null && editingEntryCharacterId === null;
 
@@ -137,16 +196,27 @@ export default function CodexPage() {
         </p>
       </div>
 
+      <VolumeManager
+        volumes={volumes}
+        entries={globalEntries}
+        onCreateVolume={handleCreateVolume}
+        onUpdateVolume={handleUpdateVolume}
+        onDeleteVolume={handleDeleteVolume}
+        onToggleVolume={handleToggleVolume}
+      />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Entry List */}
         <CodexEntryList
           entries={globalEntries}
+          volumes={volumes}
           isLoading={isLoadingGlobal}
           selectedEntryId={editingEntry?.id ?? null}
           onSelect={(entry) => startEditEntry(entry, null)}
           onCreate={handleCreate}
           onRefresh={handleRefresh}
           onToggleEnabled={handleToggleEnabled}
+          onToggleVolume={handleToggleVolume}
         />
 
         {/* Entry Form or Placeholder */}
@@ -156,6 +226,7 @@ export default function CodexPage() {
             isNew={isNewEntry}
             isSaving={lastAction.type !== null && lastAction.success === null}
             error={lastAction.error}
+            volumes={volumes}
             onChange={updateEditingEntry}
             onSave={handleSave}
             onDelete={isNewEntry ? undefined : handleDelete}

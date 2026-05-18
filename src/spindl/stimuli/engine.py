@@ -9,8 +9,14 @@ Event-driven with a periodic 1-second PATIENCE check:
 - Subscribes to STATE_CHANGED, RESPONSE_READY, TTS_COMPLETED
   to track activity and wake immediately on state transitions.
 - Checks PATIENCE every 1 second via threading.Event timeout.
+
+NANO-117: Weighted arbitration (lottery scheduling). When multiple
+modules have pending stimuli, selection uses weighted random draw
+instead of rigid priority ordering. Each module sets metadata["weight"]
+in its get_stimulus() return. Decay after firing prevents starvation.
 """
 
+import random
 import threading
 import time
 from typing import Callable, Optional, TYPE_CHECKING
@@ -40,8 +46,11 @@ class StimuliEngine:
     Central stimuli decision engine.
 
     Polls registered modules for pending stimuli, gates on agent state
-    (must be LISTENING and not processing), and fires the highest-priority
+    (must be LISTENING and not processing), and fires the winning
     stimulus through OrchestratorCallbacks.process_text_input().
+
+    Selection: weighted random draw (lottery scheduling, NANO-117).
+    Decay after firing prevents starvation of competing sources.
 
     Thread model:
         - Runs as a single daemon thread
@@ -86,6 +95,20 @@ class StimuliEngine:
         # Track previous playback state for pause/resume transitions
         self._was_speaking = False
 
+        # NANO-117: Weighted arbitration decay state.
+        # Maps module name → current decay multiplier (1.0 = no decay).
+        self._module_decay: dict[str, float] = {}
+        self._decay_multiplier = 0.3
+        self._decay_recovery_per_cycle = 0.2
+
+        # NANO-117: Per-module base weight overrides from dashboard.
+        # Maps module name → override weight. If absent, module's own
+        # metadata["weight"] is used as the base.
+        self._weight_overrides: dict[str, float] = {}
+
+        # NANO-117: Last fire info for dashboard display.
+        self._last_fire_info: dict | None = None
+
     @property
     def enabled(self) -> bool:
         return self._enabled
@@ -121,6 +144,15 @@ class StimuliEngine:
     def is_blocked_by_typing(self) -> bool:
         """Whether stimulus firing is currently blocked by user typing."""
         return self._user_typing
+
+    def is_idle(self) -> bool:
+        """Whether the engine would allow a stimulus to fire right now.
+
+        Modules can use this to make arrival-time decisions (e.g. NANO-123
+        Phase 2 stale-line dropping). Advisory — the engine's own
+        _should_fire() is the authoritative gate at fire time.
+        """
+        return self._should_fire()
 
     @property
     def modules(self) -> list[StimulusModule]:
@@ -221,13 +253,16 @@ class StimuliEngine:
         """
         Get status of all registered modules for dashboard display.
 
-        Returns list of dicts with name, priority, enabled, has_stimulus, healthy.
+        Returns list of dicts with name, priority, enabled, has_stimulus,
+        healthy, base_weight, decay, effective_weight.
         """
         with self._modules_lock:
             result = []
             for module in sorted(
                 self._modules, key=lambda m: m.priority, reverse=True
             ):
+                base = self._weight_overrides.get(module.name, self._get_default_weight(module.name))
+                decay = self._module_decay.get(module.name, 1.0)
                 result.append(
                     {
                         "name": module.name,
@@ -235,9 +270,26 @@ class StimuliEngine:
                         "enabled": module.enabled,
                         "has_stimulus": module.has_stimulus() if module.enabled else False,
                         "healthy": module.health_check(),
+                        "base_weight": base,
+                        "decay": round(decay, 2),
+                        "effective_weight": round(max(0.01, base * decay), 2),
                     }
                 )
             return result
+
+    @staticmethod
+    def _get_default_weight(module_name: str) -> float:
+        """Default weights per module when no override is set."""
+        defaults = {
+            "game_state": 2.0,
+            "twitch": 1.0,
+            "patience": 0.5,
+        }
+        return defaults.get(module_name, 1.0)
+
+    @property
+    def last_fire_info(self) -> dict | None:
+        return self._last_fire_info
 
     # -- Event subscriptions --
 
@@ -249,7 +301,7 @@ class StimuliEngine:
         self._sub_ids.append(sub)
 
         sub = self._event_bus.subscribe(
-            EventType.TTS_COMPLETED, self._on_activity_event
+            EventType.TTS_COMPLETED, self._on_tts_completed
         )
         self._sub_ids.append(sub)
 
@@ -268,6 +320,11 @@ class StimuliEngine:
         for sub_id in self._sub_ids:
             self._event_bus.unsubscribe(sub_id)
         self._sub_ids.clear()
+
+    def _on_tts_completed(self, event: Event) -> None:
+        """TTS finished — audience heard the response. Start cooldown now."""
+        self._last_fire_time = time.monotonic()
+        self.reset_activity()
 
     def _on_activity_event(self, event: Event) -> None:
         """Any activity resets PATIENCE timers."""
@@ -300,6 +357,9 @@ class StimuliEngine:
 
             # Detect playback state transitions → pause/resume modules
             self._check_playback_transitions()
+
+            # NANO-117: Recover decayed weights each cycle
+            self._recover_decay()
 
             if not self._enabled:
                 continue
@@ -382,37 +442,125 @@ class StimuliEngine:
 
     def _select_stimulus(self) -> Optional[StimulusData]:
         """
-        Select the highest-priority stimulus from registered modules.
+        Select a stimulus via weighted random draw (NANO-117).
 
-        Iterates modules sorted by priority (descending). First module
-        with a pending stimulus wins.
+        1. Collect all enabled modules with has_stimulus() == True
+        2. Drain each candidate via get_stimulus(), read metadata["weight"]
+        3. Apply decay multiplier to get effective weight
+        4. Single candidate: return directly (no randomization overhead)
+        5. Multiple candidates: weighted random selection, discard losers
         """
         with self._modules_lock:
-            candidates = sorted(
-                self._modules, key=lambda m: m.priority, reverse=True
-            )
+            ready = [
+                m for m in self._modules
+                if m.enabled and self._module_has_stimulus(m)
+            ]
 
-        for module in candidates:
-            if not module.enabled:
-                continue
+        if not ready:
+            return None
+
+        # Drain all candidates
+        drained: list[tuple[StimulusModule, StimulusData]] = []
+        for module in ready:
             try:
-                if module.has_stimulus():
-                    stimulus = module.get_stimulus()
-                    if stimulus:
-                        logger.info(
-                            "[Stimuli] %s fired (priority=%d)",
-                            module.name.upper(),
-                            module.priority,
-                        )
-                        return stimulus
+                stimulus = module.get_stimulus()
+                if stimulus:
+                    drained.append((module, stimulus))
             except Exception as e:
                 logger.error(
-                    "Module '%s' error in has_stimulus/get_stimulus: %s",
-                    module.name,
-                    e,
+                    "Module '%s' error in get_stimulus: %s", module.name, e
                 )
 
-        return None
+        if not drained:
+            return None
+
+        if len(drained) == 1:
+            module, stimulus = drained[0]
+            base = self._get_effective_base(module.name, stimulus)
+            self._apply_decay(module.name)
+            self._last_fire_info = {
+                "winner": module.name,
+                "effective_weight": round(base, 2),
+                "candidates": 1,
+            }
+            logger.info(
+                "[Stimuli] %s fired (weight=%.2f, sole candidate)",
+                module.name.upper(),
+                base,
+            )
+            return stimulus
+
+        # Weighted random selection across multiple candidates
+        weights: list[float] = []
+        for module, stimulus in drained:
+            base = self._get_effective_base(module.name, stimulus)
+            decay = self._module_decay.get(module.name, 1.0)
+            effective = max(0.01, base * decay)
+            weights.append(effective)
+
+        total = sum(weights)
+        roll = random.random() * total
+        cumulative = 0.0
+        winner_idx = len(drained) - 1
+        for i, w in enumerate(weights):
+            cumulative += w
+            if roll <= cumulative:
+                winner_idx = i
+                break
+
+        winner_module, winner_stimulus = drained[winner_idx]
+        self._apply_decay(winner_module.name)
+
+        losers = [
+            drained[i][0].name.upper()
+            for i in range(len(drained)) if i != winner_idx
+        ]
+        self._last_fire_info = {
+            "winner": winner_module.name,
+            "effective_weight": round(weights[winner_idx], 2),
+            "candidates": len(drained),
+            "losers": losers,
+        }
+        logger.info(
+            "[Stimuli] %s won weighted draw (effective=%.2f, total=%.2f, "
+            "candidates=%d, losers=%s)",
+            winner_module.name.upper(),
+            weights[winner_idx],
+            total,
+            len(drained),
+            losers,
+        )
+
+        return winner_stimulus
+
+    def _get_effective_base(self, module_name: str, stimulus: StimulusData) -> float:
+        """Get base weight: override if set, else module's metadata, else default."""
+        if module_name in self._weight_overrides:
+            return self._weight_overrides[module_name]
+        return stimulus.metadata.get("weight", self._get_default_weight(module_name))
+
+    @staticmethod
+    def _module_has_stimulus(module: StimulusModule) -> bool:
+        try:
+            return module.has_stimulus()
+        except Exception as e:
+            logger.error(
+                "Module '%s' error in has_stimulus: %s", module.name, e
+            )
+            return False
+
+    def _apply_decay(self, module_name: str) -> None:
+        """Apply post-fire decay to a module's weight multiplier."""
+        self._module_decay[module_name] = self._decay_multiplier
+
+    def _recover_decay(self) -> None:
+        """Recover all decayed modules toward 1.0. Called once per engine cycle."""
+        for name in list(self._module_decay):
+            current = self._module_decay[name]
+            if current < 1.0:
+                self._module_decay[name] = min(1.0, current + self._decay_recovery_per_cycle)
+            if self._module_decay[name] >= 1.0:
+                del self._module_decay[name]
 
     def _fire(self, stimulus: StimulusData) -> None:
         """
@@ -421,7 +569,6 @@ class StimuliEngine:
         Emits a STIMULUS_FIRED event and calls process_text_input()
         on the orchestrator callbacks.
         """
-        self._last_fire_time = time.monotonic()
         elapsed = stimulus.metadata.get("elapsed_seconds", 0.0)
         print(
             f"[Stimuli] {stimulus.source.value.upper()} fired "

@@ -13,6 +13,7 @@ from typing import Optional
 
 from .base import PipelineContext, PreProcessor
 from ...codex import CodexManager, ActivationResult
+from ...utils.tokens import count_tokens
 
 
 logger = logging.getLogger(__name__)
@@ -85,14 +86,20 @@ class CodexActivatorPlugin(PreProcessor):
         # insertion_order and priority still control ordering within the block
         codex_content = self._manager.get_activated_content(results)
 
-        # Estimate tokens (rough: 4 chars per token average)
-        # This is used by BudgetEnforcer for quick budget check
-        token_estimate = len(codex_content) // 4 if codex_content else 0
+        token_estimate = count_tokens(codex_content) if codex_content else 0
 
         # Store in metadata for pipeline to inject
         context.metadata["codex_results"] = results
         context.metadata["codex_content"] = codex_content
         context.metadata["codex_tokens_estimate"] = token_estimate
+
+        # Extract tool_choice_override from activated entries (NANO-134 reliability)
+        for r in results:
+            print(f"[DIAG] Codex entry '{r.entry_name}': activated={r.activated}, extensions={r.extensions}", flush=True)
+            if r.activated and r.extensions.get("tool_choice_override"):
+                context.metadata["tool_choice_override"] = r.extensions["tool_choice_override"]
+                print(f"[DIAG] tool_choice_override SET from '{r.entry_name}': {r.extensions['tool_choice_override']}", flush=True)
+                break
 
         if results:
             activated_names = [

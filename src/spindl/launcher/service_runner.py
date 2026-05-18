@@ -203,9 +203,10 @@ class ServiceRunner:
             self._tts_provider_config.provider_config
         )
         if command is None:
-            raise RuntimeError(
+            self._logger.log_launcher(
                 f"TTS provider '{self._tts_provider_config.provider}' "
-                "doesn't require a server (in-process provider)"
+                "uses external server, no launcher-managed process needed",
+                level="info",
             )
 
         return command
@@ -367,6 +368,8 @@ class ServiceRunner:
         # For TTS service without explicit command, derive from provider
         if command is None and config.name == "tts":
             command = self._get_tts_server_command()
+            if command is None:
+                return None
             self._logger.log_launcher(
                 f"Derived TTS server command from provider: {command[:80]}...",
                 level="debug",

@@ -10,7 +10,7 @@ export type { CloudProvider };
 export type VLMModelType = "gemma3" | "qwen2_vl" | "llava" | "minicpm_v";
 export type EnvironmentType = "conda" | "venv" | "system" | "other";
 export type STTPlatform = "native" | "wsl";
-export type TTSProvider = "kokoro" | "custom";
+export type TTSProvider = "kokoro" | "qwen3" | "custom";
 export type STTProviderType = "parakeet" | "whisper";
 
 // LLM Local Configuration
@@ -130,6 +130,13 @@ export interface EmbeddingConfig {
   topK: number;
 }
 
+// Kokoro voice blend preset
+interface VoiceBlendPreset {
+  name: string;
+  enabled: boolean;
+  weights: Record<string, number>;
+}
+
 // TTS Local Configuration
 interface TTSLocalConfig {
   provider: TTSProvider;
@@ -143,6 +150,16 @@ interface TTSLocalConfig {
   envType: EnvironmentType;
   envNameOrPath: string;
   customActivation: string;
+  // Qwen3-TTS fields (externally managed server)
+  speaker: string;
+  temperature: number;
+  emitEveryFrames: number;
+  instructTemplate: string;
+  seed: number;
+  // Kokoro TTS params
+  speed: number;
+  // Kokoro voice blend (NANO-118)
+  voiceBlend: VoiceBlendPreset | null;
 }
 
 // NANO-027 Phase 3: Launch Progress State
@@ -375,14 +392,21 @@ const DEFAULT_TTS_LOCAL: TTSLocalConfig = {
   provider: "kokoro",
   host: "127.0.0.1",
   port: 5556,
-  voice: "",
-  language: "",
+  voice: "af_bella",
+  language: "a",
   modelsDirectory: "./tts/models",
   device: "cuda",
   timeout: 30,
   envType: "conda",
   envNameOrPath: "",
   customActivation: "",
+  speaker: "danny",
+  temperature: 0.6,
+  emitEveryFrames: 32,
+  instructTemplate: "",
+  seed: 0,
+  speed: 1.0,
+  voiceBlend: null,
 };
 
 // NANO-043 Phase 5: Default embedding config
@@ -733,13 +757,17 @@ export const selectIsFormComplete = (state: LauncherStoreState): boolean => {
 
   // Check TTS (NANO-112: skip when disabled)
   if (state.ttsEnabled && state.ttsProviderType === "local") {
-    if (state.ttsLocal.envType === "conda" || state.ttsLocal.envType === "venv") {
-      if (!state.ttsLocal.envNameOrPath) {
+    if (state.ttsLocal.provider === "qwen3") {
+      if (!state.ttsLocal.speaker) return false;
+    } else {
+      if (state.ttsLocal.envType === "conda" || state.ttsLocal.envType === "venv") {
+        if (!state.ttsLocal.envNameOrPath) {
+          return false;
+        }
+      }
+      if (state.ttsLocal.envType === "other" && !state.ttsLocal.customActivation) {
         return false;
       }
-    }
-    if (state.ttsLocal.envType === "other" && !state.ttsLocal.customActivation) {
-      return false;
     }
   }
 

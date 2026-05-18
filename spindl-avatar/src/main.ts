@@ -6,7 +6,7 @@ import { setMood, updateExpressions, getAvailableMoods, setExpressionComposites 
 import { updateIdle, setMousePosition, triggerBlink, resetIdle } from './idle';
 import { updateLipSyncAmplitude, resetLipSync } from './lipsync';
 import { updateBody, triggerKeystrokeReaction } from './body';
-import { initMixer, disposeMixer, updateMixer, loadAnimationsFromDir, loadAnimationsWithFallback, playClip, stopClip, getLoadedClipNames, setAnimationConfig, getAnimationConfig, updateEmotionAnimation, setBaseAnimations } from './mixer';
+import { initMixer, disposeMixer, updateMixer, loadAnimationsFromDir, loadAnimationsWithFallback, playClip, stopClip, getLoadedClipNames, setAnimationConfig, getAnimationConfig, updateEmotionAnimation, setBaseAnimations, setCuriousHoldDuration, setAngryHoldDuration, setIdleClampOnce, getIdleClampOnce } from './mixer';
 import { initWind, updateWind } from './wind';
 import { createSpring, springDamped, SpringState } from './spring';
 import { applyBackground, loadBackgroundConfig, saveBackgroundConfig, BACKGROUND_PRESETS, BackgroundConfig } from './background';
@@ -403,6 +403,7 @@ async function frameCameraToModel(): Promise<void> {
     ctx.camera.lookAt(center.x, center.y, center.z);
     cameraBaseY = center.y;
   }
+  cameraBaseX = 0;
   cameraZoomTarget = 1.0;
   cameraZoomSpring.pos = 1.0;
   cameraOrbitTarget = 0;
@@ -410,16 +411,16 @@ async function frameCameraToModel(): Promise<void> {
   saveCameraState();
 }
 
-function loadCameraState(): { zoom: number; panY: number; orbitAngle: number } {
+function loadCameraState(): { zoom: number; panY: number; panX: number; orbitAngle: number } {
   try {
     const saved = localStorage.getItem('spindl-avatar-camera');
-    if (saved) return { orbitAngle: 0, ...JSON.parse(saved) };
+    if (saved) return { orbitAngle: 0, panX: 0, ...JSON.parse(saved) };
   } catch { /* ignore */ }
-  return { zoom: 1.0, panY: ctx.camera.position.y, orbitAngle: 0 };
+  return { zoom: 1.0, panY: ctx.camera.position.y, panX: 0, orbitAngle: 0 };
 }
 
 function saveCameraState(): void {
-  localStorage.setItem('spindl-avatar-camera', JSON.stringify({ zoom: cameraZoomTarget, panY: cameraBaseY, orbitAngle: cameraOrbitTarget }));
+  localStorage.setItem('spindl-avatar-camera', JSON.stringify({ zoom: cameraZoomTarget, panY: cameraBaseY, panX: cameraBaseX, orbitAngle: cameraOrbitTarget }));
 }
 
 const savedCamera = loadCameraState();
@@ -499,20 +500,21 @@ async function setupMixerForAvatar(characterAnimDir?: string): Promise<void> {
   const clips = getLoadedClipNames();
   if (config) {
     if (config.default && clips.includes(config.default)) {
-      playClip(config.default, 0);
+      playClip(config.default, 0, getIdleClampOnce());
     }
   } else if (clips.length > 0) {
     // No character config — check localStorage for previously selected animation
     const saved = localStorage.getItem('spindl-avatar-animation');
     if (saved) {
       const match = clips.find(c => c.toLowerCase() === saved.toLowerCase());
-      if (match) playClip(match, 0);
+      if (match) playClip(match, 0, getIdleClampOnce());
     }
   }
 }
 
 // Camera pan
 let cameraBaseY = savedCamera.panY;
+let cameraBaseX = savedCamera.panX;
 let cameraTime = 0;
 
 (window as any).__SPINDL_CAMERA_UP = () => {
@@ -575,6 +577,39 @@ canvas.addEventListener('mouseup', (e) => {
       saveCameraState();
     }
     rightDragging = false;
+  }
+});
+
+// Middle-click drag to pan camera horizontally
+let middleDragStartX = 0;
+let middleDragBaseX = 0;
+let middleDragging = false;
+
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 1) {
+    e.preventDefault();
+    middleDragStartX = e.clientX;
+    middleDragBaseX = cameraBaseX;
+    middleDragging = false;
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (e.buttons & 4) {
+    const dx = e.clientX - middleDragStartX;
+    if (!middleDragging && Math.abs(dx) > RIGHT_DRAG_THRESHOLD) {
+      middleDragging = true;
+    }
+    if (middleDragging) {
+      cameraBaseX = middleDragBaseX - dx * CAMERA_PAN_SENSITIVITY;
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (e.button === 1) {
+    if (middleDragging) saveCameraState();
+    middleDragging = false;
   }
 });
 
@@ -650,7 +685,7 @@ let dutchTiltEnabled = localStorage.getItem('spindl-avatar-dutch') !== '0';
   await setupMixerForAvatar();
   // Re-apply force-opaque if transparent mode was restored before avatar loaded
   if (ctx.transparent) setForceOpaqueMaterials(true);
-  connectStatus(WS_URL, state, onStatusMessage, (delay) => { expressionFadeDelay = delay; });
+  connectStatus(WS_URL, state, onStatusMessage, (delay) => { expressionFadeDelay = delay; }, (dur) => { setCuriousHoldDuration(dur); }, (dur) => { setAngryHoldDuration(dur); }, (val) => { setIdleClampOnce(val); });
 })();
 
 function animate(): void {
@@ -696,12 +731,12 @@ function animate(): void {
   const camBreathX = Math.sin(cameraTime * 0.25) * 0.001;
 
   // Position camera on orbit circle at current distance + breathing offset
-  ctx.camera.position.x = Math.sin(orbitAngle) * camDist + camBreathX;
+  ctx.camera.position.x = Math.sin(orbitAngle) * camDist + camBreathX + cameraBaseX;
   ctx.camera.position.z = Math.cos(orbitAngle) * camDist;
   ctx.camera.position.y = cameraBaseY + camBreathY;
 
   // Always look at model center (orbit pivot)
-  ctx.camera.lookAt(0, cameraBaseY, 0);
+  ctx.camera.lookAt(cameraBaseX, cameraBaseY, 0);
 
   // Dutch tilt — applied after lookAt so it layers on top
   const dutch = Math.abs(dutchTiltSpring.pos) > 0.0005 ? dutchTiltSpring.pos : 0;

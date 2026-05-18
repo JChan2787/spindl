@@ -50,8 +50,12 @@ class KokoroTTSProvider(TTSProvider):
         self._config: dict = {}
         self._default_voice: str = "af_bella"
         self._default_language: str = "a"
+        self._speed: float = 1.0
         self._models_dir: Optional[Path] = None
         self._initialized: bool = False
+        self._voice_blend_enabled: bool = False
+        self._voice_blend_weights: dict = {}
+        self._voice_blend_missing: list[str] = []
 
     def initialize(self, config: dict) -> None:
         """
@@ -73,6 +77,7 @@ class KokoroTTSProvider(TTSProvider):
 
         self._default_voice = config.get("voice", "af_bella")
         self._default_language = config.get("language", "a")
+        self._speed = float(config.get("speed", 1.0))
 
         # Models directory for voice listing (resolve relative paths)
         models_dir = config.get("models_dir")
@@ -95,6 +100,14 @@ class KokoroTTSProvider(TTSProvider):
 
         self._initialized = True
         logger.info(f"KokoroTTSProvider initialized: {host}:{port}")
+
+        # Apply voice blend from config if present
+        voice_blend = config.get("voice_blend")
+        if voice_blend and isinstance(voice_blend, dict):
+            enabled = voice_blend.get("enabled", False)
+            weights = voice_blend.get("weights", {})
+            if enabled and weights:
+                self.set_voice_blend(enabled=True, weights=weights)
 
     def get_properties(self) -> TTSProperties:
         """Return Kokoro's output format properties."""
@@ -132,10 +145,17 @@ class KokoroTTSProvider(TTSProvider):
         language = kwargs.get("language", self._default_language)
 
         # Delegate to client
+        if self._voice_blend_enabled:
+            active = ", ".join(f"{k}={v:.2f}" for k, v in self._voice_blend_weights.items() if v > 0)
+            print(f"[TTS] Routing synthesis through blended voice ({active}, speed={self._speed})", flush=True)
+        else:
+            print(f"[TTS] Routing synthesis through single voice '{resolved_voice}' (speed={self._speed})", flush=True)
         audio_array = self._client.synthesize(
             text=text,
             voice=resolved_voice,
             lang=language,
+            use_blend=self._voice_blend_enabled,
+            speed=self._speed,
         )
 
         # Wrap in AudioResult
@@ -215,6 +235,43 @@ class KokoroTTSProvider(TTSProvider):
         self._initialized = False
         logger.debug("KokoroTTSProvider shut down")
 
+    def set_voice_blend(self, enabled: bool, weights: dict[str, float]) -> list[str]:
+        """
+        Configure voice blending at runtime.
+
+        Args:
+            enabled: Whether to use blend for synthesis
+            weights: Dict of voice_id -> weight (0.0-1.0)
+
+        Returns:
+            List of missing voice IDs (skipped from blend)
+        """
+        self._voice_blend_enabled = enabled
+        self._voice_blend_weights = weights
+
+        if not enabled or not weights:
+            self._voice_blend_missing = []
+            logger.info("Voice blend disabled")
+            return []
+
+        if self._client is None:
+            logger.warning("Cannot send blend to server — client not initialized")
+            return []
+
+        try:
+            response = self._client.blend_voices(weights)
+            self._voice_blend_missing = response.get("missing", [])
+            voice_count = response.get("voice_count", 0)
+            logger.info(
+                f"Voice blend set: {voice_count} voices"
+                + (f", missing: {self._voice_blend_missing}" if self._voice_blend_missing else "")
+            )
+            return self._voice_blend_missing
+        except Exception as e:
+            logger.error(f"Failed to set voice blend: {e}")
+            self._voice_blend_enabled = False
+            return []
+
     @classmethod
     def validate_config(cls, config: dict) -> list[str]:
         """
@@ -254,7 +311,7 @@ class KokoroTTSProvider(TTSProvider):
 
         # Language validation (optional but must be valid if provided)
         language = config.get("language")
-        if language is not None and language not in ("a", "b"):
+        if language and language not in ("a", "b"):
             errors.append(f"language must be 'a' or 'b', got '{language}'")
 
         # Timeout validation (optional but must be positive if provided)

@@ -458,14 +458,21 @@ export async function POST(request: Request) {
     // TTS Configuration
     // ========================================
     if (body.ttsProviderType === "local") {
-      existingConfig.tts = {
-        provider: body.ttsLocal.provider,
-        plugin_paths: ["./plugins/tts"],
-        providers: {
-          ...(typeof existingConfig.tts === "object" && existingConfig.tts !== null
-            ? (existingConfig.tts as { providers?: Record<string, unknown> }).providers || {}
-            : {}),
-          [body.ttsLocal.provider]: {
+      const existingProviders = typeof existingConfig.tts === "object" && existingConfig.tts !== null
+        ? (existingConfig.tts as { providers?: Record<string, unknown> }).providers || {}
+        : {};
+
+      const providerConfig = body.ttsLocal.provider === "qwen3"
+        ? {
+            host: body.ttsLocal.host,
+            port: body.ttsLocal.port,
+            speaker: body.ttsLocal.speaker,
+            temperature: body.ttsLocal.temperature,
+            emit_every_frames: body.ttsLocal.emitEveryFrames,
+            instruct_template: body.ttsLocal.instructTemplate || "",
+            seed: body.ttsLocal.seed ?? 0,
+          }
+        : {
             host: body.ttsLocal.host,
             port: body.ttsLocal.port,
             voice: body.ttsLocal.voice,
@@ -473,10 +480,25 @@ export async function POST(request: Request) {
             models_dir: body.ttsLocal.modelsDirectory,
             timeout: body.ttsLocal.timeout,
             ...(body.ttsLocal.device ? { device: body.ttsLocal.device } : {}),
+            ...(body.ttsLocal.speed != null ? { speed: body.ttsLocal.speed } : {}),
             ...(body.ttsLocal.envType === "conda" && body.ttsLocal.envNameOrPath
               ? { conda_env: body.ttsLocal.envNameOrPath }
               : {}),
-          },
+            ...(body.ttsLocal.voiceBlend ? {
+              voice_blend: {
+                name: body.ttsLocal.voiceBlend.name,
+                enabled: body.ttsLocal.voiceBlend.enabled,
+                weights: body.ttsLocal.voiceBlend.weights,
+              },
+            } : {}),
+          };
+
+      existingConfig.tts = {
+        provider: body.ttsLocal.provider,
+        plugin_paths: ["./plugins/tts"],
+        providers: {
+          ...existingProviders,
+          [body.ttsLocal.provider]: providerConfig,
         },
       };
     }
@@ -550,14 +572,28 @@ export async function POST(request: Request) {
     // TTS service config
     // NANO-112: Respect user's enabled/disabled choice from GUI toggle
     if (body.ttsProviderType === "local") {
-      launcher.services.tts = {
-        enabled: body.ttsEnabled,
-        platform: "native",
-        health_check: {
-          type: "provider",
-          timeout: 60,
-        },
-      };
+      if (body.ttsLocal.provider === "qwen3") {
+        // Qwen3-TTS: externally managed server — no subprocess spawn, TCP health check only
+        launcher.services.tts = {
+          enabled: body.ttsEnabled,
+          platform: "native",
+          health_check: {
+            type: "tcp",
+            host: body.ttsLocal.host,
+            port: body.ttsLocal.port,
+            timeout: 60,
+          },
+        };
+      } else {
+        launcher.services.tts = {
+          enabled: body.ttsEnabled,
+          platform: "native",
+          health_check: {
+            type: "provider",
+            timeout: 60,
+          },
+        };
+      }
     } else if (body.ttsEnabled) {
       // Cloud TTS (enabled) — no local server, but preserve the enabled flag
       launcher.services.tts = {
@@ -782,7 +818,9 @@ export async function GET() {
     const vlmCloudConfig = vlmSection?.providers?.openai || {};
 
     const ttsProvider = raw?.tts?.provider;
-    const ttsConfig = raw?.tts?.providers?.[ttsProvider] || {};
+    const ttsProviders = raw?.tts?.providers || {};
+    const kokoroConfig = ttsProviders.kokoro || {};
+    const qwen3Config = ttsProviders.qwen3 || {};
 
     // Parse launcher.services for environment info
     const sttLauncher = raw?.launcher?.services?.stt || {};
@@ -913,16 +951,27 @@ export async function GET() {
       ttsProviderType: "local" as const, // Cloud not implemented yet
       ttsLocal: {
         provider: ttsProvider || "kokoro",
-        host: ttsConfig.host || "127.0.0.1",
-        port: ttsConfig.port || 5556,
-        voice: ttsConfig.voice || "",
-        language: ttsConfig.language || "",
-        modelsDirectory: ttsConfig.models_dir || "./tts/models",
-        device: ttsConfig.device || "cuda",
-        timeout: ttsConfig.timeout || 30,
-        envType: ttsConfig.conda_env ? "conda" : "system",
-        envNameOrPath: ttsConfig.conda_env || "",
+        host: (ttsProvider === "qwen3" ? qwen3Config : kokoroConfig).host || "127.0.0.1",
+        port: (ttsProvider === "qwen3" ? qwen3Config : kokoroConfig).port || (ttsProvider === "qwen3" ? 5557 : 5556),
+        voice: kokoroConfig.voice || "af_bella",
+        language: kokoroConfig.language || "a",
+        modelsDirectory: kokoroConfig.models_dir || "./tts/models",
+        device: kokoroConfig.device || "cuda",
+        timeout: kokoroConfig.timeout || 30,
+        envType: kokoroConfig.conda_env ? "conda" : "system",
+        envNameOrPath: kokoroConfig.conda_env || "",
         customActivation: "",
+        speaker: qwen3Config.speaker || "danny",
+        temperature: qwen3Config.temperature ?? 0.6,
+        emitEveryFrames: qwen3Config.emit_every_frames ?? 32,
+        instructTemplate: qwen3Config.instruct_template || "",
+        seed: qwen3Config.seed ?? 0,
+        speed: kokoroConfig.speed ?? 1.0,
+        voiceBlend: kokoroConfig.voice_blend ? {
+          name: kokoroConfig.voice_blend.name || "",
+          enabled: kokoroConfig.voice_blend.enabled ?? false,
+          weights: kokoroConfig.voice_blend.weights || {},
+        } : null,
       },
 
       // Embedding Server (NANO-043 Phase 5)

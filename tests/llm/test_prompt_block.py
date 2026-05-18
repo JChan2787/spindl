@@ -130,9 +130,10 @@ class TestDefaultBlocks:
             assert block.enabled is True, f"Block {block.id} should be enabled"
 
     def test_order_is_sequential(self, default_blocks: list[PromptBlock]):
-        """Default blocks are ordered 0-14."""
+        """Default blocks have strictly increasing order values."""
         orders = [b.order for b in default_blocks]
-        assert orders == list(range(15))
+        assert orders == sorted(orders)
+        assert len(set(orders)) == len(orders)
 
     def test_block_ids_unique(self, default_blocks: list[PromptBlock]):
         """All block IDs are unique."""
@@ -144,8 +145,8 @@ class TestDefaultBlocks:
         ids = {b.id for b in default_blocks}
         expected = {
             "persona_name", "persona_appearance", "persona_personality",
-            "scenario", "example_dialogue", "modality_context", "voice_state",
-            "codex_context", "rag_context", "audience_chat",
+            "scenario", "example_dialogue", "modality_context",
+            "codex_context", "rag_context", "audience_chat", "character_knowledge",
             "persona_rules", "modality_rules", "conversation_summary",
             "recent_history", "closing_instruction",
         }
@@ -201,7 +202,8 @@ class TestLoadBlockConfig:
         """Empty config dict returns defaults unchanged."""
         result = load_block_config({}, default_blocks)
         assert len(result) == 15
-        assert [b.order for b in result] == list(range(15))
+        orders = [b.order for b in result]
+        assert orders == sorted(orders)
 
     def test_reorder_blocks(self):
         """Config order reorders blocks."""
@@ -213,7 +215,7 @@ class TestLoadBlockConfig:
                 "persona_appearance",
                 "persona_personality",
                 "modality_context",
-                "voice_state",
+                "audience_chat",
                 "codex_context",
                 "rag_context",
                 "conversation_summary",
@@ -228,10 +230,10 @@ class TestLoadBlockConfig:
 
     def test_disable_blocks(self):
         """Config disabled list disables blocks."""
-        config = {"disabled": ["voice_state", "modality_rules"]}
+        config = {"disabled": ["audience_chat", "modality_rules"]}
         result = load_block_config(config)
         block_map = {b.id: b for b in result}
-        assert block_map["voice_state"].enabled is False
+        assert block_map["audience_chat"].enabled is False
         assert block_map["modality_rules"].enabled is False
         assert block_map["persona_name"].enabled is True  # not disabled
 
@@ -424,7 +426,7 @@ class TestBlockAssembly:
                 "persona_rules",
                 "modality_rules",
                 "modality_context",
-                "voice_state",
+                "audience_chat",
                 "codex_context",
                 "rag_context",
                 "conversation_summary",
@@ -455,7 +457,7 @@ class TestBlockAssembly:
 
     def test_disable_all_blocks_in_section(self, structured_persona: dict):
         """Disabling all blocks under a header collapses the header."""
-        config = {"disabled": ["modality_context", "voice_state", "codex_context", "rag_context"]}
+        config = {"disabled": ["modality_context", "audience_chat", "codex_context", "rag_context"]}
         blocks = load_block_config(config)
         messages = self._build_with_blocks(structured_persona, blocks=blocks)
         system = messages[0]["content"]
@@ -588,13 +590,13 @@ class TestPipelineBlockConfig:
         builder = PromptBuilder(providers=create_default_registry())
         pipeline = LLMPipeline(provider, builder)
 
-        config = {"disabled": ["voice_state"]}
+        config = {"disabled": ["audience_chat"]}
         pipeline.set_block_config(config)
 
         assert pipeline._block_config is not None
         assert len(pipeline._block_config) == 15
         block_map = {b.id: b for b in pipeline._block_config}
-        assert block_map["voice_state"].enabled is False
+        assert block_map["audience_chat"].enabled is False
 
     def test_pipeline_clear_block_config(self):
         """Pipeline clears blocks when set_block_config(None)."""
@@ -605,7 +607,7 @@ class TestPipelineBlockConfig:
         builder = PromptBuilder(providers=create_default_registry())
         pipeline = LLMPipeline(provider, builder)
 
-        pipeline.set_block_config({"disabled": ["voice_state"]})
+        pipeline.set_block_config({"disabled": ["audience_chat"]})
         assert pipeline._block_config is not None
 
         pipeline.set_block_config(None)
@@ -700,10 +702,10 @@ class TestBlockContentsCapture:
 
     def test_disabled_block_excluded(self, structured_persona: dict):
         """Disabled blocks don't appear in block_contents."""
-        blocks = load_block_config({"disabled": ["voice_state"]})
+        blocks = load_block_config({"disabled": ["audience_chat"]})
         ctx = self._build_and_get_context(structured_persona, blocks=blocks)
         ids = {e["id"] for e in ctx.block_contents}
-        assert "voice_state" not in ids
+        assert "audience_chat" not in ids
         assert len(ctx.block_contents) == 14
 
     def test_legacy_mode_no_block_contents(self, structured_persona: dict):

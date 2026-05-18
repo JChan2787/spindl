@@ -27,11 +27,11 @@ class TestPatienceModule:
     def test_custom_config(self):
         module = PatienceModule(
             timeout_seconds=30.0,
-            prompt="Say something!",
+            prompts=["Say something!"],
             enabled=False,
         )
         assert module.timeout_seconds == 30.0
-        assert module.prompt == "Say something!"
+        assert module.prompts == ["Say something!"]
         assert module.enabled is False
 
     def test_enable_disable(self):
@@ -51,10 +51,10 @@ class TestPatienceModule:
         module.timeout_seconds = -10.0
         assert module.timeout_seconds == 0.0
 
-    def test_prompt_setter(self):
+    def test_prompts_setter(self):
         module = PatienceModule()
-        module.prompt = "New prompt"
-        assert module.prompt == "New prompt"
+        module.prompts = ["New prompt", "Another prompt"]
+        assert module.prompts == ["New prompt", "Another prompt"]
 
 
 class TestPatienceHasStimulus:
@@ -102,7 +102,7 @@ class TestPatienceGetStimulus:
         module.stop()
 
     def test_returns_data_when_expired(self):
-        module = PatienceModule(timeout_seconds=0.01, prompt="Talk now!")
+        module = PatienceModule(timeout_seconds=0.01, prompts=["Talk now!"])
         module.start()
         time.sleep(0.03)
 

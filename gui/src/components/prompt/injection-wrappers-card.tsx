@@ -18,6 +18,9 @@ const DEFAULT_VALUES: PromptConfig = {
   example_dialogue_prefix:
     "The following are example dialogues demonstrating this character's voice, tone, and response style. Use them as style reference only — do not repeat or quote them directly:",
   example_dialogue_suffix: "End of style examples.",
+  voice_state_barge_in: "The User interrupted you mid-sentence.",
+  voice_state_empty_transcription: "The User made a sound but no words were detected.",
+  voice_state_error: "An error occurred. Acknowledge briefly and continue.",
 };
 
 interface WrapperFieldProps {
@@ -141,6 +144,32 @@ export function InjectionWrappersCard() {
             value={effectiveConfig.example_dialogue_suffix}
             onChange={(v) => handleChange("example_dialogue_suffix", v)}
           />
+          <div className="border-t border-zinc-700 pt-3 mt-3">
+            <p className="text-xs text-zinc-500 mb-3">
+              Voice state strings injected into the user message when a voice
+              event triggers. Only applies to voice input.
+            </p>
+            <div className="space-y-3">
+              <WrapperField
+                label="Barge-In (User Interrupts)"
+                description="Injected when user interrupts mid-response"
+                value={effectiveConfig.voice_state_barge_in}
+                onChange={(v) => handleChange("voice_state_barge_in", v)}
+              />
+              <WrapperField
+                label="Empty Transcription (Sound, No Words)"
+                description="Injected when VAD triggers but STT returns nothing"
+                value={effectiveConfig.voice_state_empty_transcription}
+                onChange={(v) => handleChange("voice_state_empty_transcription", v)}
+              />
+              <WrapperField
+                label="Error"
+                description="Injected when the voice pipeline errors"
+                value={effectiveConfig.voice_state_error}
+                onChange={(v) => handleChange("voice_state_error", v)}
+              />
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

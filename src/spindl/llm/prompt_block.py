@@ -65,7 +65,7 @@ def create_default_blocks() -> list[PromptBlock]:
     pipeline inject methods post-build, same as today.
 
     Returns:
-        List of 14 PromptBlock instances in default order.
+        List of 16 PromptBlock instances in default order.
     """
     return [
         PromptBlock(
@@ -109,12 +109,6 @@ def create_default_blocks() -> list[PromptBlock]:
             section_header="Context",
         ),
         PromptBlock(
-            id="voice_state",
-            label="Voice State",
-            order=6,
-            placeholder="[STATE_CONTEXT]",
-        ),
-        PromptBlock(
             id="codex_context",
             label="Codex",
             order=7,
@@ -136,36 +130,43 @@ def create_default_blocks() -> list[PromptBlock]:
             static_content="[AUDIENCE_CHAT]",
         ),
         PromptBlock(
+            id="character_knowledge",
+            label="Character Knowledge",
+            order=10,
+            is_static=True,
+            static_content="[CHARACTER_KNOWLEDGE]",
+        ),
+        PromptBlock(
             id="persona_rules",
             label="Character Rules",
-            order=10,
+            order=11,
             placeholder="[PERSONA_RULES]",
             section_header="Rules",
         ),
         PromptBlock(
             id="modality_rules",
             label="Modality Rules",
-            order=11,
+            order=12,
             placeholder="[MODALITY_RULES]",
         ),
         PromptBlock(
             id="conversation_summary",
             label="Summary",
-            order=12,
+            order=13,
             placeholder="[CONVERSATION_SUMMARY]",
             section_header="Conversation",
         ),
         PromptBlock(
             id="recent_history",
             label="Chat History",
-            order=13,
+            order=14,
             is_static=True,
             static_content="[RECENT_HISTORY]",
         ),
         PromptBlock(
             id="closing_instruction",
             label="Closing Instruction",
-            order=14,
+            order=15,
             section_header="Input",
             is_static=True,
             static_content="Respond as {persona_name}.",

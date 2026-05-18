@@ -157,14 +157,15 @@ class TestRAGInjectorWithMemories:
 
         assert result.metadata["rag_tokens_estimate"] > 0
 
-    def test_token_estimate_is_len_div_4(
+    def test_token_estimate_uses_tiktoken(
         self, seeded_store: MemoryStore, pipeline_context: PipelineContext
     ) -> None:
-        """Token estimate is len(rag_content) // 4."""
+        """Token estimate uses tiktoken cl100k_base, not len//4."""
+        from spindl.utils.tokens import count_tokens
         injector = RAGInjector(memory_store=seeded_store)
         result = injector.process(pipeline_context)
 
-        expected = len(result.metadata["rag_content"]) // 4
+        expected = count_tokens(result.metadata["rag_content"])
         assert result.metadata["rag_tokens_estimate"] == expected
 
     def test_memories_formatted_as_bullet_list(

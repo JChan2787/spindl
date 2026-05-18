@@ -32,6 +32,8 @@ from spindl.core.events import (
     LLMChunkEvent,
     LLMTokenEvent,
     BargeInTruncatedEvent,
+    TwitchMessageApprovedEvent,
+    TwitchFollowEvent,
 )
 
 if TYPE_CHECKING:
@@ -92,6 +94,8 @@ class EventBridge:
         self._subscribe(EventType.LLM_CHUNK, self._on_llm_chunk)
         self._subscribe(EventType.LLM_TOKEN, self._on_llm_token)
         self._subscribe(EventType.BARGE_IN_TRUNCATED, self._on_barge_in_truncated)
+        self._subscribe(EventType.TWITCH_MESSAGE_APPROVED, self._on_twitch_message_approved)
+        self._subscribe(EventType.TWITCH_FOLLOW_EVENT, self._on_twitch_follow_event)
 
         logger.info(f"EventBridge started with {len(self._subscription_ids)} subscriptions")
 
@@ -352,5 +356,28 @@ class EventBridge:
             self._gui_server.emit_barge_in_truncated(
                 truncated_text=event.truncated_text,
                 delivered_sentences=event.delivered_sentences,
+            )
+        )
+
+    def _on_twitch_message_approved(self, event: TwitchMessageApprovedEvent) -> None:
+        """Handle Twitch message approved event for OBS overlay (NANO-131)."""
+        if not self._should_emit():
+            return
+        self._emit_async(
+            self._gui_server.emit_twitch_message_approved(
+                username=event.username,
+                message_text=event.message_text,
+            )
+        )
+
+    def _on_twitch_follow_event(self, event: TwitchFollowEvent) -> None:
+        """Handle Twitch follow event for OBS overlay (NANO-132)."""
+        if not self._should_emit():
+            return
+        self._emit_async(
+            self._gui_server.emit_twitch_follow_event(
+                message=event.message,
+                usernames=event.usernames,
+                follower_count=event.follower_count,
             )
         )

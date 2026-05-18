@@ -48,12 +48,11 @@ class TTSCleanupPlugin(PostProcessor):
     3. Strip markdown headers (# through ######)
     4. Strip markdown list bullets (* or -)
     5. Unwrap **bold** emphasis — keep the words
-    6. Strip multi-word *action markers* — remove entirely
-    7. Unwrap remaining single-word *emphasis* — keep the words
-    8. Strip emojis
-    9. Strip (parenthetical asides)
-    10. Unwrap "quoted speech" — keep the words
-    11. Collapse whitespace
+    6. Unwrap *italic/action markers* — keep the words
+    7. Strip emojis
+    8. Unwrap (parenthetical asides) — keep the words
+    9. Unwrap "quoted speech" — keep the words
+    10. Collapse whitespace
     """
 
     @property
@@ -89,27 +88,19 @@ class TTSCleanupPlugin(PostProcessor):
         # 5. **bold emphasis** — unwrap, keep content
         text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
 
-        # 6. Multi-word *action markers* — always RP stage directions
-        #    e.g. *laughs nervously*, *waves excitedly at viewers*
-        #    Opening * must be at start-of-line or after whitespace to avoid
-        #    matching closing * of a prior pair as an opening delimiter.
-        text = re.sub(r"(?:^|(?<=\s))\*([^*]*\s[^*]*)\*", "", text, flags=re.MULTILINE)
-
-        # 7. Remaining single-word *emphasis* — unwrap, keep the word
-        #    e.g. *really*, *like*, *wink* (single-word actions also unwrap,
-        #    but TTS reading "wink" aloud is harmless)
+        # 6. *italic/action markers* — unwrap, keep content
         text = re.sub(r"\*([^*]+)\*", r"\1", text)
 
-        # 8. Emojis
+        # 7. Emojis
         text = _EMOJI_RE.sub("", text)
 
-        # 9. (Parenthetical asides) — e.g. (she said softly), (pauses)
-        text = re.sub(r"\([^)]+\)", "", text)
+        # 8. (Parenthetical asides) — unwrap, keep content
+        text = re.sub(r"\(([^)]+)\)", r"\1", text)
 
-        # 10. "Quoted speech" — unwrap, keep content
+        # 9. "Quoted speech" — unwrap, keep content
         text = re.sub(r'"([^"]*)"', r"\1", text)
 
-        # 11. Collapse whitespace and trim
+        # 10. Collapse whitespace and trim
         text = re.sub(r"\s+", " ", text).strip()
 
         context.metadata["tts_text"] = text

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Brain, Target, Layers, Shield, RotateCcw, Filter, RefreshCw, ChevronDown, ChevronRight, FileText } from "lucide-react";
+import { Brain, Target, Layers, Shield, RotateCcw, Filter, RefreshCw, ChevronDown, ChevronRight, FileText, Ruler, Link } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useSettingsStore, selectEffectiveMemoryConfig } from "@/lib/stores";
@@ -237,6 +237,20 @@ export function MemorySettings() {
     [updatePendingMemory, emitChanges]
   );
 
+  const handleDistanceMetricChange = useCallback(
+    (value: "l2" | "cosine") => {
+      updatePendingMemory({ distance_metric: value });
+      socket.emit("set_distance_metric", { distance_metric: value });
+    },
+    [updatePendingMemory, socket]
+  );
+
+  const handleCrossActivationToggle = useCallback(() => {
+    const next = !effectiveConfig.cross_activation;
+    updatePendingMemory({ cross_activation: next });
+    socket.emit("set_cross_activation", { enabled: next });
+  }, [effectiveConfig.cross_activation, updatePendingMemory, socket]);
+
   const handleReflectionIntervalChange = useCallback(
     (value: number) => {
       updatePendingMemory({ reflection_interval: value });
@@ -399,6 +413,52 @@ export function MemorySettings() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* NANO-126: Distance Metric */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="flex items-center gap-2 text-sm">
+              <Ruler className="h-3 w-3" />
+              Distance Metric
+            </Label>
+            <select
+              value={effectiveConfig.distance_metric}
+              onChange={(e) => handleDistanceMetricChange(e.target.value as "l2" | "cosine")}
+              className="text-sm bg-muted border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="l2">L2 (Euclidean)</option>
+              <option value="cosine">Cosine Similarity</option>
+            </select>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {effectiveConfig.distance_metric === "cosine"
+              ? "Cosine similarity — optimized for Snowflake Arctic Embed. Existing L2 memories are inactive until migrated."
+              : "L2 Euclidean distance (default). Switch to Cosine for better recall with normalized embeddings."}
+          </p>
+        </div>
+
+        {/* NANO-127: Cross-Activation Toggle */}
+        <div className="flex items-center justify-between">
+          <Label className="flex items-center gap-2 text-sm">
+            <Link className="h-3 w-3" />
+            Cross-Activate Codex
+          </Label>
+          <button
+            onClick={handleCrossActivationToggle}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              effectiveConfig.cross_activation ? "bg-primary" : "bg-muted"
+            }`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                effectiveConfig.cross_activation ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          When enabled, recalled memories will also trigger matching Codex entries via keyword scan.
+        </p>
+
         <EditableSlider
           label="Relevance Threshold"
           value={effectiveConfig.relevance_threshold ?? 0.75}
@@ -433,14 +493,14 @@ export function MemorySettings() {
           label="Dedup Threshold"
           value={effectiveConfig.dedup_threshold ?? 0.30}
           sliderMin={0.0}
-          sliderMax={2.0}
+          sliderMax={effectiveConfig.distance_metric === "cosine" ? 1.0 : 2.0}
           step={0.05}
           icon={<Filter className="h-3 w-3" />}
           onChange={handleDedupThresholdChange}
         />
 
         <p className="text-xs text-muted-foreground">
-          Relevance threshold controls memory matching strictness. Top K limits memories per prompt. Reflection interval sets how many new messages trigger a memory extraction cycle. Dedup threshold sets the L2 distance below which new memories are considered duplicates (higher = more aggressive dedup).
+          Relevance threshold controls memory matching strictness. Top K limits memories per prompt. Reflection interval sets how many new messages trigger a memory extraction cycle. Dedup threshold sets the {effectiveConfig.distance_metric === "cosine" ? "cosine" : "L2"} distance below which new memories are considered duplicates (higher = more aggressive dedup).
         </p>
 
         {/* NANO-104: Reflection Prompt */}

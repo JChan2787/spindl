@@ -21,6 +21,7 @@ from ..core.event_bus import EventBus
 from ..core.context_manager import ContextManager
 from ..core.events import (
     AudioLevelEvent,
+    EventType,
     MicLevelEvent,
     StateChangedEvent,
     TTSStartedEvent,
@@ -28,6 +29,7 @@ from ..core.events import (
     TTSInterruptedEvent,
 )
 from ..llm import LLMPipeline, PromptBuilder, LLMProviderRegistry, LLMProvider
+from .service_capabilities import ServiceCapabilities
 from ..llm.provider_holder import ProviderHolder
 from ..llm.registry import ProviderNotFoundError as LLMProviderNotFoundError
 from ..llm.plugins import (
@@ -41,6 +43,8 @@ from ..llm.plugins import (
     TwitchHistoryInjector,
     create_codex_plugins,
 )
+from ..llm.plugins.cross_activator import CrossActivatorPlugin
+from ..llm.plugins.dialogue_knowledge import DialogueKnowledgeInjector
 from ..llm.plugins.reasoning_extractor import ReasoningExtractor
 from ..llm.providers.registry import create_default_registry as create_prompt_provider_registry
 from ..characters import CharacterLoader
@@ -55,7 +59,8 @@ from ..memory.rag_injector import RAGInjector
 from ..memory.reflection import ReflectionSystem
 from ..memory.reflection_monitor import ReflectionMonitor
 from ..memory.session_summary import SessionSummaryGenerator
-from ..stimuli import StimuliEngine, PatienceModule, TwitchModule
+from ..stimuli import StimuliEngine, GameStateModule, PatienceModule, TwitchModule
+from ..stimuli.game_state import DialogueStore, DialogueSummarizer
 from ..avatar import AvatarToolMoodSubscriber, ONNXEmotionClassifier
 from ..vts import VTSDriver
 from .callbacks import OrchestratorCallbacks
@@ -99,8 +104,14 @@ class VoiceAgentOrchestrator:
         # Service clients (initialized in _setup)
         self._stt: Optional[STTProvider] = None  # NANO-061a: provider-based
         self._tts_provider: Optional[TTSProvider] = None  # NANO-015: provider-based
-        self._stt_enabled: bool = config.stt_config.enabled  # NANO-112
-        self._tts_enabled: bool = config.tts_config.enabled  # NANO-112
+
+        # NANO-116 B.4a: Central service capabilities registry
+        self._service_capabilities = ServiceCapabilities.from_config(
+            stt_enabled=config.stt_config.enabled,
+            tts_enabled=config.tts_config.enabled,
+            twitch_enabled=config.stimuli_config.twitch_enabled,
+            game_state_enabled=config.stimuli_config.game_state_enabled,
+        )
         self._llm_provider: Optional[LLMProvider] = None  # NANO-018/019: provider-based
         self._pipeline: Optional[LLMPipeline] = None
 
@@ -110,6 +121,7 @@ class VoiceAgentOrchestrator:
 
         # Codex system (NANO-037) - stored for hot-reload (NANO-036)
         self._codex_manager = None
+        self._cross_activator: Optional[CrossActivatorPlugin] = None
 
         # Runtime generation parameter overrides (NANO-053)
         self._runtime_generation_overrides: Optional[dict] = None
@@ -139,6 +151,9 @@ class VoiceAgentOrchestrator:
         self._addressing_others: bool = False
         self._addressing_others_context_id: Optional[str] = None
         self._addressing_others_prompt: Optional[str] = None  # one-shot for next pipeline call
+
+        # Mic passthrough — suppresses STT without affecting stimuli (NANO-125)
+        self._mic_passthrough: bool = False
 
         # VTubeStudio driver (NANO-060)
         self._vts_driver: Optional[VTSDriver] = None
@@ -281,6 +296,33 @@ class VoiceAgentOrchestrator:
         )
         self._twitch_history_injector = twitch_history_injector
 
+        # NANO-116 B.2: Game dialogue persistence, summarization, and injection
+        stimuli_cfg = self._config.stimuli_config
+        self._dialogue_store = DialogueStore(
+            conversations_dir=self._config.conversations_dir,
+            debug=self._config.debug,
+        )
+        summarizer_api_key = stimuli_cfg.game_state_dialogue_summarizer_api_key
+        if not summarizer_api_key:
+            llm_cfg = self._config.llm_config
+            if llm_cfg.provider == "openrouter":
+                summarizer_api_key = llm_cfg.provider_config.get("api_key", "")
+        self._dialogue_summarizer = DialogueSummarizer(
+            api_key=summarizer_api_key,
+            model=stimuli_cfg.game_state_dialogue_summarizer_model,
+            persona_prompt=stimuli_cfg.game_state_dialogue_summarizer_persona,
+            character_name=self._persona.get("name", "") if self._persona else "",
+            character_description=self._persona.get("description", "") if self._persona else "",
+            character_personality=self._persona.get("personality", "") if self._persona else "",
+            character_scenario=self._persona.get("scenario", "") if self._persona else "",
+            max_tokens=stimuli_cfg.game_state_dialogue_summary_max_tokens,
+        )
+        dialogue_knowledge_injector = DialogueKnowledgeInjector(
+            token_budget=stimuli_cfg.game_state_dialogue_token_budget,
+        )
+        dialogue_knowledge_injector.set_dialogue_store(self._dialogue_store)
+        self._dialogue_knowledge_injector = dialogue_knowledge_injector
+
         # Codex: Create activator and cooldown plugins (NANO-037)
         # Must be registered BEFORE budget_enforcer so codex tokens are counted
         # Store manager for hot-reload (NANO-036)
@@ -348,6 +390,7 @@ class VoiceAgentOrchestrator:
                 curation_client=curation_client,
                 global_memory_dir=global_memory_dir,
                 scoring_config=scoring_config,
+                distance_metric=self._config.memory_config.distance_metric,
             )
             rag_injector = RAGInjector(
                 memory_store=self._memory_store,
@@ -355,6 +398,7 @@ class VoiceAgentOrchestrator:
                 relevance_threshold=self._config.memory_config.relevance_threshold,
                 rag_prefix=self._config.prompt_config.rag_prefix,
                 rag_suffix=self._config.prompt_config.rag_suffix,
+                distance_metric=self._config.memory_config.distance_metric,
             )
             self._rag_injector = rag_injector
 
@@ -424,20 +468,31 @@ class VoiceAgentOrchestrator:
         # Tools: Initialize tool registry and executor (NANO-024)
         self._setup_tools()
 
+        # NANO-127: Cross-activator — multi-hop RAG→Codex
+        cross_activator = CrossActivatorPlugin(
+            codex_manager=self._codex_manager,
+            enabled=self._config.memory_config.cross_activation,
+        )
+        self._cross_activator = cross_activator
+
         # PreProcessors (order matters!)
         # 1. SummarizationTrigger - checks if summarization needed
         # 2. CodexActivator - activate codex entries based on user input (NANO-037)
         # 3. RAGInjector - query memories, stage for injection (NANO-043)
-        # 4. BudgetEnforcer - enforces hard limits (includes codex + RAG tokens)
-        # 5. HistoryInjector - injects remaining history into messages
-        # 6. TwitchHistoryInjector - stages audience transcript for injection (NANO-115)
+        # 4. CrossActivator - multi-hop RAG→Codex cross-activation (NANO-127)
+        # 5. BudgetEnforcer - enforces hard limits (includes codex + RAG tokens)
+        # 6. HistoryInjector - injects remaining history into messages
+        # 7. TwitchHistoryInjector - stages audience transcript for injection (NANO-115)
+        # 8. DialogueKnowledgeInjector - stages character knowledge for injection (NANO-116 B.2)
         self._pipeline.register_pre_processor(summarizer)
         self._pipeline.register_pre_processor(codex_activator)
         if rag_injector:
             self._pipeline.register_pre_processor(rag_injector)
+        self._pipeline.register_pre_processor(cross_activator)
         self._pipeline.register_pre_processor(budget_enforcer)
         self._pipeline.register_pre_processor(history_injector)
         self._pipeline.register_pre_processor(twitch_history_injector)
+        self._pipeline.register_pre_processor(dialogue_knowledge_injector)
 
         # PostProcessors
         # 0. ReasoningExtractor - strip inline <think> blocks (NANO-042)
@@ -464,6 +519,10 @@ class VoiceAgentOrchestrator:
             on_interrupt=self._on_playback_interrupt,
             on_audio_level=self._on_audio_level,
         )
+
+        # NANO-130 Phase 2: Dedicated chat-TTS playback instance
+        self._chat_tts_playback = AudioPlayback()
+        self._chat_tts_playback.configure(sample_rate=24000, channels=1)
 
         # Configure playback sample rate from TTS provider properties (NANO-015)
         # Provider declares its output format, playback adapts
@@ -502,12 +561,23 @@ class VoiceAgentOrchestrator:
             context_limit_getter=lambda: (
                 self._provider_holder.provider.get_properties().context_length or 8192
             ) if self._provider_holder else 8192,
+            orchestrator_config=self._config,
         )
 
         # NANO-111 Phase 2: Wire streaming playback callbacks
         self._callbacks._on_response_ready_streaming = self._on_response_ready_streaming
         self._callbacks._append_playback_audio = self._append_playback_audio
         self._callbacks._finalize_playback_streaming = self._finalize_playback_streaming
+        self._callbacks._is_playback_active = lambda: (
+            (self._playback.is_playing if self._playback else False)
+            or (self._chat_tts_playback.is_playing if self._chat_tts_playback else False)
+        )
+        self._callbacks._suppress_playback_complete = self._suppress_playback_complete
+        self._callbacks._restore_playback_complete = self._restore_playback_complete
+        self._callbacks._on_session_playback_complete = self._on_playback_complete
+
+        # Stimulus barge-in: wire state machine processing transition
+        self._callbacks._on_start_processing = lambda: self._state_machine.start_processing()
 
         # NANO-112: Wire TTS-skipped callback for voice path state transition.
         # Can't use _on_playback_complete — that calls finish_system_speaking()
@@ -520,11 +590,20 @@ class VoiceAgentOrchestrator:
                 )
         self._callbacks._on_tts_skipped = _on_tts_skipped
 
+        # NANO-130 Phase 2: Wire chat-TTS playback + client
+        self._callbacks._chat_tts_playback = self._chat_tts_playback
+        if stimuli_cfg.twitch_chat_tts_enabled:
+            self._callbacks._reconnect_chat_tts_client(stimuli_cfg)
+
         # NANO-111 Phase 2.5: Wire history manager for barge-in truncation
         self._callbacks._history_manager = self._history_manager
 
         # NANO-115: Wire Twitch transcript dual-write callback
         self._callbacks._on_twitch_response = self._twitch_transcript.record_assistant_reply
+
+        # NANO-116 B.2: Wire dialogue store dual-write + summarization check
+        self._callbacks._on_game_state_response = self._dialogue_store.record_assistant_reply
+        self._callbacks._on_game_state_check_summarize = self._check_dialogue_summarize
 
         # NANO-076: Wire session file getter for snapshot sidecar persistence
         self._callbacks.set_session_file_getter(lambda: self.session_file)
@@ -532,6 +611,19 @@ class VoiceAgentOrchestrator:
         # NANO-110: Wire addressing-others state getters
         self._callbacks._is_addressing_others = lambda: self._addressing_others
         self._callbacks._consume_addressing_others_prompt = self._consume_addressing_others_prompt
+
+        # NANO-125: Wire mic passthrough state getter
+        self._callbacks._is_mic_passthrough = lambda: self._mic_passthrough
+
+        # NANO-121: Model cycling for stimulus responses
+        self._model_rotator = None
+        if stimuli_cfg.model_rotation_models:
+            from ..stimuli.weighted_rotator import WeightedRotator
+            self._model_rotator = WeightedRotator(stimuli_cfg.model_rotation_models)
+        self._callbacks.update_model_rotation(
+            enabled=stimuli_cfg.model_rotation_enabled and bool(stimuli_cfg.model_rotation_models),
+            rotator=self._model_rotator,
+        )
 
         # Wrapper to emit state change events
         def on_state_change_with_event(transition):
@@ -555,6 +647,7 @@ class VoiceAgentOrchestrator:
             on_barge_in=self._callbacks.on_barge_in,
             on_processing_complete=None,  # Not needed
             on_system_speech_end=None,  # Handled via playback callbacks
+            should_suppress_input=lambda: self._mic_passthrough,
         )
 
         # Stimuli engine: autonomous stimulus system (NANO-056)
@@ -565,12 +658,19 @@ class VoiceAgentOrchestrator:
             callbacks=self._callbacks,
             event_bus=self._event_bus,
             enabled=stimuli_cfg.enabled,
-            is_speaking=lambda: self._playback.is_playing,
+            is_speaking=lambda: (
+                self._playback.is_playing
+                or (self._chat_tts_playback is not None and self._chat_tts_playback.is_playing)
+            ),
         )
+        # NANO-117: Wire arbitration config
+        self._stimuli_engine._decay_multiplier = stimuli_cfg.arbitration_decay_multiplier
+        self._stimuli_engine._decay_recovery_per_cycle = stimuli_cfg.arbitration_recovery_per_cycle
+        self._stimuli_engine._weight_overrides = dict(stimuli_cfg.arbitration_weight_overrides)
         # Register PATIENCE module
         patience = PatienceModule(
             timeout_seconds=stimuli_cfg.patience_seconds,
-            prompt=stimuli_cfg.patience_prompt,
+            prompts=stimuli_cfg.patience_prompts,
             enabled=stimuli_cfg.patience_enabled,
         )
         self._stimuli_engine.register_module(patience)
@@ -588,6 +688,16 @@ class VoiceAgentOrchestrator:
                 char_cap=stimuli_cfg.twitch_audience_char_cap,
                 enabled=stimuli_cfg.twitch_enabled,
                 on_message_accepted=self._twitch_transcript.record_audience_message,
+                max_message_age_seconds=stimuli_cfg.twitch_max_message_age_seconds,
+                selection_mode=stimuli_cfg.twitch_selection_mode,
+                selection_pass_model=stimuli_cfg.twitch_selection_pass_model,
+                selection_pass_api_key=(
+                    stimuli_cfg.twitch_selection_pass_api_key
+                    or self._config.llm_config.provider_config.get("api_key", "")
+                ),
+                events_enabled=stimuli_cfg.twitch_events_enabled,
+                is_engine_idle=self._stimuli_engine.is_idle,
+                trigger_barge_in=self._handle_self_barge_in,
             )
             self._stimuli_engine.register_module(twitch)
             logger.info(
@@ -595,6 +705,59 @@ class VoiceAgentOrchestrator:
                 stimuli_cfg.twitch_channel,
                 stimuli_cfg.twitch_enabled,
             )
+
+        # Register game-state bridge module if configured (NANO-116)
+        if stimuli_cfg.game_state_host:
+            game_state = GameStateModule(
+                host=stimuli_cfg.game_state_host,
+                port=stimuli_cfg.game_state_port,
+                buffer_size=stimuli_cfg.game_state_buffer_size,
+                prompt_template=stimuli_cfg.game_state_prompt_template,
+                enabled=stimuli_cfg.game_state_enabled,
+                dialogue_buffer_size=stimuli_cfg.game_state_dialogue_buffer_size,
+                dialogue_min_lines=stimuli_cfg.game_state_dialogue_min_lines,
+                dialogue_drain_delay=stimuli_cfg.game_state_dialogue_drain_delay,
+                gameplay_enabled=stimuli_cfg.game_state_gameplay_enabled,
+                gameplay_base_probability=stimuli_cfg.game_state_gameplay_base_probability,
+                gameplay_escalation_step=stimuli_cfg.game_state_gameplay_escalation_step,
+                gameplay_probability_ceiling=stimuli_cfg.game_state_gameplay_probability_ceiling,
+                gameplay_dirty_hp_threshold=stimuli_cfg.game_state_gameplay_dirty_hp_threshold,
+                gameplay_event_batch_window=stimuli_cfg.game_state_gameplay_event_batch_window,
+                is_engine_idle=self._stimuli_engine.is_idle,
+                barge_in_enabled=stimuli_cfg.game_state_barge_in_enabled,
+                barge_in_escalation=stimuli_cfg.game_state_barge_in_escalation,
+                barge_in_fatigue=stimuli_cfg.game_state_barge_in_fatigue,
+                trigger_barge_in=self._handle_self_barge_in,
+            )
+            game_state._dialogue_store = self._dialogue_store
+            game_state.dialogue_prompt_templates = stimuli_cfg.game_state_dialogue_prompt_templates
+            game_state.barge_in_prompt_templates = stimuli_cfg.game_state_barge_in_prompt_templates
+            # NANO-124: Subscribe to TTS_COMPLETED for probability layer reset
+            if self._event_bus:
+                self._event_bus.subscribe(
+                    EventType.TTS_COMPLETED,
+                    lambda evt: game_state.on_tts_completed(),
+                )
+            self._stimuli_engine.register_module(game_state)
+            self._game_state_module = game_state
+            # NANO-133/134: Late injection — tool system inits before game_state module
+            if self._tool_registry:
+                for tool_name in ("game_state_query", "invoke_hack"):
+                    tool = self._tool_registry.get_tool(tool_name)
+                    if tool:
+                        tool.set_game_state_module(game_state)
+                        logger.debug("Late-injected GameStateModule into %s tool", tool_name)
+            logger.info(
+                "Game-state module registered (target=%s:%d, enabled=%s, "
+                "dialogue_buffer=%d, barge_in=%s)",
+                stimuli_cfg.game_state_host,
+                stimuli_cfg.game_state_port,
+                stimuli_cfg.game_state_enabled,
+                stimuli_cfg.game_state_dialogue_buffer_size,
+                stimuli_cfg.game_state_barge_in_enabled,
+            )
+        else:
+            self._game_state_module = None
 
         logger.info(
             "Stimuli engine created (enabled=%s, patience=%.1fs)",
@@ -726,6 +889,18 @@ class VoiceAgentOrchestrator:
         # Initialize tools from config
         self._tool_registry.initialize_tools(tools_raw)
 
+        # NANO-133/134: Inject GameStateModule into game-bridge tools
+        game_state_mod = getattr(self, "_game_state_module", None)
+        if game_state_mod:
+            game_query_tool = self._tool_registry.get_tool("game_state_query")
+            if game_query_tool:
+                game_query_tool.set_game_state_module(game_state_mod)
+                logger.debug("Injected GameStateModule into game_state_query tool")
+            hack_tool = self._tool_registry.get_tool("invoke_hack")
+            if hack_tool:
+                hack_tool.set_game_state_module(game_state_mod)
+                logger.debug("Injected GameStateModule into invoke_hack tool")
+
         # Check if any tools are enabled
         enabled_tools = self._tool_registry.get_enabled_tools()
         if not enabled_tools:
@@ -837,6 +1012,18 @@ class VoiceAgentOrchestrator:
         """Signal that no more audio chunks will arrive (NANO-111 Phase 2)."""
         self._playback.finalize_streaming()
 
+    def _suppress_playback_complete(self) -> None:
+        """Suppress on_complete callback during session TTS delivery."""
+        if self._playback is not None:
+            self._playback._saved_on_complete = self._playback.on_complete
+            self._playback.on_complete = None
+
+    def _restore_playback_complete(self) -> None:
+        """Restore on_complete callback without firing it."""
+        if self._playback is not None:
+            saved = getattr(self._playback, '_saved_on_complete', None)
+            self._playback.on_complete = saved
+
     def _on_playback_complete(self) -> None:
         """Called when TTS playback finishes naturally."""
         if not self._running:
@@ -901,8 +1088,25 @@ class VoiceAgentOrchestrator:
             time.sleep(0.01)
 
     def _handle_barge_in(self) -> None:
-        """Handle barge-in by stopping playback."""
+        """Handle barge-in by stopping playback (both character and chat-TTS)."""
         self._playback.stop()
+        if self._chat_tts_playback is not None:
+            self._chat_tts_playback.stop()
+
+    def _handle_self_barge_in(self) -> None:
+        """Handle game-event self-barge-in (NANO-124).
+
+        Truncates history, transitions the state machine back to LISTENING,
+        then stops playback. Order matters: finish_system_speaking() must
+        run while state is still SYSTEM_SPEAKING — playback.stop() fires
+        on_interrupt which can cause state confusion if the transition
+        hasn't happened yet.
+        """
+        self._callbacks.trigger_self_barge_in()
+        self._state_machine.finish_system_speaking()
+        self._playback.stop()
+        if self._chat_tts_playback is not None:
+            self._chat_tts_playback.stop()
 
     def set_addressing_others(self, context_id: str) -> None:
         """
@@ -924,6 +1128,8 @@ class VoiceAgentOrchestrator:
             and self._state_machine.state == AgentState.SYSTEM_SPEAKING
         ):
             self._playback.stop()
+            if self._chat_tts_playback is not None:
+                self._chat_tts_playback.stop()
             # Transition to LISTENING, not USER_SPEAKING — we're suppressing input
             self._state_machine.finish_system_speaking()
 
@@ -971,6 +1177,11 @@ class VoiceAgentOrchestrator:
         )
 
     @property
+    def service_capabilities(self) -> ServiceCapabilities:
+        """Central service enable/disable registry (NANO-116 B.4a)."""
+        return self._service_capabilities
+
+    @property
     def addressing_others(self) -> bool:
         """Whether addressing-others mode is active (NANO-110)."""
         return self._addressing_others
@@ -990,6 +1201,20 @@ class VoiceAgentOrchestrator:
         prompt = self._addressing_others_prompt
         self._addressing_others_prompt = None
         return prompt
+
+    @property
+    def mic_passthrough(self) -> bool:
+        """Whether mic passthrough is active (NANO-125)."""
+        return self._mic_passthrough
+
+    def set_mic_passthrough(self, active: bool) -> None:
+        """Toggle mic passthrough -- suppresses STT, stimuli stays live (NANO-125)."""
+        self._mic_passthrough = active
+        if active:
+            self.pause_listening()
+        else:
+            self.resume_listening()
+        logger.info("[NANO-125] Mic passthrough %s", "ON" if active else "OFF")
 
     def _on_empty_transcription(self) -> None:
         """Handle empty transcription (noise/silence detected as speech)."""
@@ -1011,6 +1236,99 @@ class VoiceAgentOrchestrator:
         # Return to listening state on error
         if self._state_machine.state == AgentState.PROCESSING:
             self._state_machine._transition(AgentState.LISTENING, f"{stage}_error")
+
+    def _check_dialogue_summarize(self) -> None:
+        """Check if dialogue needs summarization and launch background thread if so.
+
+        Called after the LLM responds to a game_state stimulus. Threshold check
+        is synchronous; the actual OpenRouter call runs in a daemon thread.
+        While summarizing, GameStateModule drops incoming dialogue events (KD-4).
+        """
+        if not self._dialogue_store or not self._dialogue_summarizer:
+            return
+
+        from ..stimuli.game_state.dialogue_store import _count_tokens
+
+        token_budget = self._config.stimuli_config.game_state_dialogue_token_budget
+        unsummarized_lines = self._dialogue_store.get_unsummarized_lines()
+        raw_tokens = _count_tokens(self._dialogue_store._format_lines(unsummarized_lines)) if unsummarized_lines else 0
+        summary_tokens = _count_tokens(self._dialogue_store.summary_blob) if self._dialogue_store.summary_blob else 0
+        total = raw_tokens + summary_tokens
+        pct = int(total / token_budget * 100) if token_budget else 0
+        print(
+            f"[Summarizer] tokens: {raw_tokens} unsummarized + {summary_tokens} summary = {total} / {token_budget} budget ({pct}% full)",
+            flush=True,
+        )
+        if not self._dialogue_store.needs_summarization(token_budget):
+            return
+
+        if not self._dialogue_summarizer.is_configured():
+            logger.warning(
+                "Dialogue overflow detected but summarizer not configured. "
+                "Raw lines will be truncated at injection time."
+            )
+            return
+
+        # Gate: don't launch if already summarizing
+        if self._game_state_module and self._game_state_module._summarizing:
+            logger.debug("Summarizer already running, skipping duplicate launch.")
+            return
+
+        previous_summary, unsummarized = self._dialogue_store.get_summarizer_input()
+        if not unsummarized:
+            return
+
+        codex_context = ""
+        if self._codex_manager and unsummarized:
+            combined_text = " ".join(
+                f"{line.get('speaker', '')} {line.get('text', '')}"
+                for line in unsummarized
+            )
+            results = self._codex_manager.activate(combined_text)
+            if results:
+                codex_context = self._codex_manager.get_activated_content(results)
+
+        logger.info(
+            "Dialogue overflow — launching async summarizer (unsummarized_lines=%d, "
+            "previous_summary=%s, codex_entries=%d)",
+            len(unsummarized),
+            "yes" if previous_summary else "no",
+            len(codex_context.split("\n\n")) if codex_context else 0,
+        )
+
+        if self._game_state_module:
+            self._game_state_module._summarizing = True
+            self._game_state_module._dialogue_dropped_during_summary = 0
+
+        def _run_summarizer() -> None:
+            try:
+                summary = self._dialogue_summarizer.summarize(
+                    previous_summary, unsummarized, codex_context=codex_context
+                )
+                if summary:
+                    self._dialogue_store.record_summary(summary)
+                    logger.info(
+                        "Dialogue summary persisted (v%d, %d chars)",
+                        self._dialogue_store.summary_version,
+                        len(summary),
+                    )
+            except Exception:
+                logger.exception("Background summarizer failed")
+            finally:
+                if self._game_state_module:
+                    dropped = self._game_state_module._dialogue_dropped_during_summary
+                    self._game_state_module._summarizing = False
+                    self._game_state_module._dialogue_buffer.clear()
+                    if dropped:
+                        logger.info(
+                            "Summarizer complete — dropped %d dialogue events during compression",
+                            dropped,
+                        )
+
+        thread = threading.Thread(
+            target=_run_summarizer, name="DialogueSummarizer", daemon=True
+        )
+        thread.start()
 
     def start(self) -> None:
         """Start the voice agent."""
@@ -1037,6 +1355,10 @@ class VoiceAgentOrchestrator:
         # NANO-115: Bind Twitch transcript to voice session file
         if self._twitch_transcript and self._history_manager:
             self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
+
+        # NANO-116 B.2: Bind dialogue store to voice session file
+        if self._dialogue_store and self._history_manager:
+            self._dialogue_store.ensure_store(self._history_manager.session_file)
 
         # Start reflection system background thread (NANO-043 Phase 3)
         if self._reflection_system:
@@ -1110,6 +1432,13 @@ class VoiceAgentOrchestrator:
             self._capture.stop()
         if self._playback:
             self._playback.stop()
+
+        # Shutdown TTS provider (NANO-054b: sends shutdown to externally managed servers)
+        if self._tts_provider:
+            try:
+                self._tts_provider.shutdown()
+            except Exception as e:
+                logger.warning("TTS provider shutdown error: %s", e)
 
         # Shutdown tools (NANO-024)
         if self._tool_registry:
@@ -1185,16 +1514,17 @@ class VoiceAgentOrchestrator:
         """
         self._setup()
 
-        # NANO-112: Distinguish disabled vs unhealthy
-        if not self._stt_enabled:
-            stt_status = "disabled"
-        else:
-            stt_status = self._stt.health_check() if self._stt else False
+        # NANO-116 B.4a: Read from service capabilities registry
+        caps = self._service_capabilities
+        stt_disabled = caps.health_status("stt")
+        stt_status = stt_disabled if stt_disabled else (
+            self._stt.health_check() if self._stt else False
+        )
 
-        if not self._tts_enabled:
-            tts_status = "disabled"
-        else:
-            tts_status = self._tts_provider.health_check() if self._tts_provider else False
+        tts_disabled = caps.health_status("tts")
+        tts_status = tts_disabled if tts_disabled else (
+            self._tts_provider.health_check() if self._tts_provider else False
+        )
 
         return {
             "stt": stt_status,
@@ -1270,6 +1600,9 @@ class VoiceAgentOrchestrator:
         codex_suffix: Optional[str] = ...,
         example_dialogue_prefix: Optional[str] = ...,
         example_dialogue_suffix: Optional[str] = ...,
+        voice_state_barge_in: Optional[str] = ...,
+        voice_state_empty_transcription: Optional[str] = ...,
+        voice_state_error: Optional[str] = ...,
     ) -> None:
         """
         Update prompt injection wrappers at runtime (NANO-045d + NANO-052 follow-up).
@@ -1281,6 +1614,9 @@ class VoiceAgentOrchestrator:
             codex_suffix: New codex suffix. Ellipsis (...) = keep current.
             example_dialogue_prefix: New example dialogue prefix. Ellipsis = keep current.
             example_dialogue_suffix: New example dialogue suffix. Ellipsis = keep current.
+            voice_state_barge_in: Barge-in injection text. Ellipsis = keep current.
+            voice_state_empty_transcription: Empty transcription text. Ellipsis = keep current.
+            voice_state_error: Error injection text. Ellipsis = keep current.
         """
         pc = self._config.prompt_config
         if rag_prefix is not ...:
@@ -1295,6 +1631,12 @@ class VoiceAgentOrchestrator:
             pc.example_dialogue_prefix = example_dialogue_prefix or ""
         if example_dialogue_suffix is not ...:
             pc.example_dialogue_suffix = example_dialogue_suffix or ""
+        if voice_state_barge_in is not ...:
+            pc.voice_state_barge_in = voice_state_barge_in or ""
+        if voice_state_empty_transcription is not ...:
+            pc.voice_state_empty_transcription = voice_state_empty_transcription or ""
+        if voice_state_error is not ...:
+            pc.voice_state_error = voice_state_error or ""
 
         if self._rag_injector:
             self._rag_injector.update_config(
@@ -1863,8 +2205,9 @@ class VoiceAgentOrchestrator:
         enabled: Optional[bool] = None,
         patience_enabled: Optional[bool] = None,
         patience_seconds: Optional[float] = None,
-        patience_prompt: Optional[str] = None,
+        patience_prompts: Optional[list[str]] = None,
         twitch_enabled: Optional[bool] = None,
+        twitch_events_enabled: Optional[bool] = None,
         twitch_channel: Optional[str] = None,
         twitch_app_id: Optional[str] = None,
         twitch_app_secret: Optional[str] = None,
@@ -1873,7 +2216,51 @@ class VoiceAgentOrchestrator:
         twitch_prompt_template: Optional[str] = None,
         twitch_audience_window: Optional[int] = None,
         twitch_audience_char_cap: Optional[int] = None,
+        twitch_max_message_age_seconds: Optional[float] = None,
+        twitch_selection_mode: Optional[str] = None,
+        twitch_selection_pass_model: Optional[str] = None,
+        twitch_selection_pass_api_key: Optional[str] = None,
+        twitch_chat_tts_enabled: Optional[bool] = None,
+        twitch_chat_tts_host: Optional[str] = None,
+        twitch_chat_tts_port: Optional[int] = None,
+        twitch_chat_tts_device: Optional[str] = None,
+        twitch_chat_tts_voice: Optional[str] = None,
+        twitch_chat_tts_speed: Optional[float] = None,
+        twitch_chat_tts_format: Optional[str] = None,
+        twitch_chat_tts_max_length: Optional[int] = None,
         addressing_others_contexts: Optional[list] = None,
+        game_state_profile: Optional[str] = None,
+        game_state_enabled: Optional[bool] = None,
+        game_state_host: Optional[str] = None,
+        game_state_port: Optional[int] = None,
+        game_state_buffer_size: Optional[int] = None,
+        game_state_prompt_template: Optional[str] = None,
+        game_state_dialogue_enabled: Optional[bool] = None,
+        game_state_dialogue_buffer_size: Optional[int] = None,
+        game_state_dialogue_prompt_templates: Optional[list[str]] = None,
+        game_state_dialogue_token_budget: Optional[int] = None,
+        game_state_dialogue_summary_max_tokens: Optional[int] = None,
+        game_state_dialogue_min_lines: Optional[int] = None,
+        game_state_dialogue_drain_delay: Optional[float] = None,
+        game_state_dialogue_summarizer_model: Optional[str] = None,
+        game_state_dialogue_summarizer_api_key: Optional[str] = None,
+        game_state_dialogue_summarizer_persona: Optional[str] = None,
+        game_state_gameplay_enabled: Optional[bool] = None,
+        game_state_gameplay_base_probability: Optional[float] = None,
+        game_state_gameplay_escalation_step: Optional[float] = None,
+        game_state_gameplay_probability_ceiling: Optional[float] = None,
+        game_state_gameplay_dirty_hp_threshold: Optional[float] = None,
+        game_state_gameplay_event_batch_window: Optional[float] = None,
+        game_state_barge_in_enabled: Optional[bool] = None,
+        game_state_barge_in_escalation: Optional[list[float]] = None,
+        game_state_barge_in_fatigue: Optional[list[float]] = None,
+        game_state_barge_in_prompt_templates: Optional[list[str]] = None,
+        model_rotation_enabled: Optional[bool] = None,
+        model_rotation_models: Optional[list[str]] = None,
+        model_rotation_api_key: Optional[str] = None,
+        arbitration_decay_multiplier: Optional[float] = None,
+        arbitration_recovery_per_cycle: Optional[float] = None,
+        arbitration_weight_overrides: Optional[dict[str, float]] = None,
     ) -> None:
         """
         Update stimuli config at runtime (NANO-056).
@@ -1882,7 +2269,7 @@ class VoiceAgentOrchestrator:
             enabled: Master enable/disable for stimuli engine.
             patience_enabled: Enable/disable PATIENCE timer.
             patience_seconds: PATIENCE timeout in seconds.
-            patience_prompt: Custom PATIENCE prompt text.
+            patience_prompts: PATIENCE prompt templates (weighted rotation).
             twitch_enabled: Enable/disable Twitch module (NANO-056b).
             twitch_channel: Twitch channel name.
             twitch_app_id: Twitch app ID.
@@ -1891,6 +2278,19 @@ class VoiceAgentOrchestrator:
             twitch_max_message_length: Max message length filter.
             twitch_prompt_template: Prompt template for Twitch stimulus.
             addressing_others_contexts: List of AddressingContext dicts (NANO-110).
+            game_state_enabled: Enable/disable game-state bridge module (NANO-116).
+            game_state_host: TCP host for game-state bridge.
+            game_state_port: TCP port for game-state bridge.
+            game_state_buffer_size: Max buffered game events.
+            game_state_prompt_template: Prompt template for game events.
+            game_state_dialogue_enabled: Enable/disable dialogue pipeline.
+            game_state_dialogue_buffer_size: Max buffered dialogue lines.
+            game_state_dialogue_prompt_templates: Prompt templates for dialogue stimulus (weighted rotation).
+            game_state_dialogue_token_budget: Token budget for CHARACTER_KNOWLEDGE block (tiktoken tokens).
+            game_state_dialogue_summary_max_tokens: Max tokens for summarizer output.
+            game_state_dialogue_summarizer_model: OpenRouter model for summarizer.
+            game_state_dialogue_summarizer_api_key: OpenRouter API key for summarizer.
+            game_state_dialogue_summarizer_persona: Persona prompt for summarizer.
         """
         cfg = self._config.stimuli_config
 
@@ -1917,9 +2317,9 @@ class VoiceAgentOrchestrator:
                     if patience_seconds is not None:
                         module.timeout_seconds = patience_seconds
                         cfg.patience_seconds = patience_seconds
-                    if patience_prompt is not None:
-                        module.prompt = patience_prompt
-                        cfg.patience_prompt = patience_prompt
+                    if patience_prompts is not None:
+                        module.prompts = patience_prompts
+                        cfg.patience_prompts = patience_prompts
                     break
 
             # Find the Twitch module and update it (NANO-056b)
@@ -1928,6 +2328,7 @@ class VoiceAgentOrchestrator:
                     if twitch_enabled is not None:
                         module.enabled = twitch_enabled
                         cfg.twitch_enabled = twitch_enabled
+                        self._service_capabilities.set("twitch", twitch_enabled, reason="runtime_toggle")
                         if twitch_enabled:
                             module.start()
                         else:
@@ -1952,11 +2353,34 @@ class VoiceAgentOrchestrator:
                         cfg.twitch_prompt_template = twitch_prompt_template
                     if twitch_audience_char_cap is not None:
                         module.char_cap = twitch_audience_char_cap
+                    # NANO-130: Selection pass + staleness filter
+                    if twitch_max_message_age_seconds is not None:
+                        module.max_message_age_seconds = twitch_max_message_age_seconds
+                        cfg.twitch_max_message_age_seconds = twitch_max_message_age_seconds
+                    if twitch_selection_mode is not None:
+                        module.selection_mode = twitch_selection_mode
+                        cfg.twitch_selection_mode = twitch_selection_mode
+                    if twitch_selection_pass_model is not None:
+                        module.selection_pass_model = twitch_selection_pass_model
+                        cfg.twitch_selection_pass_model = twitch_selection_pass_model
+                    if twitch_selection_pass_api_key is not None:
+                        effective_key = (
+                            twitch_selection_pass_api_key
+                            or self._config.llm_config.provider_config.get("api_key", "")
+                        )
+                        module.selection_pass_api_key = effective_key
+                        cfg.twitch_selection_pass_api_key = twitch_selection_pass_api_key
+                    # NANO-132: EventSub events toggle
+                    if twitch_events_enabled is not None:
+                        module.events_enabled = twitch_events_enabled
+                        cfg.twitch_events_enabled = twitch_events_enabled
                     break
 
             # Update config even if module isn't registered yet
             if twitch_enabled is not None:
                 cfg.twitch_enabled = twitch_enabled
+            if twitch_events_enabled is not None:
+                cfg.twitch_events_enabled = twitch_events_enabled
             if twitch_channel is not None:
                 cfg.twitch_channel = twitch_channel
             if twitch_app_id is not None:
@@ -1977,6 +2401,38 @@ class VoiceAgentOrchestrator:
                 cfg.twitch_audience_char_cap = twitch_audience_char_cap
                 if hasattr(self, "_twitch_history_injector"):
                     self._twitch_history_injector.audience_char_cap = twitch_audience_char_cap
+            # NANO-130: Selection pass + staleness filter (config fallback)
+            if twitch_max_message_age_seconds is not None:
+                cfg.twitch_max_message_age_seconds = twitch_max_message_age_seconds
+            if twitch_selection_mode is not None:
+                cfg.twitch_selection_mode = twitch_selection_mode
+            if twitch_selection_pass_model is not None:
+                cfg.twitch_selection_pass_model = twitch_selection_pass_model
+            if twitch_selection_pass_api_key is not None:
+                cfg.twitch_selection_pass_api_key = twitch_selection_pass_api_key
+            # NANO-130 Phase 2: Chat-TTS config
+            if twitch_chat_tts_enabled is not None:
+                cfg.twitch_chat_tts_enabled = twitch_chat_tts_enabled
+            if twitch_chat_tts_host is not None:
+                cfg.twitch_chat_tts_host = twitch_chat_tts_host
+            if twitch_chat_tts_port is not None:
+                cfg.twitch_chat_tts_port = twitch_chat_tts_port
+            if twitch_chat_tts_device is not None:
+                cfg.twitch_chat_tts_device = twitch_chat_tts_device
+            if twitch_chat_tts_voice is not None:
+                cfg.twitch_chat_tts_voice = twitch_chat_tts_voice
+            if twitch_chat_tts_speed is not None:
+                cfg.twitch_chat_tts_speed = twitch_chat_tts_speed
+            if twitch_chat_tts_format is not None:
+                cfg.twitch_chat_tts_format = twitch_chat_tts_format
+            if twitch_chat_tts_max_length is not None:
+                cfg.twitch_chat_tts_max_length = twitch_chat_tts_max_length
+            # Reconnect chat-TTS client if enabled or connection params changed
+            if twitch_chat_tts_enabled or any(x is not None for x in (twitch_chat_tts_host, twitch_chat_tts_port, twitch_chat_tts_voice, twitch_chat_tts_speed)):
+                if cfg.twitch_chat_tts_enabled:
+                    self._callbacks._reconnect_chat_tts_client(cfg)
+                else:
+                    self._callbacks._chat_tts_client = None
 
         # Addressing-others contexts (NANO-110) — config-only, no live module
         if addressing_others_contexts is not None:
@@ -1989,6 +2445,181 @@ class VoiceAgentOrchestrator:
                 )
                 for i, ctx in enumerate(addressing_others_contexts)
             ]
+
+        # Game-state bridge module (NANO-116)
+        if self._stimuli_engine:
+            for module in self._stimuli_engine.modules:
+                if module.name == "game_state":
+                    if game_state_enabled is not None:
+                        module.enabled = game_state_enabled
+                        cfg.game_state_enabled = game_state_enabled
+                        self._service_capabilities.set("game_state", game_state_enabled, reason="runtime_toggle")
+                        if game_state_enabled:
+                            module.start()
+                        else:
+                            module.stop()
+                    if game_state_host is not None:
+                        module.host = game_state_host
+                        cfg.game_state_host = game_state_host
+                    if game_state_port is not None:
+                        module.port = game_state_port
+                        cfg.game_state_port = game_state_port
+                    if game_state_buffer_size is not None:
+                        module.buffer_size = game_state_buffer_size
+                        cfg.game_state_buffer_size = game_state_buffer_size
+                    if game_state_prompt_template is not None:
+                        module.prompt_template = game_state_prompt_template
+                        cfg.game_state_prompt_template = game_state_prompt_template
+                    if game_state_dialogue_enabled is not None:
+                        cfg.game_state_dialogue_enabled = game_state_dialogue_enabled
+                    if game_state_dialogue_buffer_size is not None:
+                        if hasattr(module, "dialogue_buffer") and module.dialogue_buffer:
+                            module.dialogue_buffer.maxlen = game_state_dialogue_buffer_size
+                        cfg.game_state_dialogue_buffer_size = game_state_dialogue_buffer_size
+                    if game_state_dialogue_prompt_templates is not None:
+                        module.dialogue_prompt_templates = game_state_dialogue_prompt_templates
+                        cfg.game_state_dialogue_prompt_templates = game_state_dialogue_prompt_templates
+                    if game_state_dialogue_token_budget is not None:
+                        cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
+                    if game_state_dialogue_min_lines is not None:
+                        module.dialogue_min_lines = game_state_dialogue_min_lines
+                        cfg.game_state_dialogue_min_lines = game_state_dialogue_min_lines
+                    if game_state_dialogue_drain_delay is not None:
+                        module.dialogue_drain_delay = game_state_dialogue_drain_delay
+                        cfg.game_state_dialogue_drain_delay = game_state_dialogue_drain_delay
+                    # NANO-122: Gameplay stimulus config
+                    if game_state_gameplay_enabled is not None:
+                        module.gameplay_enabled = game_state_gameplay_enabled
+                        cfg.game_state_gameplay_enabled = game_state_gameplay_enabled
+                    if game_state_gameplay_base_probability is not None:
+                        module.gameplay_base_probability = game_state_gameplay_base_probability
+                        cfg.game_state_gameplay_base_probability = game_state_gameplay_base_probability
+                    if game_state_gameplay_escalation_step is not None:
+                        module.gameplay_escalation_step = game_state_gameplay_escalation_step
+                        cfg.game_state_gameplay_escalation_step = game_state_gameplay_escalation_step
+                    if game_state_gameplay_probability_ceiling is not None:
+                        module.gameplay_probability_ceiling = game_state_gameplay_probability_ceiling
+                        cfg.game_state_gameplay_probability_ceiling = game_state_gameplay_probability_ceiling
+                    if game_state_gameplay_dirty_hp_threshold is not None:
+                        module.gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
+                        cfg.game_state_gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
+                    if game_state_gameplay_event_batch_window is not None:
+                        module.gameplay_event_batch_window = game_state_gameplay_event_batch_window
+                        cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
+                    # NANO-124: Self-barge-in config
+                    if game_state_barge_in_enabled is not None:
+                        module.barge_in_enabled = game_state_barge_in_enabled
+                        cfg.game_state_barge_in_enabled = game_state_barge_in_enabled
+                    if game_state_barge_in_escalation is not None:
+                        module.barge_in_escalation = game_state_barge_in_escalation
+                        cfg.game_state_barge_in_escalation = game_state_barge_in_escalation
+                    if game_state_barge_in_fatigue is not None:
+                        module.barge_in_fatigue = game_state_barge_in_fatigue
+                        cfg.game_state_barge_in_fatigue = game_state_barge_in_fatigue
+                    if game_state_barge_in_prompt_templates is not None:
+                        module.barge_in_prompt_templates = game_state_barge_in_prompt_templates
+                        cfg.game_state_barge_in_prompt_templates = game_state_barge_in_prompt_templates
+                    break
+
+        # Update config even if game_state module isn't registered yet
+        if game_state_profile is not None:
+            cfg.game_state_profile = game_state_profile
+        if game_state_enabled is not None:
+            cfg.game_state_enabled = game_state_enabled
+        if game_state_host is not None:
+            cfg.game_state_host = game_state_host
+        if game_state_port is not None:
+            cfg.game_state_port = game_state_port
+        if game_state_buffer_size is not None:
+            cfg.game_state_buffer_size = game_state_buffer_size
+        if game_state_prompt_template is not None:
+            cfg.game_state_prompt_template = game_state_prompt_template
+        if game_state_dialogue_enabled is not None:
+            cfg.game_state_dialogue_enabled = game_state_dialogue_enabled
+        if game_state_dialogue_buffer_size is not None:
+            cfg.game_state_dialogue_buffer_size = game_state_dialogue_buffer_size
+        if game_state_dialogue_prompt_templates is not None:
+            cfg.game_state_dialogue_prompt_templates = game_state_dialogue_prompt_templates
+        if game_state_dialogue_token_budget is not None:
+            cfg.game_state_dialogue_token_budget = game_state_dialogue_token_budget
+        if game_state_dialogue_summary_max_tokens is not None:
+            cfg.game_state_dialogue_summary_max_tokens = game_state_dialogue_summary_max_tokens
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.max_tokens = game_state_dialogue_summary_max_tokens
+        if game_state_dialogue_min_lines is not None:
+            cfg.game_state_dialogue_min_lines = game_state_dialogue_min_lines
+        if game_state_dialogue_drain_delay is not None:
+            cfg.game_state_dialogue_drain_delay = game_state_dialogue_drain_delay
+        if game_state_dialogue_summarizer_model is not None:
+            cfg.game_state_dialogue_summarizer_model = game_state_dialogue_summarizer_model
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.model = game_state_dialogue_summarizer_model
+        if game_state_dialogue_summarizer_api_key is not None:
+            cfg.game_state_dialogue_summarizer_api_key = game_state_dialogue_summarizer_api_key
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.api_key = game_state_dialogue_summarizer_api_key
+        if game_state_dialogue_summarizer_persona is not None:
+            cfg.game_state_dialogue_summarizer_persona = game_state_dialogue_summarizer_persona
+            if self._dialogue_summarizer:
+                self._dialogue_summarizer.persona_prompt = game_state_dialogue_summarizer_persona
+        # NANO-122: Gameplay stimulus config (fallback if module not registered)
+        if game_state_gameplay_enabled is not None:
+            cfg.game_state_gameplay_enabled = game_state_gameplay_enabled
+        if game_state_gameplay_base_probability is not None:
+            cfg.game_state_gameplay_base_probability = game_state_gameplay_base_probability
+        if game_state_gameplay_escalation_step is not None:
+            cfg.game_state_gameplay_escalation_step = game_state_gameplay_escalation_step
+        if game_state_gameplay_probability_ceiling is not None:
+            cfg.game_state_gameplay_probability_ceiling = game_state_gameplay_probability_ceiling
+        if game_state_gameplay_dirty_hp_threshold is not None:
+            cfg.game_state_gameplay_dirty_hp_threshold = game_state_gameplay_dirty_hp_threshold
+        if game_state_gameplay_event_batch_window is not None:
+            cfg.game_state_gameplay_event_batch_window = game_state_gameplay_event_batch_window
+        # NANO-124: Self-barge-in config (fallback if module not registered)
+        if game_state_barge_in_enabled is not None:
+            cfg.game_state_barge_in_enabled = game_state_barge_in_enabled
+        if game_state_barge_in_escalation is not None:
+            cfg.game_state_barge_in_escalation = game_state_barge_in_escalation
+        if game_state_barge_in_fatigue is not None:
+            cfg.game_state_barge_in_fatigue = game_state_barge_in_fatigue
+        if game_state_barge_in_prompt_templates is not None:
+            cfg.game_state_barge_in_prompt_templates = game_state_barge_in_prompt_templates
+
+        # NANO-121: Model cycling for stimulus responses
+        rotation_changed = False
+        if model_rotation_enabled is not None:
+            cfg.model_rotation_enabled = model_rotation_enabled
+            rotation_changed = True
+        if model_rotation_models is not None:
+            cfg.model_rotation_models = model_rotation_models
+            rotation_changed = True
+        if model_rotation_api_key is not None:
+            cfg.model_rotation_api_key = model_rotation_api_key
+        if rotation_changed:
+            from ..stimuli.weighted_rotator import WeightedRotator
+            models = cfg.model_rotation_models
+            if models:
+                self._model_rotator = WeightedRotator(models)
+            else:
+                self._model_rotator = None
+            self._callbacks.update_model_rotation(
+                enabled=cfg.model_rotation_enabled and bool(models),
+                rotator=self._model_rotator,
+            )
+
+        # NANO-117: Weighted arbitration config
+        if arbitration_decay_multiplier is not None:
+            cfg.arbitration_decay_multiplier = arbitration_decay_multiplier
+            if self._stimuli_engine:
+                self._stimuli_engine._decay_multiplier = arbitration_decay_multiplier
+        if arbitration_recovery_per_cycle is not None:
+            cfg.arbitration_recovery_per_cycle = arbitration_recovery_per_cycle
+            if self._stimuli_engine:
+                self._stimuli_engine._decay_recovery_per_cycle = arbitration_recovery_per_cycle
+        if arbitration_weight_overrides is not None:
+            cfg.arbitration_weight_overrides = dict(arbitration_weight_overrides)
+            if self._stimuli_engine:
+                self._stimuli_engine._weight_overrides = dict(arbitration_weight_overrides)
 
     def update_vts_config(
         self,
@@ -2224,9 +2855,13 @@ class VoiceAgentOrchestrator:
             return False
         from pathlib import Path
         result = self._history_manager.load_session(Path(filepath))
-        # NANO-107: update session-scoped retrieval filter
-        if result and self._memory_store and self._history_manager.session_file:
-            self._memory_store.set_session_id(self._history_manager.session_file.stem)
+        if result:
+            # NANO-107: update session-scoped retrieval filter
+            if self._memory_store and self._history_manager.session_file:
+                self._memory_store.set_session_id(self._history_manager.session_file.stem)
+            # NANO-116 B.2: Rebind dialogue store to loaded session
+            if self._dialogue_store:
+                self._dialogue_store.ensure_store(self._history_manager.session_file)
         return result
 
     def create_new_session(self) -> bool:
@@ -2251,6 +2886,9 @@ class VoiceAgentOrchestrator:
         # NANO-115: Rebind Twitch transcript to new session file
         if self._twitch_transcript:
             self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
+        # NANO-116 B.2: Rebind dialogue store to new session file
+        if self._dialogue_store:
+            self._dialogue_store.ensure_store(self._history_manager.session_file)
         # NANO-107: update session-scoped retrieval filter
         if self._memory_store and self._history_manager.session_file:
             self._memory_store.set_session_id(self._history_manager.session_file.stem)
@@ -2377,6 +3015,10 @@ class VoiceAgentOrchestrator:
         # NANO-115: Rebind Twitch transcript to new persona session
         if self._twitch_transcript and self._history_manager:
             self._twitch_transcript.ensure_transcript(self._history_manager.session_file)
+
+        # NANO-116 B.2: Rebind dialogue store to new persona session
+        if self._dialogue_store and self._history_manager:
+            self._dialogue_store.ensure_store(self._history_manager.session_file)
 
         # 11. Restart reflection system with new session_id
         if self._reflection_system:

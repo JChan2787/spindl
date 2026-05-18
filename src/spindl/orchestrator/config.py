@@ -1,6 +1,7 @@
 """Configuration models for VoiceAgentOrchestrator (NANO-089: Pydantic validation layer)."""
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -339,6 +340,12 @@ class MemoryConfig(BaseModel):
     curation: CurationConfig = Field(default_factory=CurationConfig)
     live_mode: bool = True
 
+    # Distance metric for ChromaDB collections (NANO-126)
+    distance_metric: str = Field(default="l2", pattern="^(l2|cosine)$")
+
+    # Multi-hop RAG→Codex cross-activation (NANO-127)
+    cross_activation: bool = False
+
     # Retrieval scoring weights (NANO-107)
     scoring_w_relevance: float = Field(default=0.5, ge=0.0, le=1.0)
     scoring_w_recency: float = Field(default=0.2, ge=0.0, le=1.0)
@@ -380,6 +387,8 @@ class MemoryConfig(BaseModel):
             reflection_delimiter=data.get("reflection_delimiter", "{qa}"),
             session_summary_max_tokens=data.get("session_summary_max_tokens", 500),
             dedup_threshold=data.get("dedup_threshold", 0.30),
+            distance_metric=data.get("distance_metric", "l2"),
+            cross_activation=data.get("cross_activation", False),
             curation=CurationConfig.from_dict(curation_data),
             live_mode=data.get("live_mode", True),
             scoring_w_relevance=data.get("scoring_w_relevance", 0.5),
@@ -413,6 +422,11 @@ class PromptConfig(BaseModel):
         "do not repeat or quote them directly:"
     )
     example_dialogue_suffix: str = "End of style examples."
+    voice_state_barge_in: str = "The User interrupted you mid-sentence."
+    voice_state_empty_transcription: str = (
+        "The User made a sound but no words were detected."
+    )
+    voice_state_error: str = "An error occurred. Acknowledge briefly and continue."
 
     @classmethod
     def from_dict(cls, data: dict) -> "PromptConfig":
@@ -425,6 +439,9 @@ class PromptConfig(BaseModel):
             codex_suffix=data.get("codex_suffix", defaults.codex_suffix),
             example_dialogue_prefix=data.get("example_dialogue_prefix", defaults.example_dialogue_prefix),
             example_dialogue_suffix=data.get("example_dialogue_suffix", defaults.example_dialogue_suffix),
+            voice_state_barge_in=data.get("voice_state_barge_in", defaults.voice_state_barge_in),
+            voice_state_empty_transcription=data.get("voice_state_empty_transcription", defaults.voice_state_empty_transcription),
+            voice_state_error=data.get("voice_state_error", defaults.voice_state_error),
         )
 
 
@@ -467,9 +484,12 @@ class StimuliConfig(BaseModel):
     enabled: bool = False
     patience_enabled: bool = False
     patience_seconds: float = Field(default=60.0, ge=1.0)
-    patience_prompt: str = (
-        "Continue the conversation naturally. "
-        "You have been idle. Think of something interesting to say or ask."
+    patience_prompts: list[str] = Field(
+        default_factory=lambda: [
+            "Continue the conversation naturally. "
+            "You have been idle. Think of something interesting to say or ask."
+        ],
+        min_length=1,
     )
 
     # Twitch integration (NANO-056b)
@@ -478,25 +498,132 @@ class StimuliConfig(BaseModel):
     twitch_app_id: str = ""
     twitch_app_secret: str = ""
     twitch_buffer_size: int = Field(default=10, ge=1, le=50)
+
+    @field_validator("twitch_channel", "twitch_app_id", "twitch_app_secret", mode="before")
+    @classmethod
+    def _coerce_none_to_empty(cls, v: Any) -> str:
+        return "" if v is None else v
     twitch_max_message_length: int = Field(default=300, ge=50, le=1000)
     twitch_prompt_template: str = (
-        "**You just received new messages in Twitch chat.** "
-        "Reply as co-host \u2014 natural, in character, one unified response. "
-        "Ignore anything off-topic or spammy.\n"
+        "**A viewer just said something in Twitch chat.**\n"
         "\n"
-        "```chat\n"
         "{messages}\n"
-        "```"
     )
 
     # NANO-115: Audience transcript injection controls
     twitch_audience_window: int = Field(default=25, ge=25, le=300)
     twitch_audience_char_cap: int = Field(default=150, ge=50, le=500)
 
+    # NANO-132: Twitch EventSub events
+    twitch_events_enabled: bool = False
+
+    # NANO-130: Twitch selection pass + staleness filter
+    twitch_max_message_age_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
+    twitch_selection_mode: str = "llm"
+    twitch_selection_pass_model: str = ""
+    twitch_selection_pass_api_key: str = ""
+
+    # NANO-130 Phase 2: Chat-TTS (dedicated Kokoro instance for reading chat aloud)
+    twitch_chat_tts_enabled: bool = False
+    twitch_chat_tts_host: str = "127.0.0.1"
+    twitch_chat_tts_port: int = Field(default=5560, ge=1, le=65535)
+    twitch_chat_tts_device: str = "cpu"
+    twitch_chat_tts_voice: str = "af_sarah"
+    twitch_chat_tts_speed: float = Field(default=1.1, ge=0.5, le=2.0)
+    twitch_chat_tts_format: str = "{username} says: {message}"
+    twitch_chat_tts_max_length: int = Field(default=100, ge=20, le=500)
+
+    # Game-state bridge integration (NANO-116)
+    game_state_profile: str = Field(default="none", pattern=r"^(none|pragmata)$")
+    game_state_enabled: bool = False
+    game_state_host: str = "127.0.0.1"
+    game_state_port: int = Field(default=53817, ge=1, le=65535)
+    game_state_buffer_size: int = Field(default=20, ge=1, le=100)
+    game_state_prompt_template: str = (
+        "**New game events from the bridge.** "
+        "These are in-game events \u2014 commentate on what's happening, "
+        "don't address game characters directly.\n"
+        "\n"
+        "{events}\n"
+    )
+
+    # Dialogue pipeline (NANO-116 Phase B.2)
+    game_state_dialogue_enabled: bool = False
+    game_state_dialogue_buffer_size: int = Field(default=30, ge=1, le=200)
+    game_state_dialogue_prompt_templates: list[str] = Field(
+        default_factory=lambda: [
+            "**The following are in-game character dialogue lines from the game "
+            "you're co-hosting.** These characters are not talking to you — "
+            "commentate on what they're saying, don't reply to them directly.\n"
+            "\n"
+            "{dialogue}\n"
+        ],
+        min_length=1,
+    )
+    game_state_dialogue_token_budget: int = Field(default=500, ge=200, le=4000)
+    game_state_dialogue_summary_max_tokens: int = Field(default=512, ge=64, le=2048)
+    game_state_dialogue_min_lines: int = Field(default=1, ge=1, le=50)
+    game_state_dialogue_drain_delay: float = Field(default=0.0, ge=0.0, le=30.0)
+    game_state_dialogue_summarizer_model: str = "anthropic/claude-sonnet-4-20250514"
+    game_state_dialogue_summarizer_api_key: str = ""
+    game_state_dialogue_summarizer_persona: str = ""
+
+    # Gameplay stimulus (NANO-122)
+    game_state_gameplay_enabled: bool = False
+    game_state_gameplay_base_probability: float = Field(default=0.20, ge=0.05, le=1.0)
+    game_state_gameplay_escalation_step: float = Field(default=0.15, ge=0.05, le=0.5)
+    game_state_gameplay_probability_ceiling: float = Field(default=1.0, ge=0.1, le=1.0)
+    game_state_gameplay_dirty_hp_threshold: float = Field(default=0.10, ge=0.01, le=0.5)
+    game_state_gameplay_event_batch_window: float = Field(default=2.0, ge=0.5, le=10.0)
+
+    # NANO-124: Self-barge-in probability system
+    game_state_barge_in_enabled: bool = False
+    game_state_barge_in_escalation: list[float] = Field(
+        default_factory=lambda: [
+            0.01, 0.015, 0.02, 0.025, 0.05,
+            0.06, 0.067, 0.07, 0.075, 0.1,
+            0.12, 0.15, 0.18, 0.2, 0.23,
+            0.25, 0.27, 0.3, 0.33, 0.4,
+        ]
+    )
+    game_state_barge_in_fatigue: list[float] = Field(
+        default_factory=lambda: [1.00, 0.60, 0.30]
+    )
+    game_state_barge_in_prompt_templates: list[str] = Field(
+        default_factory=lambda: [
+            "**Something just happened in the game while you were talking.** "
+            "React to this new line instead of continuing your previous thought.\n"
+            "\n"
+            "{dialogue}\n"
+        ]
+    )
+
     # Addressing-others contexts (NANO-110)
     addressing_others_contexts: list[AddressingContext] = Field(
         default_factory=_default_addressing_contexts,
     )
+
+    # Model cycling for stimuli responses (NANO-121)
+    model_rotation_enabled: bool = False
+    model_rotation_models: list[str] = Field(default_factory=list)
+    model_rotation_api_key: str = ""
+
+    # Weighted arbitration (NANO-117)
+    arbitration_decay_multiplier: float = Field(default=0.3, ge=0.1, le=1.0)
+    arbitration_recovery_per_cycle: float = Field(default=0.2, ge=0.05, le=0.5)
+    arbitration_weight_overrides: dict[str, float] = Field(default_factory=dict)
+
+    @staticmethod
+    def _resolve_env(value: str) -> str:
+        """Expand ${VAR_NAME} patterns with env var values."""
+        if not value or not isinstance(value, str):
+            return value or ""
+        import re
+        return re.sub(
+            r"\$\{([^}]+)\}",
+            lambda m: os.environ.get(m.group(1), m.group(0)),
+            value,
+        )
 
     @classmethod
     def from_dict(cls, data: dict) -> "StimuliConfig":
@@ -504,6 +631,12 @@ class StimuliConfig(BaseModel):
         defaults = cls()
         patience = data.get("patience", {})
         twitch = data.get("twitch", {})
+        game_state = data.get("game_state", {})
+        dialogue = game_state.get("dialogue", {})
+        gameplay = game_state.get("gameplay", {})
+        barge_in = dialogue.get("tts_barge_in", {})
+        model_rotation = data.get("model_rotation", {})
+        arbitration = data.get("arbitration", {})
 
         # Parse addressing-others contexts (NANO-110)
         addressing = data.get("addressing_others", {})
@@ -524,11 +657,19 @@ class StimuliConfig(BaseModel):
             enabled=data.get("enabled", defaults.enabled),
             patience_enabled=patience.get("enabled", defaults.patience_enabled),
             patience_seconds=patience.get("seconds", defaults.patience_seconds),
-            patience_prompt=patience.get("prompt", defaults.patience_prompt),
+            patience_prompts=patience.get(
+                "prompts",
+                [patience["prompt"]]
+                if "prompt" in patience
+                else defaults.patience_prompts,
+            ),
             twitch_enabled=twitch.get("enabled", defaults.twitch_enabled),
+            twitch_events_enabled=twitch.get("events", {}).get(
+                "enabled", defaults.twitch_events_enabled
+            ),
             twitch_channel=twitch.get("channel", defaults.twitch_channel),
-            twitch_app_id=twitch.get("app_id", defaults.twitch_app_id),
-            twitch_app_secret=twitch.get("app_secret", defaults.twitch_app_secret),
+            twitch_app_id=cls._resolve_env(twitch.get("app_id", defaults.twitch_app_id)),
+            twitch_app_secret=cls._resolve_env(twitch.get("app_secret", defaults.twitch_app_secret)),
             twitch_buffer_size=twitch.get(
                 "buffer_size", defaults.twitch_buffer_size
             ),
@@ -544,7 +685,148 @@ class StimuliConfig(BaseModel):
             twitch_audience_char_cap=twitch.get(
                 "audience_char_cap", defaults.twitch_audience_char_cap
             ),
+            twitch_max_message_age_seconds=twitch.get(
+                "max_message_age_seconds", defaults.twitch_max_message_age_seconds
+            ),
+            twitch_selection_mode=twitch.get(
+                "selection_mode", defaults.twitch_selection_mode
+            ),
+            twitch_selection_pass_model=twitch.get(
+                "selection_pass", {}
+            ).get("model", defaults.twitch_selection_pass_model),
+            twitch_selection_pass_api_key=twitch.get(
+                "selection_pass", {}
+            ).get("api_key", defaults.twitch_selection_pass_api_key),
+            twitch_chat_tts_enabled=twitch.get(
+                "chat_tts", {}
+            ).get("enabled", defaults.twitch_chat_tts_enabled),
+            twitch_chat_tts_host=twitch.get(
+                "chat_tts", {}
+            ).get("host", defaults.twitch_chat_tts_host),
+            twitch_chat_tts_port=twitch.get(
+                "chat_tts", {}
+            ).get("port", defaults.twitch_chat_tts_port),
+            twitch_chat_tts_device=twitch.get(
+                "chat_tts", {}
+            ).get("device", defaults.twitch_chat_tts_device),
+            twitch_chat_tts_voice=twitch.get(
+                "chat_tts", {}
+            ).get("voice", defaults.twitch_chat_tts_voice),
+            twitch_chat_tts_speed=twitch.get(
+                "chat_tts", {}
+            ).get("speed", defaults.twitch_chat_tts_speed),
+            twitch_chat_tts_format=twitch.get(
+                "chat_tts", {}
+            ).get("format", defaults.twitch_chat_tts_format),
+            twitch_chat_tts_max_length=twitch.get(
+                "chat_tts", {}
+            ).get("max_length", defaults.twitch_chat_tts_max_length),
+            game_state_profile=game_state.get(
+                "profile", defaults.game_state_profile
+            ),
+            game_state_enabled=game_state.get(
+                "enabled", defaults.game_state_enabled
+            ),
+            game_state_host=game_state.get(
+                "host", defaults.game_state_host
+            ),
+            game_state_port=game_state.get(
+                "port", defaults.game_state_port
+            ),
+            game_state_buffer_size=game_state.get(
+                "buffer_size", defaults.game_state_buffer_size
+            ),
+            game_state_prompt_template=game_state.get(
+                "prompt_template", defaults.game_state_prompt_template
+            ),
+            game_state_dialogue_enabled=dialogue.get(
+                "enabled", defaults.game_state_dialogue_enabled
+            ),
+            game_state_dialogue_buffer_size=dialogue.get(
+                "buffer_size", defaults.game_state_dialogue_buffer_size
+            ),
+            game_state_dialogue_prompt_templates=dialogue.get(
+                "prompt_templates",
+                [dialogue["prompt_template"]]
+                if "prompt_template" in dialogue
+                else defaults.game_state_dialogue_prompt_templates,
+            ),
+            game_state_dialogue_token_budget=dialogue.get(
+                "token_budget", defaults.game_state_dialogue_token_budget
+            ),
+            game_state_dialogue_min_lines=dialogue.get(
+                "min_lines", defaults.game_state_dialogue_min_lines
+            ),
+            game_state_dialogue_drain_delay=dialogue.get(
+                "drain_delay", defaults.game_state_dialogue_drain_delay
+            ),
+            game_state_dialogue_summary_max_tokens=dialogue.get(
+                "summary_max_tokens", defaults.game_state_dialogue_summary_max_tokens
+            ),
+            game_state_dialogue_summarizer_model=dialogue.get(
+                "summarizer", {}
+            ).get("model", None) or dialogue.get(
+                "summarizer_model", defaults.game_state_dialogue_summarizer_model
+            ),
+            game_state_dialogue_summarizer_api_key=dialogue.get(
+                "summarizer", {}
+            ).get("api_key", None) or dialogue.get(
+                "summarizer_api_key", defaults.game_state_dialogue_summarizer_api_key
+            ),
+            game_state_dialogue_summarizer_persona=dialogue.get(
+                "summarizer", {}
+            ).get("persona_prompt", None) or dialogue.get(
+                "summarizer_persona", defaults.game_state_dialogue_summarizer_persona
+            ),
+            game_state_gameplay_enabled=gameplay.get(
+                "enabled", defaults.game_state_gameplay_enabled
+            ),
+            game_state_gameplay_base_probability=gameplay.get(
+                "base_probability", defaults.game_state_gameplay_base_probability
+            ),
+            game_state_gameplay_escalation_step=gameplay.get(
+                "escalation_step", defaults.game_state_gameplay_escalation_step
+            ),
+            game_state_gameplay_probability_ceiling=gameplay.get(
+                "probability_ceiling", defaults.game_state_gameplay_probability_ceiling
+            ),
+            game_state_gameplay_dirty_hp_threshold=gameplay.get(
+                "dirty_hp_threshold", defaults.game_state_gameplay_dirty_hp_threshold
+            ),
+            game_state_gameplay_event_batch_window=gameplay.get(
+                "event_batch_window", defaults.game_state_gameplay_event_batch_window
+            ),
+            game_state_barge_in_enabled=barge_in.get(
+                "enabled", defaults.game_state_barge_in_enabled
+            ),
+            game_state_barge_in_escalation=barge_in.get(
+                "escalation", defaults.game_state_barge_in_escalation
+            ),
+            game_state_barge_in_fatigue=barge_in.get(
+                "fatigue", defaults.game_state_barge_in_fatigue
+            ),
+            game_state_barge_in_prompt_templates=barge_in.get(
+                "prompt_templates", defaults.game_state_barge_in_prompt_templates
+            ),
             addressing_others_contexts=contexts,
+            model_rotation_enabled=model_rotation.get(
+                "enabled", defaults.model_rotation_enabled
+            ),
+            model_rotation_models=model_rotation.get(
+                "models", defaults.model_rotation_models
+            ),
+            model_rotation_api_key=model_rotation.get(
+                "api_key", defaults.model_rotation_api_key
+            ),
+            arbitration_decay_multiplier=arbitration.get(
+                "decay_multiplier", defaults.arbitration_decay_multiplier
+            ),
+            arbitration_recovery_per_cycle=arbitration.get(
+                "recovery_per_cycle", defaults.arbitration_recovery_per_cycle
+            ),
+            arbitration_weight_overrides=arbitration.get(
+                "weight_overrides", defaults.arbitration_weight_overrides
+            ),
         )
 
 
@@ -606,6 +888,9 @@ class AvatarConfig(BaseModel):
     emotion_model_path: str = "models/emotion"
     emotion_confidence_threshold: float = 0.3
     expression_fade_delay: float = 1.0  # Seconds after TTS ends before face+body expressions fade out
+    curious_hold_duration: float = 8.0  # Seconds the Thinking/Curious body pose holds before releasing
+    angry_hold_duration: float = 8.0  # Seconds the Angry body pose holds before releasing
+    idle_clamp_once: bool = False
     show_emotion_in_chat: bool = True
     subtitles_enabled: bool = False  # NANO-100: Show subtitle overlay window in avatar app
     subtitle_fade_delay: float = 1.5  # NANO-100: Seconds to hold subtitle text after TTS ends
@@ -637,6 +922,15 @@ class AvatarConfig(BaseModel):
             ),
             expression_fade_delay=data.get(
                 "expression_fade_delay", defaults.expression_fade_delay
+            ),
+            curious_hold_duration=data.get(
+                "curious_hold_duration", defaults.curious_hold_duration
+            ),
+            angry_hold_duration=data.get(
+                "angry_hold_duration", defaults.angry_hold_duration
+            ),
+            idle_clamp_once=data.get(
+                "idle_clamp_once", defaults.idle_clamp_once
             ),
             show_emotion_in_chat=data.get(
                 "show_emotion_in_chat", defaults.show_emotion_in_chat
@@ -743,11 +1037,11 @@ class OrchestratorConfig(BaseModel):
     force_role_history: Literal["splice", "flatten"] = "flatten"
 
     # Character settings (NANO-034: ST V2 Character Cards)
-    character_id: str = "spindle"
+    character_id: str = "spinny"
     characters_dir: str = "./characters"
 
     # Legacy persona settings (deprecated, use character_id/characters_dir)
-    persona_id: str = "spindle"  # @deprecated: use character_id
+    persona_id: str = "spinny"  # @deprecated: use character_id
     personas_dir: str = "./personas"  # @deprecated: use characters_dir
 
     # Prompt composition (NANO-045a: block-based prompt assembly)
@@ -1046,6 +1340,8 @@ class OrchestratorConfig(BaseModel):
         mem["scoring_w_importance"] = self.memory_config.scoring_w_importance
         mem["scoring_w_frequency"] = self.memory_config.scoring_w_frequency
         mem["scoring_decay_base"] = self.memory_config.scoring_decay_base
+        mem["distance_metric"] = self.memory_config.distance_metric
+        mem["cross_activation"] = self.memory_config.cross_activation
 
         # Curation (nested under memory)
         if "curation" not in mem:
@@ -1065,6 +1361,9 @@ class OrchestratorConfig(BaseModel):
         data["prompt"]["codex_suffix"] = self.prompt_config.codex_suffix
         data["prompt"]["example_dialogue_prefix"] = self.prompt_config.example_dialogue_prefix
         data["prompt"]["example_dialogue_suffix"] = self.prompt_config.example_dialogue_suffix
+        data["prompt"]["voice_state_barge_in"] = self.prompt_config.voice_state_barge_in
+        data["prompt"]["voice_state_empty_transcription"] = self.prompt_config.voice_state_empty_transcription
+        data["prompt"]["voice_state_error"] = self.prompt_config.voice_state_error
 
         # --- LLM ---
         if "llm" not in data:
@@ -1102,13 +1401,18 @@ class OrchestratorConfig(BaseModel):
             stim["patience"] = {}
         stim["patience"]["enabled"] = self.stimuli_config.patience_enabled
         stim["patience"]["seconds"] = self.stimuli_config.patience_seconds
-        stim["patience"]["prompt"] = self.stimuli_config.patience_prompt
+        stim["patience"].pop("prompt", None)
+        stim["patience"]["prompts"] = self.stimuli_config.patience_prompts
 
         # Twitch (nested under stimuli)
         if "twitch" not in stim:
             stim["twitch"] = {}
         tw = stim["twitch"]
         tw["enabled"] = self.stimuli_config.twitch_enabled
+        # NANO-132: EventSub events
+        if "events" not in tw:
+            tw["events"] = {}
+        tw["events"]["enabled"] = self.stimuli_config.twitch_events_enabled
         tw["channel"] = self.stimuli_config.twitch_channel
         tw["app_id"] = self.stimuli_config.twitch_app_id
         tw["app_secret"] = self.stimuli_config.twitch_app_secret
@@ -1117,6 +1421,74 @@ class OrchestratorConfig(BaseModel):
         tw["prompt_template"] = self.stimuli_config.twitch_prompt_template
         tw["audience_window"] = self.stimuli_config.twitch_audience_window
         tw["audience_char_cap"] = self.stimuli_config.twitch_audience_char_cap
+        # NANO-130: Selection pass + staleness filter
+        tw["max_message_age_seconds"] = self.stimuli_config.twitch_max_message_age_seconds
+        tw["selection_mode"] = self.stimuli_config.twitch_selection_mode
+        if "selection_pass" not in tw:
+            tw["selection_pass"] = {}
+        tw["selection_pass"]["model"] = self.stimuli_config.twitch_selection_pass_model
+        tw["selection_pass"]["api_key"] = self.stimuli_config.twitch_selection_pass_api_key
+        # NANO-130 Phase 2: Chat-TTS
+        if "chat_tts" not in tw:
+            tw["chat_tts"] = {}
+        ct = tw["chat_tts"]
+        ct["enabled"] = self.stimuli_config.twitch_chat_tts_enabled
+        ct["host"] = self.stimuli_config.twitch_chat_tts_host
+        ct["port"] = self.stimuli_config.twitch_chat_tts_port
+        ct["device"] = self.stimuli_config.twitch_chat_tts_device
+        ct["voice"] = self.stimuli_config.twitch_chat_tts_voice
+        ct["speed"] = self.stimuli_config.twitch_chat_tts_speed
+        ct["format"] = self.stimuli_config.twitch_chat_tts_format
+        ct["max_length"] = self.stimuli_config.twitch_chat_tts_max_length
+
+        # Game-state bridge (NANO-116, nested under stimuli)
+        if "game_state" not in stim:
+            stim["game_state"] = {}
+        gs = stim["game_state"]
+        gs["host"] = self.stimuli_config.game_state_host
+        gs["port"] = self.stimuli_config.game_state_port
+        gs["buffer_size"] = self.stimuli_config.game_state_buffer_size
+        gs["prompt_template"] = self.stimuli_config.game_state_prompt_template
+
+        # Game-state dialogue pipeline (NANO-116 B.2, nested under game_state)
+        if "dialogue" not in gs:
+            gs["dialogue"] = {}
+        gsd = gs["dialogue"]
+        gsd["buffer_size"] = self.stimuli_config.game_state_dialogue_buffer_size
+        gsd.pop("prompt_template", None)
+        gsd["prompt_templates"] = self.stimuli_config.game_state_dialogue_prompt_templates
+        gsd["token_budget"] = self.stimuli_config.game_state_dialogue_token_budget
+        gsd["summary_max_tokens"] = self.stimuli_config.game_state_dialogue_summary_max_tokens
+        gsd["min_lines"] = self.stimuli_config.game_state_dialogue_min_lines
+        gsd["drain_delay"] = self.stimuli_config.game_state_dialogue_drain_delay
+        # Clean up stale flat keys from pre-117A write path
+        for stale_key in ("summarizer_model", "summarizer_api_key", "summarizer_persona"):
+            gsd.pop(stale_key, None)
+        if "summarizer" not in gsd:
+            gsd["summarizer"] = {}
+        gsd["summarizer"]["model"] = self.stimuli_config.game_state_dialogue_summarizer_model
+        gsd["summarizer"]["api_key"] = self.stimuli_config.game_state_dialogue_summarizer_api_key
+        gsd["summarizer"]["persona_prompt"] = self.stimuli_config.game_state_dialogue_summarizer_persona
+
+        # Game-state gameplay stimulus (NANO-122, nested under game_state)
+        if "gameplay" not in gs:
+            gs["gameplay"] = {}
+        gsg = gs["gameplay"]
+        gsg["enabled"] = self.stimuli_config.game_state_gameplay_enabled
+        gsg["base_probability"] = self.stimuli_config.game_state_gameplay_base_probability
+        gsg["escalation_step"] = self.stimuli_config.game_state_gameplay_escalation_step
+        gsg["probability_ceiling"] = self.stimuli_config.game_state_gameplay_probability_ceiling
+        gsg["dirty_hp_threshold"] = self.stimuli_config.game_state_gameplay_dirty_hp_threshold
+        gsg["event_batch_window"] = self.stimuli_config.game_state_gameplay_event_batch_window
+
+        # NANO-124: Self-barge-in config (nested under dialogue)
+        if "tts_barge_in" not in gsd:
+            gsd["tts_barge_in"] = {}
+        gsb = gsd["tts_barge_in"]
+        gsb["enabled"] = self.stimuli_config.game_state_barge_in_enabled
+        gsb["escalation"] = self.stimuli_config.game_state_barge_in_escalation
+        gsb["fatigue"] = self.stimuli_config.game_state_barge_in_fatigue
+        gsb["prompt_templates"] = self.stimuli_config.game_state_barge_in_prompt_templates
 
         # Addressing-others contexts (NANO-110, nested under stimuli)
         if "addressing_others" not in stim:
@@ -1127,10 +1499,36 @@ class OrchestratorConfig(BaseModel):
             for ctx in self.stimuli_config.addressing_others_contexts
         ]
 
+        # Model cycling (NANO-121, nested under stimuli)
+        if "model_rotation" not in stim:
+            stim["model_rotation"] = {}
+        mr = stim["model_rotation"]
+        mr["enabled"] = self.stimuli_config.model_rotation_enabled
+        mr["models"] = self.stimuli_config.model_rotation_models
+        mr["api_key"] = self.stimuli_config.model_rotation_api_key
+
+        # Weighted arbitration (NANO-117, nested under stimuli)
+        if "arbitration" not in stim:
+            stim["arbitration"] = {}
+        arb = stim["arbitration"]
+        arb["decay_multiplier"] = self.stimuli_config.arbitration_decay_multiplier
+        arb["recovery_per_cycle"] = self.stimuli_config.arbitration_recovery_per_cycle
+        if self.stimuli_config.arbitration_weight_overrides:
+            arb["weight_overrides"] = dict(self.stimuli_config.arbitration_weight_overrides)
+
         # --- Tools ---
         if "tools" not in data:
             data["tools"] = {}
         data["tools"]["enabled"] = self.tools_config.enabled
+
+        # --- TTS ---
+        if "tts" not in data:
+            data["tts"] = {}
+        tts = data["tts"]
+        tts["provider"] = self.tts_config.provider
+        if "providers" not in tts:
+            tts["providers"] = {}
+        tts["providers"][self.tts_config.provider] = dict(self.tts_config.provider_config)
 
         # --- VTubeStudio ---
         if "vtubestudio" in data:
@@ -1150,6 +1548,9 @@ class OrchestratorConfig(BaseModel):
         av["emotion_model_path"] = self.avatar_config.emotion_model_path
         av["emotion_confidence_threshold"] = self.avatar_config.emotion_confidence_threshold
         av["expression_fade_delay"] = self.avatar_config.expression_fade_delay
+        av["curious_hold_duration"] = self.avatar_config.curious_hold_duration
+        av["angry_hold_duration"] = self.avatar_config.angry_hold_duration
+        av["idle_clamp_once"] = self.avatar_config.idle_clamp_once
         av["show_emotion_in_chat"] = self.avatar_config.show_emotion_in_chat
         av["subtitles_enabled"] = self.avatar_config.subtitles_enabled
         av["subtitle_fade_delay"] = self.avatar_config.subtitle_fade_delay

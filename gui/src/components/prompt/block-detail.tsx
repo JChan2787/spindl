@@ -161,56 +161,56 @@ export function BlockDetail({
 
         {/* Override editor */}
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="override-toggle" className="text-sm font-medium">
-              User Override
-            </Label>
-            <Switch
-              id="override-toggle"
-              checked={overrideEnabled}
-              onCheckedChange={handleToggleOverride}
-              disabled={isDeferred}
-            />
-          </div>
-
-          {isDeferred && (
-            <p className="text-xs text-muted-foreground">
-              Deferred blocks are populated at runtime and cannot be overridden.
-            </p>
-          )}
-
-          {overrideEnabled && !isDeferred && (
-            <div className="space-y-2">
-              <Textarea
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                placeholder="Enter override content for this block..."
-                className="min-h-[200px] font-mono text-sm"
+            <div className="flex items-center justify-between">
+              <Label htmlFor="override-toggle" className="text-sm font-medium">
+                User Override
+              </Label>
+              <Switch
+                id="override-toggle"
+                checked={overrideEnabled}
+                onCheckedChange={handleToggleOverride}
+                disabled={isDeferred}
               />
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  {editContent.length.toLocaleString()} characters
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleRevert}
-                    disabled={!hasUnsavedEdit}
-                  >
-                    Revert
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={handleApply}
-                    disabled={!hasUnsavedEdit}
-                  >
-                    Apply
-                  </Button>
+            </div>
+
+            {isDeferred && (
+              <p className="text-xs text-muted-foreground">
+                Deferred blocks are populated at runtime and cannot be overridden.
+              </p>
+            )}
+
+            {overrideEnabled && !isDeferred && (
+              <div className="space-y-2">
+                <Textarea
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  placeholder="Enter override content for this block..."
+                  className="min-h-[200px] font-mono text-sm"
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {editContent.length.toLocaleString()} characters
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRevert}
+                      disabled={!hasUnsavedEdit}
+                    >
+                      Revert
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleApply}
+                      disabled={!hasUnsavedEdit}
+                    >
+                      Apply
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
         </div>
       </CardContent>
     </Card>

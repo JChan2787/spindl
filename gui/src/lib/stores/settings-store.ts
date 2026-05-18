@@ -33,6 +33,8 @@ interface MemoryConfig {
   top_k: number;
   relevance_threshold: number | null;
   dedup_threshold: number | null;
+  distance_metric: "l2" | "cosine";
+  cross_activation: boolean;
   reflection_interval: number;
   reflection_prompt: string | null;
   reflection_system_message: string | null;
@@ -63,6 +65,9 @@ export interface PromptConfig {
   codex_suffix: string;
   example_dialogue_prefix: string;
   example_dialogue_suffix: string;
+  voice_state_barge_in: string;
+  voice_state_empty_transcription: string;
+  voice_state_error: string;
 }
 
 // NANO-110: Addressing-others context
@@ -77,9 +82,10 @@ export interface StimuliConfig {
   enabled: boolean;
   patience_enabled: boolean;
   patience_seconds: number;
-  patience_prompt: string;
+  patience_prompts: string[];
   // Twitch integration (NANO-056b)
   twitch_enabled: boolean;
+  twitch_events_enabled: boolean;
   twitch_channel: string;
   twitch_app_id: string;
   twitch_app_secret: string;
@@ -88,15 +94,82 @@ export interface StimuliConfig {
   twitch_prompt_template: string;
   twitch_audience_window: number;
   twitch_audience_char_cap: number;
+  // NANO-130: Selection pass + staleness filter
+  twitch_max_message_age_seconds: number;
+  twitch_selection_mode: string;
+  twitch_selection_pass_model: string;
+  twitch_selection_pass_api_key: string;
+  // NANO-130 Phase 2: Chat-TTS
+  twitch_chat_tts_enabled: boolean;
+  twitch_chat_tts_host: string;
+  twitch_chat_tts_port: number;
+  twitch_chat_tts_device: string;
+  twitch_chat_tts_voice: string;
+  twitch_chat_tts_speed: number;
+  twitch_chat_tts_format: string;
+  twitch_chat_tts_max_length: number;
   // Resolved by backend — true when credentials available (config or env vars)
   twitch_has_credentials: boolean;
   // NANO-110: Addressing-others contexts
   addressing_others_contexts: AddressingContextEntry[];
+  // NANO-116: Game-state bridge
+  game_state_profile: string;
+  game_state_enabled: boolean;
+  game_state_host: string;
+  game_state_port: number;
+  game_state_buffer_size: number;
+  game_state_prompt_template: string;
+  // NANO-116 B.2: Dialogue pipeline
+  game_state_dialogue_enabled: boolean;
+  game_state_dialogue_buffer_size: number;
+  game_state_dialogue_prompt_templates: string[];
+  game_state_dialogue_token_budget: number;
+  game_state_dialogue_summary_max_tokens: number;
+  game_state_dialogue_min_lines: number;
+  game_state_dialogue_drain_delay: number;
+  game_state_dialogue_summarizer_model: string;
+  game_state_dialogue_summarizer_api_key: string;
+  game_state_dialogue_summarizer_persona: string;
+  // NANO-122: Gameplay stimulus
+  game_state_gameplay_enabled: boolean;
+  game_state_gameplay_base_probability: number;
+  game_state_gameplay_escalation_step: number;
+  game_state_gameplay_probability_ceiling: number;
+  game_state_gameplay_dirty_hp_threshold: number;
+  game_state_gameplay_event_batch_window: number;
+  // NANO-124: Self-barge-in
+  game_state_barge_in_enabled: boolean;
+  game_state_barge_in_escalation: number[];
+  game_state_barge_in_fatigue: number[];
+  game_state_barge_in_prompt_templates: string[];
+  // NANO-121: Model cycling
+  model_rotation_enabled: boolean;
+  model_rotation_models: string[];
+  model_rotation_api_key: string;
+  // NANO-117: Weighted arbitration
+  arbitration_decay_multiplier: number;
+  arbitration_recovery_per_cycle: number;
+  arbitration_weight_overrides: Record<string, number>;
+}
+
+// Game-state bridge status (NANO-116, NANO-122)
+export interface GameStateStatus {
+  connected: boolean;
+  protocol_version: string | null;
+  buffer_count: number;
+  recent_lines: string[];
+  enabled: boolean;
+  dialogue_enabled: boolean;
+  current_summary: string;
+  gameplay_enabled: boolean;
+  gameplay_event_buffer_count: number;
+  gameplay_snapshot_probability: number;
 }
 
 // Twitch module status (NANO-056b)
 export interface TwitchStatus {
   connected: boolean;
+  events_connected: boolean;
   channel: string;
   buffer_count: number;
   recent_messages: string[];
@@ -143,6 +216,9 @@ export interface AvatarRuntimeConfig {
   show_emotion_in_chat: boolean;
   emotion_confidence_threshold: number;
   expression_fade_delay: number;
+  curious_hold_duration: number;
+  angry_hold_duration: number;
+  idle_clamp_once: boolean;
   subtitles_enabled: boolean; // NANO-100: subtitle overlay window
   subtitle_fade_delay: number; // NANO-100: seconds to hold subtitle after TTS
   stream_deck_enabled: boolean; // NANO-110: stream deck overlay window
@@ -196,6 +272,7 @@ interface SettingsStoreState {
   isSavingStimuli: boolean;
   stimuliProgress: StimuliProgress | null;
   twitchStatus: TwitchStatus | null;
+  gameStateStatus: GameStateStatus | null;
 
   // Tools runtime config (NANO-065a)
   toolsConfig: ToolsConfig;
@@ -273,6 +350,7 @@ interface SettingsStoreState {
   setSavingStimuli: (saving: boolean) => void;
   setStimuliProgress: (progress: StimuliProgress | null) => void;
   setTwitchStatus: (status: TwitchStatus | null) => void;
+  setGameStateStatus: (status: GameStateStatus | null) => void;
 
   // Actions - Tools (NANO-065a)
   setToolsConfig: (config: ToolsConfig) => void;
@@ -343,6 +421,8 @@ const DEFAULT_MEMORY: MemoryConfig = {
   top_k: 5,
   relevance_threshold: 0.25,
   dedup_threshold: 0.30,
+  distance_metric: "l2",
+  cross_activation: false,
   reflection_interval: 20,
   reflection_prompt: null,
   reflection_system_message: null,
@@ -370,6 +450,9 @@ const DEFAULT_AVATAR: AvatarRuntimeConfig = {
   show_emotion_in_chat: true,
   emotion_confidence_threshold: 0.3,
   expression_fade_delay: 1.0,
+  curious_hold_duration: 8.0,
+  angry_hold_duration: 8.0,
+  idle_clamp_once: false,
   subtitles_enabled: false,
   subtitle_fade_delay: 1.5,
   stream_deck_enabled: false,
@@ -385,18 +468,72 @@ const DEFAULT_STIMULI: StimuliConfig = {
   enabled: false,
   patience_enabled: false,
   patience_seconds: 60,
-  patience_prompt: "Continue the conversation naturally. You have been idle. Think of something interesting to say or ask.",
+  patience_prompts: ["Continue the conversation naturally. You have been idle. Think of something interesting to say or ask."],
   twitch_enabled: false,
+  twitch_events_enabled: false,
   twitch_channel: "",
   twitch_app_id: "",
   twitch_app_secret: "",
   twitch_buffer_size: 10,
   twitch_max_message_length: 300,
-  twitch_prompt_template: "**You just received new messages in Twitch chat.** Reply as co-host \u2014 natural, in character, one unified response. Ignore anything off-topic or spammy.\n\n```chat\n{messages}\n```",
+  twitch_prompt_template: "**A viewer just said something in Twitch chat.**\n\n{messages}\n",
   twitch_audience_window: 25,
   twitch_audience_char_cap: 150,
+  // NANO-130: Selection pass + staleness filter
+  twitch_max_message_age_seconds: 15,
+  twitch_selection_mode: "llm",
+  twitch_selection_pass_model: "",
+  twitch_selection_pass_api_key: "",
+  // NANO-130 Phase 2: Chat-TTS
+  twitch_chat_tts_enabled: false,
+  twitch_chat_tts_host: "127.0.0.1",
+  twitch_chat_tts_port: 5560,
+  twitch_chat_tts_device: "cpu",
+  twitch_chat_tts_voice: "af_sarah",
+  twitch_chat_tts_speed: 1.1,
+  twitch_chat_tts_format: "{username} says: {message}",
+  twitch_chat_tts_max_length: 100,
   twitch_has_credentials: false,
   addressing_others_contexts: [{ id: "ctx_0", label: "Others", prompt: "" }],
+  // NANO-116: Game-state bridge
+  game_state_profile: "none",
+  game_state_enabled: false,
+  game_state_host: "127.0.0.1",
+  game_state_port: 53817,
+  game_state_buffer_size: 20,
+  game_state_prompt_template: "**New game events from the bridge.** These are in-game events — commentate on what's happening, don't address game characters directly.\n\n{events}\n",
+  game_state_dialogue_enabled: false,
+  game_state_dialogue_buffer_size: 30,
+  game_state_dialogue_prompt_templates: ["**The following are in-game character dialogue lines from the game you're co-hosting.** These characters are not talking to you — commentate on what they're saying, don't reply to them directly.\n\n{dialogue}\n"],
+  game_state_dialogue_token_budget: 500,
+  game_state_dialogue_summary_max_tokens: 512,
+  game_state_dialogue_min_lines: 1,
+  game_state_dialogue_drain_delay: 0.0,
+  game_state_dialogue_summarizer_model: "anthropic/claude-sonnet-4-20250514",
+  game_state_dialogue_summarizer_api_key: "",
+  game_state_dialogue_summarizer_persona: "",
+  // NANO-122: Gameplay stimulus
+  game_state_gameplay_enabled: false,
+  game_state_gameplay_base_probability: 0.20,
+  game_state_gameplay_escalation_step: 0.15,
+  game_state_gameplay_probability_ceiling: 1.0,
+  game_state_gameplay_dirty_hp_threshold: 0.10,
+  game_state_gameplay_event_batch_window: 2.0,
+  // NANO-124: Self-barge-in
+  game_state_barge_in_enabled: false,
+  game_state_barge_in_escalation: [0.01, 0.015, 0.02, 0.025, 0.05, 0.06, 0.067, 0.07, 0.075, 0.1, 0.12, 0.15, 0.18, 0.2, 0.23, 0.25, 0.27, 0.3, 0.33, 0.4],
+  game_state_barge_in_fatigue: [1.00, 0.60, 0.30],
+  game_state_barge_in_prompt_templates: [
+    "**Something just happened in the game while you were talking.** React to this new line instead of continuing your previous thought.\n\n{dialogue}\n"
+  ],
+  // NANO-121: Model cycling
+  model_rotation_enabled: false,
+  model_rotation_models: [],
+  model_rotation_api_key: "",
+  // NANO-117: Weighted arbitration
+  arbitration_decay_multiplier: 0.3,
+  arbitration_recovery_per_cycle: 0.2,
+  arbitration_weight_overrides: {},
 };
 
 const DEFAULT_PROMPT: PromptConfig = {
@@ -406,6 +543,9 @@ const DEFAULT_PROMPT: PromptConfig = {
   codex_suffix: "",
   example_dialogue_prefix: "The following are example dialogues demonstrating this character's voice, tone, and response style. Use them as style reference only — do not repeat or quote them directly:",
   example_dialogue_suffix: "End of style examples.",
+  voice_state_barge_in: "The User interrupted you mid-sentence.",
+  voice_state_empty_transcription: "The User made a sound but no words were detected.",
+  voice_state_error: "An error occurred. Acknowledge briefly and continue.",
 };
 
 const DEFAULT_TOOLS: ToolsConfig = {
@@ -475,6 +615,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
   isSavingStimuli: false,
   stimuliProgress: null,
   twitchStatus: null,
+  gameStateStatus: null,
 
   // Initial state - Avatar (NANO-093)
   avatarConfig: DEFAULT_AVATAR,
@@ -585,6 +726,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
 
   setStimuliProgress: (stimuliProgress) => set({ stimuliProgress }),
   setTwitchStatus: (twitchStatus) => set({ twitchStatus }),
+  setGameStateStatus: (gameStateStatus) => set({ gameStateStatus }),
 
   // Avatar actions (NANO-093)
   setAvatarConfig: (avatarConfig) => set({ avatarConfig }),
@@ -640,7 +782,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       curation: { ...DEFAULT_CURATION, ...((config.settings?.memory as any)?.curation ?? {}) },
     },
-    promptConfig: config.settings?.prompt ?? DEFAULT_PROMPT,
+    promptConfig: { ...DEFAULT_PROMPT, ...(config.settings?.prompt ?? {}) },
     generationConfig: { ...DEFAULT_GENERATION, ...(config.settings?.generation ?? {}) },
     stimuliConfig: { ...DEFAULT_STIMULI, ...(config.settings?.stimuli ?? {}) },
     toolsConfig: config.settings?.tools

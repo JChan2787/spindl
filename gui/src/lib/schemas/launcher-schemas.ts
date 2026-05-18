@@ -121,6 +121,17 @@ export const TTSLocalConfigSchema = z.object({
   envType: z.enum(["conda", "venv", "system", "other"]).default("conda"),
   envNameOrPath: z.string().default(""),
   customActivation: z.string().default(""),
+  speaker: z.string().default(""),
+  temperature: z.number().min(0).max(2).default(0.6),
+  emitEveryFrames: z.number().int().min(1).max(128).default(32),
+  instructTemplate: z.string().default(""),
+  seed: z.number().int().min(0).default(0),
+  speed: z.number().min(0.5).max(2.0).default(1.0),
+  voiceBlend: z.object({
+    name: z.string().default(""),
+    enabled: z.boolean().default(false),
+    weights: z.record(z.string(), z.number().min(0).max(1)).default({}),
+  }).nullable().default(null),
 });
 
 export const EmbeddingConfigSchema = z.object({

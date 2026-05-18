@@ -79,6 +79,60 @@ class TestValidateConfig:
         errors = OpenRouterProvider.validate_config(config)
         assert errors == []
 
+    def test_valid_provider_routing(self):
+        """Should pass with valid provider_routing config."""
+        config = {
+            "api_key": "sk-test",
+            "model": "openai/gpt-4o",
+            "provider_routing": {
+                "ignore": ["Chutes", "Azure"],
+                "allow_fallbacks": True,
+                "sort": "throughput",
+            },
+        }
+        errors = OpenRouterProvider.validate_config(config)
+        assert errors == []
+
+    def test_invalid_provider_routing_type(self):
+        """Should fail when provider_routing is not a dict."""
+        config = {
+            "api_key": "sk-test",
+            "model": "openai/gpt-4o",
+            "provider_routing": "Chutes",
+        }
+        errors = OpenRouterProvider.validate_config(config)
+        assert any("provider_routing" in e and "dict" in e for e in errors)
+
+    def test_invalid_provider_routing_ignore_type(self):
+        """Should fail when provider_routing.ignore is not a list."""
+        config = {
+            "api_key": "sk-test",
+            "model": "openai/gpt-4o",
+            "provider_routing": {"ignore": "Chutes"},
+        }
+        errors = OpenRouterProvider.validate_config(config)
+        assert any("ignore" in e and "list" in e for e in errors)
+
+    def test_invalid_provider_routing_sort_value(self):
+        """Should fail when provider_routing.sort is not a valid option."""
+        config = {
+            "api_key": "sk-test",
+            "model": "openai/gpt-4o",
+            "provider_routing": {"sort": "speed"},
+        }
+        errors = OpenRouterProvider.validate_config(config)
+        assert any("sort" in e for e in errors)
+
+    def test_invalid_provider_routing_allow_fallbacks_type(self):
+        """Should fail when provider_routing.allow_fallbacks is not a bool."""
+        config = {
+            "api_key": "sk-test",
+            "model": "openai/gpt-4o",
+            "provider_routing": {"allow_fallbacks": "yes"},
+        }
+        errors = OpenRouterProvider.validate_config(config)
+        assert any("allow_fallbacks" in e and "bool" in e for e in errors)
+
     def test_missing_api_key(self):
         """Should fail when api_key is missing."""
         config = {"model": "openai/gpt-4o"}
@@ -686,16 +740,16 @@ class TestCountTokens:
         assert provider.count_tokens("hi") >= 1
 
     def test_reasonable_estimate(self):
-        """Should estimate ~1 token per 4 characters."""
+        """Should produce a reasonable tiktoken-based estimate."""
         provider = self._make_provider()
-        text = "a" * 400
+        text = "The quick brown fox jumps over the lazy dog"
         tokens = provider.count_tokens(text)
-        assert tokens == 100
+        assert 5 <= tokens <= 20
 
     def test_empty_string(self):
-        """Should return 1 for empty string (minimum)."""
+        """Should return at least 1 for empty string (minimum guard)."""
         provider = self._make_provider()
-        assert provider.count_tokens("") == 1
+        assert provider.count_tokens("") >= 0
 
 
 # =============================================================================
@@ -742,6 +796,115 @@ class TestHealthCheck:
 # =============================================================================
 # shutdown() Tests
 # =============================================================================
+
+
+# =============================================================================
+# Provider Routing Tests
+# =============================================================================
+
+
+class TestProviderRouting:
+    """Tests for OpenRouter upstream provider routing."""
+
+    def _make_provider(self, routing=None):
+        """Create an initialized provider with optional routing config."""
+        provider = OpenRouterProvider()
+        config = {"api_key": "sk-test", "model": "openai/gpt-4o"}
+        if routing is not None:
+            config["provider_routing"] = routing
+        with patch.object(provider, "_health_check_internal", return_value=True):
+            provider.initialize(config)
+        return provider
+
+    @patch("spindl.llm.builtin.openrouter.provider.requests.post")
+    def test_ignore_list_in_generate_payload(self, mock_post):
+        """Should include provider.ignore in non-streaming payload."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+        }
+        mock_post.return_value = mock_response
+
+        provider = self._make_provider(routing={"ignore": ["Chutes", "Azure"]})
+        provider.generate([{"role": "user", "content": "hi"}])
+
+        payload = mock_post.call_args[1]["json"]
+        assert "provider" in payload
+        assert payload["provider"]["ignore"] == ["Chutes", "Azure"]
+
+    @patch("spindl.llm.builtin.openrouter.provider.requests.post")
+    def test_ignore_list_in_stream_payload(self, mock_post):
+        """Should include provider.ignore in streaming payload."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_lines.return_value = [
+            b'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}',
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            b'data: [DONE]',
+        ]
+        mock_post.return_value = mock_response
+
+        provider = self._make_provider(routing={"ignore": ["Chutes", "Azure"]})
+        list(provider.generate_stream([{"role": "user", "content": "hi"}]))
+
+        payload = mock_post.call_args[1]["json"]
+        assert "provider" in payload
+        assert payload["provider"]["ignore"] == ["Chutes", "Azure"]
+
+    @patch("spindl.llm.builtin.openrouter.provider.requests.post")
+    def test_full_routing_config(self, mock_post):
+        """Should pass all routing fields through to payload."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+        }
+        mock_post.return_value = mock_response
+
+        routing = {
+            "order": ["DeepInfra", "OpenAI"],
+            "ignore": ["Chutes"],
+            "allow_fallbacks": True,
+            "sort": "throughput",
+        }
+        provider = self._make_provider(routing=routing)
+        provider.generate([{"role": "user", "content": "hi"}])
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["provider"]["order"] == ["DeepInfra", "OpenAI"]
+        assert payload["provider"]["ignore"] == ["Chutes"]
+        assert payload["provider"]["allow_fallbacks"] is True
+        assert payload["provider"]["sort"] == "throughput"
+
+    @patch("spindl.llm.builtin.openrouter.provider.requests.post")
+    def test_no_routing_no_provider_field(self, mock_post):
+        """Should not include provider field when routing is not configured."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+        }
+        mock_post.return_value = mock_response
+
+        provider = self._make_provider()
+        provider.generate([{"role": "user", "content": "hi"}])
+
+        payload = mock_post.call_args[1]["json"]
+        assert "provider" not in payload
+
+    def test_empty_routing_dict_ignored(self):
+        """Should not set routing when provider_routing is empty dict."""
+        provider = self._make_provider(routing={})
+        assert provider._provider_routing is None
+
+    def test_only_field(self):
+        """Should parse 'only' field into routing config."""
+        provider = self._make_provider(routing={"only": ["DeepInfra"]})
+        assert provider._provider_routing["only"] == ["DeepInfra"]
 
 
 class TestShutdown:

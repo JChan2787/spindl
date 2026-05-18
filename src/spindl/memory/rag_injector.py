@@ -16,30 +16,25 @@ import logging
 from typing import Optional
 
 from ..llm.plugins.base import PipelineContext, PreProcessor
+from ..utils.tokens import count_tokens
 from .memory_store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
-# L2 distance ceiling used for threshold conversion.
-# With normalized embeddings, L2 distance ranges from 0 (identical)
-# to 2.0 (maximally different). This constant defines the upper bound.
+# Distance ceilings per metric (NANO-126).
 _MAX_L2_DISTANCE = 2.0
+_MAX_COSINE_DISTANCE = 1.0
 
 
-def threshold_to_max_distance(threshold: float) -> float:
-    """Convert user-facing relevance threshold to L2 max-distance.
+def threshold_to_max_distance(threshold: float, metric: str = "l2") -> float:
+    """Convert user-facing relevance threshold to max-distance for the active metric.
 
     User semantics: 0.0 = accept everything, 1.0 = only exact matches.
-    Internal:       max_distance = 2.0 * (1.0 - threshold).
-
-    Examples:
-        0.0  → 2.0  (everything passes)
-        0.25 → 1.5  (very loose)
-        0.5  → 1.0  (moderate)
-        0.75 → 0.5  (strict)
-        1.0  → 0.0  (only identical)
+    L2:     max_distance = 2.0 * (1.0 - threshold).
+    Cosine: max_distance = 1.0 * (1.0 - threshold).
     """
-    return _MAX_L2_DISTANCE * (1.0 - threshold)
+    ceiling = _MAX_COSINE_DISTANCE if metric == "cosine" else _MAX_L2_DISTANCE
+    return ceiling * (1.0 - threshold)
 
 
 class RAGInjector(PreProcessor):
@@ -72,6 +67,7 @@ class RAGInjector(PreProcessor):
         relevance_threshold: Optional[float] = None,
         rag_prefix: Optional[str] = None,
         rag_suffix: Optional[str] = None,
+        distance_metric: str = "l2",
     ):
         """
         Args:
@@ -81,12 +77,14 @@ class RAGInjector(PreProcessor):
                 everything) to 1.0 (only exact matches). None = no filtering.
             rag_prefix: Header text before memory list. None = use default.
             rag_suffix: Footer text after memory list. None = use default.
+            distance_metric: "l2" or "cosine" — used for threshold conversion (NANO-126).
         """
         self._memory_store = memory_store
         self._top_k = top_k
         self._relevance_threshold = relevance_threshold
         self._rag_prefix = rag_prefix if rag_prefix is not None else self._DEFAULT_RAG_PREFIX
         self._rag_suffix = rag_suffix if rag_suffix is not None else self._DEFAULT_RAG_SUFFIX
+        self._distance_metric = distance_metric
 
     @property
     def name(self) -> str:
@@ -116,10 +114,9 @@ class RAGInjector(PreProcessor):
 
         # Filter by distance threshold — discard semantically distant results.
         # User-facing threshold: 0.0 = accept everything, 1.0 = only exact matches.
-        # Internally converted to L2 max-distance for the comparison.
+        # Internally converted to max-distance for the active metric.
         if self._relevance_threshold is not None:
-            max_dist = threshold_to_max_distance(self._relevance_threshold)
-            before_count = len(results)
+            max_dist = threshold_to_max_distance(self._relevance_threshold, self._distance_metric)
             results = [
                 r for r in results if r["distance"] <= max_dist
             ]
@@ -136,7 +133,7 @@ class RAGInjector(PreProcessor):
         rag_text = self._format_memories(results)
 
         context.metadata["rag_content"] = rag_text
-        context.metadata["rag_tokens_estimate"] = len(rag_text) // 4
+        context.metadata["rag_tokens_estimate"] = count_tokens(rag_text)
         context.metadata["rag_results"] = results
 
         # NANO-107: reinforce memories that actually made it into the prompt
@@ -159,6 +156,7 @@ class RAGInjector(PreProcessor):
         relevance_threshold: Optional[float] = ...,
         rag_prefix: Optional[str] = ...,
         rag_suffix: Optional[str] = ...,
+        distance_metric: Optional[str] = None,
     ) -> None:
         """
         Update RAG query parameters at runtime (no pipeline rebuild needed).
@@ -169,6 +167,7 @@ class RAGInjector(PreProcessor):
                                  Ellipsis (...) = keep current.
             rag_prefix: New prefix string. Ellipsis (...) = keep current.
             rag_suffix: New suffix string. Ellipsis (...) = keep current.
+            distance_metric: "l2" or "cosine". None = keep current (NANO-126).
         """
         if top_k is not None:
             self._top_k = top_k
@@ -178,6 +177,8 @@ class RAGInjector(PreProcessor):
             self._rag_prefix = rag_prefix if rag_prefix is not None else self._DEFAULT_RAG_PREFIX
         if rag_suffix is not ...:
             self._rag_suffix = rag_suffix if rag_suffix is not None else self._DEFAULT_RAG_SUFFIX
+        if distance_metric is not None:
+            self._distance_metric = distance_metric
 
     def _format_memories(self, results: list[dict]) -> str:
         """
