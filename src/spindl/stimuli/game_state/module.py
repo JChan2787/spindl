@@ -1,5 +1,5 @@
 """
-Game-state bridge stimulus module (NANO-116 B.1, NANO-122, NANO-123, NANO-124).
+Game-state bridge stimulus module (NANO-116 B.1, NANO-122, NANO-123, NANO-124, NANO-134).
 
 Connects to the SPNDL-001 game-state bridge via TCP, buffers incoming
 events, and exposes them as stimuli for the StimuliEngine. Priority 60
@@ -15,6 +15,11 @@ a two-layer probability system (escalating pressure + interrupt fatigue)
 decides whether to interrupt the current TTS and react to the new line.
 The module triggers TTS stop via callback, reusing the existing barge-in
 plumbing. Both layers reset when a TTS output completes without interruption.
+
+Command channel (NANO-134 / SPNDL-003 C.4): bidirectional — tools can send
+commands to the bridge via send_command_and_wait(). The module's internal
+asyncio loop handles the write; command_response events are intercepted in
+_process_line and routed to pending futures by command_id.
 
 Killed paths (NANO-123): independent gameplay event stimulus and snapshot
 aggregate stimulus no longer fire. Accumulation logic stays for context.
@@ -203,6 +208,11 @@ class GameStateModule(StimulusModule):
         # NANO-133: Hack lifecycle state buffer (tool-queryable)
         self._current_hack: dict[str, Any] | None = None
         self._last_hack_outcome: dict[str, Any] | None = None
+
+        # NANO-134 / SPNDL-003 C.4: Command channel state
+        self._writer: Optional[asyncio.StreamWriter] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._pending_commands: dict[str, asyncio.Future] = {}
 
         self._connected = False
         self._running = False
@@ -458,6 +468,8 @@ class GameStateModule(StimulusModule):
         self._current_snapshot = None
         self._last_chapter_name = None
         self._last_sequence = -1
+        self._pending_commands.clear()
+        self._writer = None
         self._thread = None
         logger.info("Game-state module stopped")
 
@@ -501,6 +513,99 @@ class GameStateModule(StimulusModule):
             ),
             "snapshot": dict(self._current_snapshot) if self._current_snapshot else None,
         }
+
+    # -- NANO-134: Command channel (tool-facing send API) ---------------------
+
+    async def send_command_and_wait(
+        self, command: dict, timeout: float = 10.0
+    ) -> dict:
+        """Send a command to the bridge and await the response.
+
+        Thread-safe: dispatches the write into the module's internal asyncio
+        loop via run_coroutine_threadsafe. Can be awaited from any event loop.
+
+        Args:
+            command: Must contain 'command_id' and 'command_type'.
+            timeout: Seconds to wait for response before returning error.
+
+        Returns:
+            Response payload dict (success, error_code, message, etc.)
+        """
+        cmd_id = command.get("command_id")
+        if not cmd_id:
+            raise ValueError("command must have command_id for request-response pairing")
+
+        if not self._loop or self._loop.is_closed():
+            return {
+                "command_id": cmd_id,
+                "success": False,
+                "error_code": "disconnected",
+                "message": "Module event loop not running",
+            }
+
+        if not self._writer:
+            return {
+                "command_id": cmd_id,
+                "success": False,
+                "error_code": "disconnected",
+                "message": "Bridge not connected",
+            }
+
+        # Schedule the actual send+await in the module's own event loop
+        concurrent_future = asyncio.run_coroutine_threadsafe(
+            self._send_and_await(command, cmd_id, timeout), self._loop
+        )
+
+        try:
+            # wrap_future bridges the concurrent.futures.Future into the
+            # caller's asyncio loop so we can await it without blocking
+            return await asyncio.wrap_future(concurrent_future)
+        except Exception as e:
+            return {
+                "command_id": cmd_id,
+                "success": False,
+                "error_code": "send_error",
+                "message": str(e),
+            }
+
+    async def _send_and_await(
+        self, command: dict, cmd_id: str, timeout: float
+    ) -> dict:
+        """Internal coroutine — runs in the module's event loop."""
+        if not self._writer:
+            return {
+                "command_id": cmd_id,
+                "success": False,
+                "error_code": "disconnected",
+                "message": "Bridge not connected",
+            }
+
+        future: asyncio.Future = self._loop.create_future()
+        self._pending_commands[cmd_id] = future
+
+        try:
+            line = json.dumps(command) + "\n"
+            self._writer.write(line.encode("utf-8"))
+            await self._writer.drain()
+        except (ConnectionError, OSError) as e:
+            self._pending_commands.pop(cmd_id, None)
+            return {
+                "command_id": cmd_id,
+                "success": False,
+                "error_code": "disconnected",
+                "message": f"Write failed: {e}",
+            }
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._pending_commands.pop(cmd_id, None)
+            return {
+                "command_id": cmd_id,
+                "success": False,
+                "error_code": "timeout",
+                "message": f"No response from bridge within {timeout}s",
+            }
 
     # -- Dialogue stimulus (NANO-116 B.2) ------------------------------------
 
@@ -768,15 +873,16 @@ class GameStateModule(StimulusModule):
 
     def _run_thread(self) -> None:
         """Daemon thread entry point — runs the async event loop."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
         try:
-            loop.run_until_complete(self._run_async())
+            self._loop.run_until_complete(self._run_async())
         except Exception:
             logger.exception("Game-state module thread crashed")
         finally:
             self._connected = False
-            loop.close()
+            self._loop.close()
+            self._loop = None
 
     async def _run_async(self) -> None:
         """Async main — connect to bridge TCP and listen for events."""
@@ -827,6 +933,7 @@ class GameStateModule(StimulusModule):
         )
         print(f"[GameState] Attempting TCP connect to {self._host}:{self._port}...", flush=True)
         reader, writer = await asyncio.open_connection(self._host, self._port)
+        self._writer = writer
         self._connected = True
         print(f"[GameState] CONNECTED to bridge at {self._host}:{self._port}", flush=True)
 
@@ -846,6 +953,18 @@ class GameStateModule(StimulusModule):
                 self._process_line(line)
 
         finally:
+            # NANO-134: Reject all pending commands before closing
+            for cmd_id, fut in self._pending_commands.items():
+                if not fut.done():
+                    fut.set_result({
+                        "command_id": cmd_id,
+                        "success": False,
+                        "error_code": "disconnected",
+                        "message": "Bridge connection lost",
+                    })
+            self._pending_commands.clear()
+            self._writer = None
+
             writer.close()
             try:
                 await writer.wait_closed()
@@ -890,6 +1009,16 @@ class GameStateModule(StimulusModule):
                 event.get("event_type"),
             )
         self._last_sequence = seq
+
+        # NANO-134: Intercept command_response before game event routing
+        if event.get("event_type") == "command_response":
+            payload = event.get("payload", {})
+            cmd_id = payload.get("command_id")
+            if cmd_id and cmd_id in self._pending_commands:
+                fut = self._pending_commands.pop(cmd_id)
+                if not fut.done():
+                    fut.set_result(payload)
+            return
 
         self._buffer_event(event)
 
