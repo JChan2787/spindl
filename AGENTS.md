@@ -70,9 +70,9 @@ Runs on every push to `main` and every PR targeting `main`.
 ## Project Layout
 
 ```
-src/spindl/             Python backend (~38,170 lines, 144 files)
-gui/src/                Next.js frontend (~34,150 lines, 158 files)
-tests/                  Backend unit tests (98 test modules, ~30,400 lines)
+src/spindl/             Python backend (~45,500 lines, 162 files)
+gui/src/                Next.js frontend (~38,200 lines, 166 files)
+tests/                  Backend unit tests (106 test modules, ~33,500 lines)
 tests_e2e/              E2E tests (Playwright, 8 modules, 5-config matrix)
 scripts/                dev.py (unified launcher), launcher.py (headless), standalone GUI
 config/                 spindl.yaml.example (runtime config template)
@@ -89,28 +89,34 @@ characters/             User character data (gitignored)
 
 | Module | Purpose | Key ABCs/Classes |
 |--------|---------|-----------------|
-| `orchestrator/` | Central voice agent loop, config (Pydantic v2) | `VoiceAgentOrchestrator`, `OrchestratorConfig`, `OrchestratorCallbacks` |
+| `orchestrator/` | Central voice agent loop, config (Pydantic v2), service capabilities registry | `VoiceAgentOrchestrator`, `OrchestratorConfig`, `OrchestratorCallbacks`, `ServiceCapabilities` |
 | `core/` | State machine, event bus, context | `AudioStateMachine`, `EventBus`, `ContextManager` |
 | `audio/` | Mic capture, speaker playback, VAD, RMS level emission, stream health watchdog | `AudioCapture` (includes `_watchdog_loop` for dead-stream detection + auto-restart), `AudioPlayback`, `SileroVAD`, `VADTracker` |
 | `avatar/` | Emotion classification + avatar bridge | `ONNXEmotionClassifier`, `AvatarToolMoodSubscriber`, `AvatarConfig` |
-| `llm/` | Prompt building, LLM dispatch, plugins, sentence segmentation | `LLMProvider` (ABC), `LLMPipeline`, `PromptBuilder`, `PromptBlock`, `SentenceSegmenter` |
+| `llm/` | Prompt building, LLM dispatch, plugins, sentence segmentation | `LLMProvider` (ABC), `LLMPipeline`, `PromptBuilder`, `PromptBlock`, `SentenceSegmenter`, `LlamaClient` |
 | `llm/builtin/` | LLM backend implementations | `LlamaProvider`, `DeepSeekProvider`, `OpenRouterProvider` |
 | `llm/providers/` | Pipeline content providers | `HistoryProvider`, `PersonaProvider`, `InputProvider`, `VoiceStateProvider`, etc. |
-| `llm/plugins/` | Pre/post-processing pipeline | `PreProcessor` (ABC), `PostProcessor` (ABC), `BudgetEnforcer`, `HistoryInjector`, `TwitchHistoryInjector` (NANO-115), `ConversationHistoryManager` (with empty-assistant guard, NANO-115), `ReasoningExtractor`, `SummarizationTrigger`, `CodexActivator`, `CodexCooldown`, `TTSCleanupPlugin` (dual-output: raw→chat, cleaned→TTS/subtitles/history) |
-| `stt/` | Speech-to-text | `STTProvider` (ABC), `WhisperProvider`, `ParakeetProvider` |
-| `tts/` | Text-to-speech | `TTSProvider` (ABC), `KokoroProvider` |
+| `llm/plugins/` | Pre/post-processing pipeline | `PreProcessor` (ABC), `PostProcessor` (ABC), `BudgetEnforcer`, `HistoryInjector`, `TwitchHistoryInjector` (NANO-115), `ConversationHistoryManager` (with empty-assistant guard, NANO-115), `ReasoningExtractor`, `SummarizationTrigger`, `CodexActivatorPlugin` (keyword activation + `tool_choice_override`), `CodexCooldown`, `TTSCleanupPlugin` (dual-output: raw→chat, cleaned→TTS/subtitles/history) |
+| `stt/` | Speech-to-text | `STTProvider` (ABC), `WhisperSTTProvider`, `ParakeetSTTProvider` |
+| `stt/builtin/` | STT backend implementations | `whisper/` (provider + client), `parakeet/` (provider + client) |
+| `tts/` | Text-to-speech | `TTSProvider` (ABC), `KokoroTTSProvider`, `Qwen3TTSProvider` |
+| `tts/builtin/` | TTS backend implementations | `kokoro/` (provider + client + server), `qwen3/` (provider) |
 | `vision/` | Screen capture + VLM (local, cloud, unified) | `VLMProvider` (ABC), `ScreenCapture`, `VisionProvider`, `LLMVisionProvider` |
-| `memory/` | ChromaDB vector store (global + per-character), RAG with composite scoring, reflection, summaries | `MemoryStore` (tiered: global + general + flashcards + summaries), `RAGInjector`, `ReflectionSystem`, `SessionSummaryGenerator`, `compute_score()` |
-| `characters/` | SillyTavern V2 card models | `Character` (Pydantic), `CharacterLoader` |
-| `codex/` | Lorebook/character book | `CodexActivationManager`, `CodexManager` |
-| `tools/` | Function calling framework | `Tool` (ABC), `ToolExecutor`, `ToolRegistry` |
-| `stimuli/` | Autonomous behavior engine (idle timer, Twitch chat with `on_message_accepted` callback for transcript persistence, addressing-others) | `StimulusModule` (ABC), `StimuliEngine`, `PatienceModule`, `TwitchModule` |
+| `vision/builtin/` | VLM backend implementations | `llama/` (provider + gemma3 model handler), `llm/` (unified LLM-as-VLM), `openai/` (cloud OpenAI-compatible) |
+| `memory/` | ChromaDB vector store (global + per-character), RAG with composite scoring, reflection, summaries | `MemoryStore`, `RAGInjector`, `ReflectionSystem`, `ReflectionMonitor`, `SessionSummaryGenerator`, `CurationClient`, `EmbeddingClient`, `compute_score()` |
+| `characters/` | SillyTavern V2 card models, import/export | `Character` (Pydantic), `CharacterLoader`, `CharacterImporter`, `CharacterExporter` |
+| `codex/` | Lorebook/character book | `CodexActivationManager`, `CodexManager`, `CodexEntry` (models) |
+| `tools/` | Function calling framework + tool executor | `Tool` (ABC), `ToolExecutor` (`TOOL_PATH_TIMEOUT`, `forced_tool_choice` break), `ToolRegistry` |
+| `tools/builtin/` | Built-in tool implementations | `screen_vision/` (VLM screenshot describe), `game_state_query/` (query game bridge state), `invoke_hack/` (send hack_walk command to game bridge) |
+| `stimuli/` | Autonomous behavior engine (weighted lottery, idle, Twitch, game state, addressing-others) | `StimulusModule` (ABC), `StimuliEngine` (`_select_stimulus` with weighted lottery), `PatienceModule`, `TwitchModule` (`on_message_accepted`), `TwitchSelector`, `WeightedRotator` (decay + recovery) |
+| `stimuli/game_state/` | Game bridge consumer — TCP event stream, dialogue buffering, summarization | `GameStateModule` (TCP `asyncio.open_connection`, `send_command_and_wait`), `DialogueBuffer`, `DialogueStore`, `DialogueSummarizer`, `EventValidator` |
+| `personas/` | Persona loading | `PersonaLoader` |
 | `vts/` | VTubeStudio WebSocket driver | `VTSDriver` |
 | `launcher/` | Service process management | `ServiceRunner`, `HealthChecker`, `LogAggregator` |
 | `gui/` | Socket.IO server, response models | `server.py` (core: connect, lifecycle, emit API), `server_memory.py`, `server_sessions.py`, `server_config.py`, `server_providers.py`, `server_stimuli.py`, `server_vts.py`, `server_avatar.py` (domain handlers — NANO-113), `response_models.py` (Pydantic) |
 | `history/` | JSONL conversation persistence, prompt snapshots | `JSONLStore`, `SnapshotStore` |
 | `config/` | YAML config loading | `config_loader.py`, `get_config_path()` |
-| `utils/` | Shared utilities (paths, ring buffer) | `paths.py`, `ring_buffer.py` |
+| `utils/` | Shared utilities | `paths.py`, `ring_buffer.py`, `tokens.py` |
 
 ### Patterns to Follow
 
@@ -134,7 +140,7 @@ characters/             User character data (gitignored)
 
 **Thread safety.** Audio capture, playback, VAD, stimuli engine, and VTS driver all run in daemon threads. Use `SimpleQueue` for inter-thread command dispatch (see `vts/driver.py`). Use `threading.Lock` for shared state (see `core/state_machine.py`).
 
-**Event types.** 20 `EventType` enum values in `core/events.py`:
+**Event types.** 22 `EventType` enum values in `core/events.py`:
 - Speech pipeline: `TRANSCRIPTION_READY`, `RESPONSE_READY`, `TTS_STARTED`, `TTS_COMPLETED`, `TTS_INTERRUPTED`
 - State: `STATE_CHANGED`
 - Audio viz: `AUDIO_LEVEL` (speaker RMS), `MIC_LEVEL` (mic RMS)
@@ -144,6 +150,7 @@ characters/             User character data (gitignored)
 - Stimuli: `STIMULUS_FIRED`
 - Avatar: `AVATAR_MOOD`, `AVATAR_TOOL_MOOD`
 - Streaming (NANO-111): `LLM_CHUNK` (sentence-level, carries text + index), `LLM_TOKEN` (token-level raw text for dashboard display), `BARGE_IN_TRUNCATED` (response truncated to delivered sentences)
+- Twitch overlay (NANO-131/132): `TWITCH_MESSAGE_APPROVED` (selection pass picked a chat message for overlay), `TWITCH_FOLLOW_EVENT` (channel follow via EventSub)
 - Error: `PIPELINE_ERROR`
 
 Key event data: `ResponseReadyEvent` carries `emotion`, `emotion_confidence`, `stimulus_source`, `tts_text`, and `chunks` (list of `{text}` per sentence — `None` for blocking path). Emotion is single-per-response (classified on full text). `LLMChunkEvent` carries `text`, `index`, `is_final`. `ToolInvokedEvent`/`ToolResultEvent` carry `tool_call_id` and `iteration`.
@@ -324,6 +331,54 @@ Standalone Tauri 2 app (`spindl-stream-deck/`). Dynamic button grid — one hold
 
 `shutdown_services()` and `_shutdown_backend_async()` both call `_avatar_kill()`, `_subtitle_kill()`, and `_stream_deck_kill()` as defense-in-depth.
 
+### Game-State Bridge Integration
+
+SpindL connects to game processes via the [SpindL Game Bridge](https://github.com/JChan2787/spindl-game-bridge) — a REFramework Lua plugin + C++ native DLL that emits game events over TCP.
+
+**Architecture:**
+```
+Game (REFramework) → Lua hooks → C++ TcpServer → TCP 127.0.0.1:53817
+    → GameStateModule._connect_and_consume() (Python asyncio)
+    → reader.readline() → _process_line() → _buffer_event() → stimulus pipeline
+
+Consumer → writer.write(JSON + \n) → C++ recv_thread → cmd_queue → Lua poll
+    → commands.lua dispatch → game API calls → response via event send path
+```
+
+**Key files:**
+- `stimuli/game_state/module.py` — `GameStateModule` (extends `StimulusModule`). Runs its own `asyncio.new_event_loop()` in a daemon thread. Connects to bridge, reads newline-delimited JSON events, buffers dialogue, builds game-state context for the LLM.
+- `stimuli/game_state/dialogue_buffer.py` — Buffers and deduplicates game dialogue events.
+- `stimuli/game_state/dialogue_store.py` — Persistent dialogue history.
+- `stimuli/game_state/dialogue_summarizer.py` — LLM-driven summarization of dialogue windows.
+- `stimuli/game_state/validator.py` — JSON schema validation for bridge events.
+- `stimuli/game_state/models.py` — Pydantic models for game events.
+
+**Command/response channel (bidirectional):** `GameStateModule` stores the TCP `writer` from `asyncio.open_connection`. `send_command_and_wait(command, timeout)` dispatches a JSON command to the bridge and awaits a `command_response` event matched by `command_id`. Cross-thread dispatch uses `asyncio.run_coroutine_threadsafe()` (module runs its own event loop in a daemon thread; tool executor calls from the main thread). `asyncio.wrap_future()` bridges the result back.
+
+**Response interception:** `_process_line()` catches `event_type == "command_response"` before `_buffer_event` — command responses are routed to the pending futures dict, not into the stimulus pipeline.
+
+**Gotchas:**
+- GameStateModule runs its own event loop — NOT the main asyncio loop. `send_command_and_wait` must use `run_coroutine_threadsafe`, not direct `await`.
+- `_pending_commands` cleanup on disconnect: all pending futures get a `disconnected` error result (guard with `fut.done()` to avoid `InvalidStateError` on timeout races).
+- Command responses have sequence numbers from the bridge's event send path — they're regular events that happen to be intercepted early.
+
+### Tool Executor + Forced Tool Choice (NANO-134, Session 737)
+
+The tool executor (`tools/executor.py`) runs an iterative loop: LLM call → extract tool calls → execute tools → feed results back → repeat until the LLM produces a text-only response or `max_iterations` (5) is reached.
+
+**Forced tool choice:** When `tool_choice` is set (e.g., by `CodexActivatorPlugin` detecting a lorebook keyword trigger), the executor detects `forced_tool_choice` and **breaks after the first tool execution round**. Without this, the LLM sees tool definitions + a successful result and re-invokes the tool on every iteration (6 API calls instead of 2). After break, a single text-only narration call produces the final response.
+
+**Per-call timeout:** `TOOL_PATH_TIMEOUT = 60.0` (class constant). Injected into provider kwargs when tools are present. The OpenRouter provider accepts `timeout` via `kwargs.get()` (not `pop` — persists across iterations). Worst case: 120s total (2 × 60s), matching the existing single-call timeout. Without this, two sequential 120s timeouts = 240s of dead air.
+
+**Built-in tools:**
+- `screen_vision` — captures screenshot, sends to VLM, returns description.
+- `game_state_query` — queries the GameStateModule for current game context (hack status, combat state, player info).
+- `invoke_hack` — sends `hack_walk` command to the game bridge via `GameStateModule.send_command_and_wait()`. Returns success/error with LLM-friendly descriptions.
+
+### Weighted Stimulus Arbitration (NANO-117)
+
+`StimuliEngine._select_stimulus()` uses weighted lottery scheduling instead of rigid priority ordering. Each stimulus module sets `metadata["weight"]` — e.g., game_state dialogue 2.0, priority events 5.0, Twitch 1.0, Patience 0.5. `WeightedRotator` (`stimuli/weighted_rotator.py`) handles decay after firing and recovery per cycle, preventing starvation of lower-weight modules. Dashboard sliders allow runtime tuning.
+
 ## Frontend Architecture
 
 **Stack:** Next.js 16 + React 19 + TypeScript + Tailwind CSS v4 + Zustand + Socket.IO client + Radix UI
@@ -343,7 +398,7 @@ Standalone Tauri 2 app (`spindl-stream-deck/`). Dynamic button grid — one hold
 
 ### State Management
 
-12 Zustand stores in `gui/src/lib/stores/`:
+13 Zustand stores in `gui/src/lib/stores/`:
 
 | Store | Scope |
 |-------|-------|
@@ -359,6 +414,7 @@ Standalone Tauri 2 app (`spindl-stream-deck/`). Dynamic button grid — one hold
 | `settings-store` | VAD, pipeline, memory, generation params (`force_role_history`: `splice | flatten`, NANO-115), stimuli (patience, twitch with `audience_window`/`audience_char_cap`, addressing-others contexts), tools, LLM/VLM runtime, avatar config (emotion classifier, fade delay, subtitles, stream deck, Tauri install state, connection status) |
 | `session-store` | Conversation history, session resume/delete/summarize |
 | `vts-store` | VTubeStudio connection state, plugin auth, hotkey/expression/parameter/model lists |
+| `use-service-status` | Service capability hooks — `useServiceDisabled()`, `useServiceStatus()` for runtime toggle gating (NANO-116) |
 
 **Data flow:** `SocketProvider` (root context) listens to 100+ socket events → calls Zustand store setters → components re-render via selectors.
 
@@ -397,7 +453,7 @@ conda run -n spindl python -m pytest tests/ -m "not slow and not cloud" --tb=sho
 
 `pytest-timeout` is NOT installed. If a test might hang, run it in the background.
 
-Test markers: `@pytest.mark.slow`, `@pytest.mark.vision`, `@pytest.mark.cloud`.
+Test markers: `@pytest.mark.slow`, `@pytest.mark.vision`, `@pytest.mark.cloud`, `@pytest.mark.hardware`.
 
 ### Frontend (Vitest)
 
@@ -412,7 +468,7 @@ jsdom environment. Global `fetch` mock in `gui/src/test/setup.ts`. Socket.IO moc
 
 22 test files across stores, components, API routes, and schemas:
 - **Stores (9):** agent, character, chat, connection, memory, prompt, session, settings, vts
-- **Components (6):** block-detail, block-list, prompt-viewer, session-list, session-viewer, llm-config, vtubestudio-card
+- **Components (8):** block-detail, block-list, prompt-viewer, token-breakdown, session-list, session-viewer, llm-config, vtubestudio-card
 - **API routes (2):** fetch-models, write-config
 - **Schemas (1):** config-schemas (28 test suites covering all Zod schemas)
 - **Pages (2):** codex, memories

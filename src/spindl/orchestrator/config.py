@@ -1037,11 +1037,11 @@ class OrchestratorConfig(BaseModel):
     force_role_history: Literal["splice", "flatten"] = "flatten"
 
     # Character settings (NANO-034: ST V2 Character Cards)
-    character_id: str = "spindle"
+    character_id: str = "spinny"
     characters_dir: str = "./characters"
 
     # Legacy persona settings (deprecated, use character_id/characters_dir)
-    persona_id: str = "spindle"  # @deprecated: use character_id
+    persona_id: str = "spinny"  # @deprecated: use character_id
     personas_dir: str = "./personas"  # @deprecated: use characters_dir
 
     # Prompt composition (NANO-045a: block-based prompt assembly)

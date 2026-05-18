@@ -86,9 +86,9 @@ logs/
 # Runtime config (user-specific provider settings, model paths, API keys)
 config/spindl.yaml
 
-# Character data (user-created characters — spindle is the bundled default)
+# Character data (user-created characters — spinny is the bundled default)
 /characters/*
-!/characters/spindle/
+!/characters/spinny/
 # Per-character ChromaDB memories (user conversation data)
 characters/*/memory/
 

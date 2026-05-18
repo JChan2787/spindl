@@ -290,7 +290,7 @@ audio:
   chunk_size: 512
 
 character:
-  default: spindle                        # Character persona loaded at startup
+  default: spinny                         # Character persona loaded at startup
   directory: ./characters
 
 vad:
